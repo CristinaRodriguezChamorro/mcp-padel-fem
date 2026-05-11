@@ -1,4 +1,3 @@
-# mcp-padel-fem
 # 🎾 MCP Padel Fem
 
 Proyecto personal centrado en la exploración de nuevas formas de interacción entre inteligencia artificial y herramientas externas en el contexto del pádel femenino.
