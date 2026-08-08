@@ -198,39 +198,126 @@ nav {
 }
 
 /* ── EN JUEGO ── */
-.live-tournament{display:flex;flex-direction:column;gap:16px}
-.live-summary{padding:22px 24px;display:grid;grid-template-columns:1fr auto;gap:22px;align-items:center;background:linear-gradient(135deg,#161825 0%,#11131d 100%);border:1px solid #34374a;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.22)}
-.live-kicker{display:inline-flex;align-items:center;gap:7px;font-size:.68em;font-weight:950;text-transform:uppercase;letter-spacing:1.4px;color:#ff5da8;margin-bottom:8px}
-.live-name{font-size:1.55em;font-weight:950;color:#fff;letter-spacing:-.025em}
-.live-place{font-size:.86em;color:#bfc1cc;margin-top:7px}
-.live-dates{font-size:.8em;color:#e6e6eb;font-weight:800;white-space:nowrap;background:#1a1d29;border:1px solid #35394c;border-radius:999px;padding:8px 12px}
-.live-watch{display:flex;gap:9px;align-items:center;flex-wrap:wrap;padding:0 3px}
-.live-watch-label{font-size:.66em;font-weight:950;color:#9da0ad;text-transform:uppercase;letter-spacing:1px}
-.live-watch-chip{background:#181b27;border:1px solid #34384a;border-radius:999px;padding:7px 12px;font-size:.76em;color:#fff}
-.next-match{padding:18px 20px;border:1px solid #9d5cff;background:linear-gradient(135deg,rgba(132,69,210,.18),rgba(35,27,54,.5));border-radius:14px;box-shadow:0 0 0 1px rgba(157,92,255,.05),0 10px 25px rgba(90,40,140,.12)}
-.next-label{font-size:.68em;font-weight:950;letter-spacing:1.2px;text-transform:uppercase;color:#c789ff;margin-bottom:10px}
-.next-round{font-size:.78em;font-weight:900;color:#b76bff;margin-bottom:8px}
-.next-pairs{font-size:1.02em;font-weight:950;color:#fff;line-height:1.45}
-.next-when{font-size:.8em;color:#b9bbc7;margin-top:9px}
-.results-title{margin-top:2px;font-size:.72em;text-transform:uppercase;letter-spacing:1.05px;font-weight:950;color:#a4a6b2}
-.round-group{overflow:hidden;background:linear-gradient(180deg,#151823 0%,#11141d 100%);border:1px solid #34384a;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.16)}
-.round-heading{margin:0;padding:13px 16px 10px;font-size:.7em;color:#c789ff;font-weight:950;text-transform:uppercase;letter-spacing:1px;background:rgba(121,75,172,.08)}
-.round-group .result-row{margin:0;border-top:1px solid #2d3140}
+.live-tournament{
+  display:flex;flex-direction:column;gap:14px;
+  max-width:980px;margin:0 auto
+}
+.live-summary{
+  background:linear-gradient(145deg,#171824 0%,#11131c 100%);
+  border:1px solid #323546;border-radius:16px;
+  padding:22px 24px;display:grid;grid-template-columns:1fr auto;
+  gap:20px;align-items:center;box-shadow:0 14px 35px rgba(0,0,0,.22)
+}
+.live-kicker{
+  display:flex;align-items:center;gap:7px;
+  color:#ff5ca8;font-size:.68em;font-weight:950;
+  letter-spacing:1.35px;text-transform:uppercase;margin-bottom:8px
+}
+.live-name{color:#fff;font-size:1.52em;font-weight:950;letter-spacing:-.025em}
+.live-place{color:#aeb1bd;font-size:.84em;margin-top:7px}
+.live-dates{
+  background:#1a1d29;border:1px solid #36394a;border-radius:999px;
+  color:#e7e7ec;font-size:.78em;font-weight:850;padding:8px 12px;white-space:nowrap
+}
+.live-watch{
+  padding:0 2px;display:flex;align-items:center;gap:8px;flex-wrap:wrap
+}
+.live-watch-label{
+  color:#8f929e;font-size:.66em;font-weight:950;letter-spacing:1px;
+  text-transform:uppercase;margin-right:2px
+}
+.live-watch-chip{
+  color:#fff;background:#181b26;border:1px solid #343748;
+  padding:7px 11px;border-radius:999px;font-size:.75em;font-weight:750
+}
+.next-match{
+  background:linear-gradient(135deg,rgba(139,78,216,.18),rgba(45,29,67,.52));
+  border:1px solid #9d5cff;border-radius:14px;padding:18px 20px;
+  box-shadow:0 10px 25px rgba(102,46,160,.13)
+}
+.next-label{
+  color:#c88cff;font-size:.67em;font-weight:950;letter-spacing:1.2px;
+  text-transform:uppercase;margin-bottom:9px
+}
+.next-round{color:#c074ff;font-size:.77em;font-weight:900;margin-bottom:8px}
+.next-versus{
+  display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:14px
+}
+.next-team{
+  color:#fff;font-size:.98em;font-weight:950;line-height:1.35
+}
+.next-team.right{text-align:right}
+.next-vs{
+  color:#777b89;font-size:.67em;font-weight:950;text-transform:uppercase;
+  border:1px solid #383b4b;border-radius:999px;padding:4px 7px
+}
+.next-when{
+  color:#aeb0bd;font-size:.78em;font-weight:700;margin-top:10px
+}
+.results-title{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  margin-top:3px;color:#a5a8b3;font-size:.7em;font-weight:950;
+  text-transform:uppercase;letter-spacing:1.05px
+}
+.results-source{
+  color:#717482;font-size:.9em;font-weight:800;text-transform:none;letter-spacing:0
+}
+.round-group{
+  overflow:hidden;background:linear-gradient(180deg,#151721 0%,#11131b 100%);
+  border:1px solid #333646;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.16)
+}
+.round-heading{
+  color:#c98cff;background:rgba(137,82,203,.08);
+  padding:12px 16px 10px;font-size:.7em;font-weight:950;
+  letter-spacing:.95px;text-transform:uppercase
+}
+.result-row{padding:0;border-top:1px solid #2a2e3b}
 .round-group .result-row:first-of-type{border-top:0}
-.result-row{background:transparent;border:0;border-radius:0;padding:15px 16px}
-.result-pairs{display:grid;grid-template-columns:minmax(240px,1.65fr) minmax(110px,.65fr) auto;gap:18px;align-items:center}
-.result-names{min-width:0}
-.result-winner{font-size:.93em;color:#fff;font-weight:950}
-.result-loser{font-size:.82em;color:#9fa2af;margin-top:5px}
-.result-score{font-size:1em;color:#c789ff;font-weight:950;white-space:nowrap;letter-spacing:.8px}
-.result-date{font-size:.72em;color:#8f92a0;white-space:nowrap;text-align:right}
-.live-empty{padding:36px 28px;text-align:center;color:var(--muted);background:#141722;border:1px solid #303442;border-radius:14px}
-.news-date{font-size:.74em;color:#aeb0bb;font-weight:800;margin:6px 0 10px;letter-spacing:.1px}
-
-.results-title{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.results-source{font-size:.82em;text-transform:none;letter-spacing:0;color:#7f8290;font-weight:800}
-.live-footer{padding:8px 2px 0;color:#6f7280;font-size:.68em;text-align:right}
-@media(max-width:650px){.tabs{overflow-x:auto;max-width:68vw}.tab{white-space:nowrap;padding:7px 12px}.live-summary{grid-template-columns:1fr}.live-dates{padding-top:0}.result-pairs{grid-template-columns:1fr auto;gap:10px}.result-date{grid-column:1/-1;text-align:left}.live-watch,.live-summary{padding-left:16px;padding-right:16px}}
+.result-card{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;
+  grid-template-areas:
+    "winner score"
+    "loser score"
+    "meta meta";
+  column-gap:24px;row-gap:4px;padding:15px 16px
+}
+.result-winner{
+  grid-area:winner;color:#fff;font-size:.94em;font-weight:950;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.result-winner .trophy{margin-left:7px}
+.result-loser{
+  grid-area:loser;color:#8f929f;font-size:.82em;font-weight:650;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.result-score{
+  grid-area:score;align-self:center;color:#c98cff;
+  font-size:1.03em;font-weight:950;letter-spacing:.6px;white-space:nowrap
+}
+.result-meta{
+  grid-area:meta;display:flex;align-items:center;gap:8px;margin-top:4px
+}
+.result-status{
+  color:#6f7280;font-size:.66em;font-weight:850;text-transform:uppercase;
+  letter-spacing:.65px
+}
+.result-date{color:#747785;font-size:.68em;font-weight:700}
+.live-empty{
+  padding:34px 26px;text-align:center;color:#8f929f;background:#141722;
+  border:1px solid #303442;border-radius:14px
+}
+.live-footer{padding-top:2px;color:#666976;font-size:.66em;text-align:right}
+@media(max-width:650px){
+.tabs{overflow-x:auto;max-width:68vw}
+.tab{white-space:nowrap;padding:7px 12px}
+.live-summary{grid-template-columns:1fr;padding:18px}
+.live-dates{justify-self:start}
+.next-versus{grid-template-columns:1fr;gap:7px}
+.next-team.right{text-align:left}
+.next-vs{justify-self:start}
+.result-card{grid-template-columns:1fr;grid-template-areas:"winner" "loser" "score" "meta";gap:4px}
+.result-score{margin-top:6px}
+}
 </style>
 </head>
 <body>
@@ -350,76 +437,114 @@ async function loadTorneos(){try{const data=await fetch('/api/calendar').then(r=
 
 async function loadEnJuego(){
   const el=document.getElementById('live-content');
+
+  const fmtResultDate=(iso)=>{
+    if(!iso)return'';
+    const d=new Date(iso+'T12:00:00');
+    if(Number.isNaN(d.getTime()))return iso;
+    return d.toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit'});
+  };
+
   try{
     const d=await fetch('/api/live?gender=women').then(r=>{
-      if(!r.ok) throw new Error(`HTTP ${r.status}`);
+      if(!r.ok)throw new Error(`HTTP ${r.status}`);
       return r.json();
     });
+
     if(!d.active){
       const msg=d.error
-        ? 'No se pudo actualizar la información de En juego. El resto de la web sigue disponible.'
+        ? 'No se pudo actualizar la información de En juego.'
         : 'Ahora mismo no hay ningún torneo Premier Padel en juego.';
       el.innerHTML=`<div class="live-empty">${msg}</div>`;
       return;
     }
 
-    const watch=(d.watch||[]).map(x=>`<span class="live-watch-chip">📺 ${x}</span>`).join('');
+    const watch=(d.watch||[])
+      .map(x=>`<span class="live-watch-chip">📺 ${x}</span>`)
+      .join('');
 
     let nextHtml='';
     if(d.next_match){
       const n=d.next_match;
       nextHtml=`<div class="next-match">
         <div class="next-label">Próximo partido</div>
-        <div class="next-round">${n.round||''}</div>
-        <div class="next-pairs">${n.pair1||''} <span style="color:var(--muted);font-weight:700">vs</span> ${n.pair2||''}</div>
-        <div class="next-when">${n.when||''}</div>
+        <div class="next-round">${n.round||'Próximo partido'}</div>
+        <div class="next-versus">
+          <div class="next-team">${n.pair1||''}</div>
+          <div class="next-vs">vs</div>
+          <div class="next-team right">${n.pair2||''}</div>
+        </div>
+        <div class="next-when">🕒 ${n.when||'Horario por confirmar'}</div>
       </div>`;
     }
 
     const groups={};
     (d.results||[]).forEach(r=>{
       const round=r.round||'Partidos';
-      if(!groups[round]) groups[round]=[];
-      groups[round].push(r);
+      (groups[round]??=[]).push(r);
     });
 
-    const roundOrder=['Final','Semifinales','Cuartos de final','Octavos de final','Segunda ronda','Primera ronda','Clasificación','Partidos'];
-    const orderedRounds=[
-      ...roundOrder.filter(x=>groups[x]),
-      ...Object.keys(groups).filter(x=>!roundOrder.includes(x))
+    const roundOrder=[
+      'Final','Semifinales','Cuartos de final','Octavos de final',
+      'Segunda ronda','Primera ronda','Clasificación','Partidos'
+    ];
+    const ordered=[
+      ...roundOrder.filter(r=>groups[r]),
+      ...Object.keys(groups).filter(r=>!roundOrder.includes(r))
     ];
 
-    const resultsHtml=orderedRounds.map(round=>{
-      const matches=groups[round].map(r=>`<div class="result-row">
-        <div class="result-pairs">
-          <div class="result-names">
-            <div class="result-winner">🏆 ${r.winner||''}</div>
+    const resultsHtml=ordered.map(round=>{
+      const matches=groups[round].map(r=>`
+        <div class="result-row">
+          <div class="result-card">
+            <div class="result-winner">${r.winner||''}<span class="trophy">🏆</span></div>
             <div class="result-loser">${r.loser||''}</div>
+            <div class="result-score">${r.score||''}</div>
+            <div class="result-meta">
+              <span class="result-status">Finalizado</span>
+              ${r.date?`<span class="result-date">· ${fmtResultDate(r.date)}</span>`:''}
+            </div>
           </div>
-          <div class="result-score">${r.score||''}</div>
-          <div class="result-date">${r.date ? '📅 '+r.date.split('-').reverse().join('/') : ''}</div>
-        </div>
-      </div>`).join('');
-      return `<div class="round-group"><div class="round-heading">${round}</div>${matches}</div>`;
+        </div>`).join('');
+
+      return `<div class="round-group">
+        <div class="round-heading">${round}</div>
+        ${matches}
+      </div>`;
     }).join('');
 
     el.innerHTML=`<div class="live-tournament">
       <div class="live-summary">
         <div>
-          <div class="live-kicker"><span class="live-dot" style="display:inline-block;margin-right:6px"></span>En juego</div>
+          <div class="live-kicker"><span class="live-dot"></span>En juego</div>
           <div class="live-name">${d.name||''}</div>
           <div class="live-place">📍 ${d.place||''}</div>
         </div>
         <div class="live-dates">${d.dates||''}</div>
       </div>
-      <div class="live-watch"><div class="live-watch-label">Dónde verlo</div>${watch||'<span class="live-watch-chip">Sin dato</span>'}</div>
+
+      <div class="live-watch">
+        <div class="live-watch-label">Dónde verlo</div>
+        ${watch||'<span class="live-watch-chip">Por confirmar</span>'}
+      </div>
+
       ${nextHtml}
-      <div class="results-title"><span>Resultados</span><span class="results-source">Datos oficiales FIP</span></div>
-      ${resultsHtml||'<div class="live-empty">Aún no hay resultados femeninos finalizados publicados.</div>'}
+
+      <div class="results-title">
+        <span>Resultados</span>
+        <span class="results-source">Datos oficiales FIP</span>
+      </div>
+
+      ${resultsHtml||'<div class="live-empty">Todavía no hay resultados femeninos finalizados disponibles.</div>'}
+
       <div class="live-footer">Datos oficiales FIP · actualización automática</div>
     </div>`;
+
   }catch(e){
-    el.innerHTML=`<div class="live-empty">No se pudo cargar la información en directo.<br><small>${e.message||''}</small></div>`;
+    el.innerHTML=`<div class="live-empty">
+      No se pudo cargar la información en directo.
+      <br><small>${e.message||''}</small>
+    </div>`;
   }
 }
 
