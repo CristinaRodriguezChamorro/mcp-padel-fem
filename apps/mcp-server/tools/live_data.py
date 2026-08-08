@@ -11,7 +11,8 @@ import os
 import re
 import json
 import io
-from datetime import date
+from datetime import date, timedelta
+from zoneinfo import ZoneInfo
 from bs4 import BeautifulSoup
 from groq import Groq
 from pypdf import PdfReader
@@ -888,18 +889,32 @@ async def get_tournament_now(gender: str = "female") -> dict:
             "source": "FIP", "source_url": FIP_PREMIER_CALENDAR_URL.format(year=date.today().year),
         }
 
-    watch, results, next_match = await asyncio.gather(
+    parts = await asyncio.gather(
         _get_watch_official(),
         _extract_official_results(event, gender),
         _extract_next_womens_match(event) if gender in {"female", "women", "woman"} else asyncio.sleep(0, result=None),
+        return_exceptions=True,
     )
+
+    watch, results, next_match = parts
+
+    if isinstance(watch, Exception):
+        print(f"  live watch error: {watch}")
+        watch = []
+    if isinstance(results, Exception):
+        print(f"  live results error: {results}")
+        results = []
+    if isinstance(next_match, Exception):
+        print(f"  live next-match error: {next_match}")
+        next_match = None
+
     return {
         "active": True,
         "name": event["name"],
         "place": event["place"],
         "dates": event["dates"],
-        "watch": watch,
-        "results": results,
+        "watch": watch or [],
+        "results": results or [],
         "next_match": next_match,
         "updated": today_str,
         "gender": gender,

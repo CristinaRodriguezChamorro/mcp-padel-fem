@@ -71,9 +71,22 @@ async def api_live(gender: str = "female"):
     if cached:
         return cached
 
-    data = await get_tournament_now(gender=gender)
-    cache_set(cache_key, data)
-    return data
+    try:
+        data = await get_tournament_now(gender=gender)
+        cache_set(cache_key, data)
+        return data
+    except Exception as exc:
+        # Do not leave the frontend with a generic HTTP 500.
+        print(f"  /api/live fatal error: {type(exc).__name__}: {exc}")
+        return {
+            "active": False,
+            "error": True,
+            "message": "No se pudo actualizar En juego",
+            "watch": [],
+            "results": [],
+            "next_match": None,
+            "gender": gender,
+        }
 
 
 @app.get("/api/live-debug")
@@ -87,11 +100,14 @@ async def api_live_debug(gender: str = "female"):
     data = await get_tournament_now(gender=gender)
     return {
         "active": data.get("active", False),
+        "error": data.get("error", False),
+        "message": data.get("message", ""),
         "name": data.get("name", ""),
         "place": data.get("place", ""),
         "dates": data.get("dates", ""),
         "gender": data.get("gender", gender),
         "results_count": len(data.get("results", [])),
+        "has_next_match": bool(data.get("next_match")),
         "source_url": data.get("source_url", ""),
     }
 
