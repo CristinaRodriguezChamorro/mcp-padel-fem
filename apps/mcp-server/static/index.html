@@ -185,18 +185,18 @@ nav {
 .tv-chip.free     { border-color:rgba(255,200,0,.4);   color:#ffc800; background:rgba(255,200,0,.08); }
 .live-badge { display:inline-flex; align-items:center; gap:5px; font-size:.68em; font-weight:700; color:var(--pink); background:rgba(255,77,141,.1); border:1px solid rgba(255,77,141,.3); padding:2px 9px; border-radius:20px; }
 
-.sponsors-list{display:flex;flex-direction:column;gap:22px;margin-top:8px}
+.sponsors-list{display:flex;flex-direction:column;gap:16px;margin-top:6px}
 .sponsor-card{
   background:linear-gradient(135deg,rgba(19,22,33,.99),rgba(10,14,24,.99));
-  border:1px solid rgba(255,77,141,.42);border-radius:18px;overflow:hidden;
+  border:1px solid rgba(255,77,141,.42);border-radius:16px;overflow:hidden;
   animation:fadeUp .35s ease-out backwards;box-shadow:0 14px 34px rgba(0,0,0,.18)
 }
 .sponsor-profile{
-  display:grid;grid-template-columns:280px minmax(0,1fr);
-  gap:30px;align-items:center;padding:22px;border-bottom:1px solid var(--border)
+  display:grid;grid-template-columns:220px minmax(0,1fr);
+  gap:24px;align-items:center;padding:18px;border-bottom:1px solid var(--border)
 }
 .sponsor-avatar{
-  position:relative;width:280px;height:220px;border-radius:15px;overflow:hidden;
+  position:relative;width:220px;height:175px;border-radius:13px;overflow:hidden;
   background:linear-gradient(145deg,var(--pink),#7652cf 60%,var(--orange));
   border:1px solid rgba(255,255,255,.08)
 }
@@ -213,23 +213,23 @@ nav {
 }
 .sponsor-fallback-initials{font-size:3.2em;font-weight:1000}.sponsor-fallback-ball{font-size:1.5em}
 .sponsor-meta{display:flex;flex-direction:column;justify-content:center;min-width:0;padding:8px 10px}
-.sponsor-name{font-size:2em;font-weight:1000;color:#fff;letter-spacing:-.035em}
-.sponsor-identity{display:flex;align-items:center;gap:12px;color:#c8c5cf;font-size:.98em;margin-top:8px}
+.sponsor-name{font-size:1.65em;font-weight:1000;color:#fff;letter-spacing:-.035em}
+.sponsor-identity{display:flex;align-items:center;gap:12px;color:#c8c5cf;font-size:.9em;margin-top:6px}
 .sponsor-pair{font-size:1em;color:#c8c5cf;margin-top:14px}.sponsor-pair strong{color:var(--pink)}
 .sponsor-rank-line{
-  display:flex;align-items:center;gap:16px;margin-top:18px;padding:15px 0;
+  display:flex;align-items:center;gap:16px;margin-top:14px;padding:12px 0;
   border-top:1px solid var(--border);border-bottom:1px solid var(--border);max-width:440px
 }
-.sponsor-rank-icon{font-size:1.7em}.sponsor-rank-copy small{display:block;color:var(--muted);font-size:.67em;font-weight:850;letter-spacing:1.5px;text-transform:uppercase}
-.sponsor-rank-copy strong{display:block;color:#fff;font-size:1.2em;margin-top:2px}
-.sponsor-rank-badge{margin-left:auto;font-size:.82em;font-weight:900;padding:7px 14px;border-radius:20px;background:linear-gradient(135deg,var(--pink),var(--orange));color:#fff}
-.sponsor-note{font-size:.88em;line-height:1.65;color:#b7b3bd;margin-top:14px;max-width:620px}
-.sponsor-products{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:18px 12px}
-.sponsor-category{min-height:138px;padding:0 20px;display:flex;flex-direction:column;justify-content:flex-start;border-right:1px solid var(--border)}
+.sponsor-rank-icon{font-size:1.45em}.sponsor-rank-copy small{display:block;color:var(--muted);font-size:.67em;font-weight:850;letter-spacing:1.5px;text-transform:uppercase}
+.sponsor-rank-copy strong{display:block;color:#fff;font-size:1.05em;margin-top:2px}
+.sponsor-rank-badge{margin-left:auto;font-size:.75em;font-weight:900;padding:6px 12px;border-radius:20px;background:linear-gradient(135deg,var(--pink),var(--orange));color:#fff}
+.sponsor-note{font-size:.8em;line-height:1.55;color:#b7b3bd;margin-top:14px;max-width:620px}
+.sponsor-products{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));padding:14px 10px}
+.sponsor-category{min-height:112px;padding:0 16px;display:flex;flex-direction:column;justify-content:flex-start;border-right:1px solid var(--border)}
 .sponsor-category:last-child{border-right:0}
-.category-label{font-size:.76em;font-weight:850;color:#eee;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:18px}
+.category-label{font-size:.7em;font-weight:850;color:#eee;text-transform:uppercase;letter-spacing:1.2px;margin-bottom:18px}
 .brand-chips{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
-.chip{display:inline-flex;align-items:center;gap:6px;font-size:.86em;font-weight:700;padding:6px 13px;border-radius:20px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--text)}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:.8em;font-weight:700;padding:5px 11px;border-radius:20px;border:1px solid var(--border);background:rgba(255,255,255,.04);color:var(--text)}
 .chip.bullpadel{border-color:rgba(255,77,141,.5);color:var(--pink);background:rgba(255,77,141,.08)}
 .chip.head{border-color:rgba(0,160,230,.5);color:#00a0e6;background:rgba(0,160,230,.08)}
 .chip.nox{border-color:rgba(255,180,0,.45);color:#ffb400}.chip.adidas{border-color:rgba(120,220,100,.45);color:#78dc64}
@@ -258,13 +258,28 @@ nav {
   .rank-pair{font-size:.73em}
   .rank-flag{display:none}
   .rank-pts{grid-column:3;font-size:.82em}
-  .sponsor-profile{grid-template-columns:1fr;padding:14px;gap:14px}
-  .sponsor-avatar{width:100%;height:210px}
-  .sponsor-meta{padding:2px 4px 8px}
-  .sponsor-name{font-size:1.55em}
-  .sponsor-products{grid-template-columns:1fr 1fr;padding:12px}
-  .sponsor-category{min-height:110px;padding:12px;border-right:0;border-bottom:1px solid var(--border)}
+  .sponsor-profile{grid-template-columns:1fr;padding:12px;gap:12px}
+  .sponsor-avatar{width:100%;height:180px;max-width:100%;margin:0 auto}
+  .sponsor-avatar img{object-position:center 16%}
+  .sponsor-meta{padding:0 2px 6px}
+  .sponsor-name{font-size:1.35em}
+  .sponsor-identity{font-size:.84em;flex-wrap:wrap}
+  .sponsor-rank-line{gap:10px;padding:10px 0;margin-top:10px;max-width:none}
+  .sponsor-note{font-size:.76em;margin-top:10px}
+  .sponsor-products{grid-template-columns:1fr;padding:8px 10px}
+  .sponsor-category{min-height:auto;padding:10px 6px;border-right:0;border-bottom:1px solid var(--border)}
+  .sponsor-category:last-child{border-bottom:0}
+  .brand-chips{flex-direction:row;flex-wrap:wrap}
+  .chip{font-size:.76em;padding:5px 10px}
   .torneo-top{padding:14px 16px 12px} .torneo-tv-bar{padding:10px 16px}
+}
+
+@media(max-width:430px){
+  .sponsor-avatar{height:155px}
+  .sponsor-name{font-size:1.22em}
+  .sponsor-rank-badge{font-size:.7em;padding:5px 10px}
+  .sponsor-products{padding:6px 8px}
+  .category-label{margin-bottom:10px}
 }
 
 /* ── EN JUEGO ── */
@@ -943,7 +958,6 @@ async function renderSponsors(){
   };
 
   list.innerHTML=SPONSORS_DATA.map((p,i)=>{
-    const partner=currentPartner(p);
     return `
     <article class="sponsor-card" style="animation-delay:${i*.05}s">
       <div class="sponsor-profile">
@@ -951,7 +965,6 @@ async function renderSponsors(){
         <div class="sponsor-meta">
           <div class="sponsor-name">${p.name}</div>
           <div class="sponsor-identity"><span>${p.flag}</span><span>Jugadora profesional</span></div>
-          <div class="sponsor-pair">Pareja: <strong>${partner}</strong></div>
           <div class="sponsor-rank-line">
             <span class="sponsor-rank-icon">🏆</span>
             <div class="sponsor-rank-copy"><small>Ranking FIP</small><strong>${p.rank.startsWith('#')?p.rank.slice(1)+' del mundo':p.rank}</strong></div>
