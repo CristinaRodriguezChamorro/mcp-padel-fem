@@ -947,7 +947,8 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
         "playwright": False,
         "raw_blocks": 0,
         "states_scanned": 0,
-        "source_mode": "read-all-organize-filter",
+        "gender_states_scanned": 0,
+        "source_mode": "read-all-states-organize-filter",
     }
 
     if async_playwright is None:
@@ -1059,6 +1060,63 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
             # Estado inicial.
             await collect_state("current")
 
+            # Recorremos TODOS los estados de controles de género sin decidir
+            # cuál es Female. Primero leemos; el filtro femenino va después.
+            try:
+                inputs = page.locator("input")
+                for ii in range(min(await inputs.count(), 12)):
+                    inp = inputs.nth(ii)
+                    try:
+                        meta = await inp.evaluate(
+                            """el => ({
+                                type: el.type || '',
+                                name: el.name || '',
+                                value: el.value || '',
+                                id: el.id || '',
+                                aria: el.getAttribute('aria-label') || ''
+                            })"""
+                        )
+                        meta_text = " ".join(str(v) for v in meta.values()).lower()
+                        likely_gender = (
+                            meta.get("type") in {"radio", "checkbox"} or
+                            any(k in meta_text for k in ("gender", "female", "male", "women", "men", "sex"))
+                        )
+                        if not likely_gender:
+                            continue
+
+                        await inp.click(force=True, timeout=1800)
+                        await page.wait_for_timeout(850)
+                        diag["gender_states_scanned"] += 1
+                        await collect_state(
+                            f"input:{ii}:{meta.get('name','')}:{meta.get('value','')}"
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+            try:
+                gender_controls = page.locator("label, button, [role=button], [role=radio]")
+                seen_gender_labels = set()
+                for gi in range(min(await gender_controls.count(), 120)):
+                    el = gender_controls.nth(gi)
+                    try:
+                        label = re.sub(r"\s+", " ", (await el.inner_text()).strip())
+                        low = label.lower()
+                        if low not in {"female", "male", "women", "men", "femenino", "femenina", "masculino"}:
+                            continue
+                        if low in seen_gender_labels:
+                            continue
+                        seen_gender_labels.add(low)
+                        await el.click(force=True, timeout=1800)
+                        await page.wait_for_timeout(850)
+                        diag["gender_states_scanned"] += 1
+                        await collect_state(f"gender-control:{label}")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
             # Todos los días disponibles en selects.
             try:
                 selects = page.locator("select")
@@ -1142,6 +1200,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
     print(
         "  FIP raw results:",
         f"states={diag['states_scanned']}",
+        f"gender_states={diag['gender_states_scanned']}",
         f"raw_blocks={diag['raw_blocks']}",
     )
 
@@ -1326,12 +1385,19 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     for match in organized:
         mapped = []
+
         for raw_name in match["names"]:
             female = map_to_female(raw_name)
             if female and female not in mapped:
                 mapped.append(female)
 
-        # Un partido femenino válido tiene exactamente 4 jugadoras identificables.
+        if len(mapped) < 4:
+            whole = _norm_person_name(match.get("text", ""))
+            padded = f" {whole} "
+            for ranked in ranking_full:
+                if ranked and f" {ranked} " in padded and ranked not in mapped:
+                    mapped.append(ranked)
+
         if len(mapped) != 4:
             continue
 
@@ -1457,6 +1523,15 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         "parsed_results": len(parsed),
         "valid_results": len(valid),
         "ranking_players_seen": len(ranking_full),
+        "capture_gender_states": capture_diag.get("gender_states_scanned", 0),
+        "raw_block_sample": [
+            {
+                "names": m.get("names", [])[:8],
+                "scores": m.get("scores", [])[:8],
+                "text": m.get("text", "")[:180],
+            }
+            for m in organized[:3]
+        ],
         "groq_used": False,
     })
 
@@ -1470,6 +1545,54 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
     )
 
     return valid
+
+
+def _normalize_scoreboard_result(item: dict) -> dict | None:
+    """Normaliza un partido finalizado para el cuadro visual de En juego."""
+    if not isinstance(item, dict):
+        return None
+
+    winner = re.sub(r"\s+", " ", str(item.get("winner", ""))).strip()
+    loser = re.sub(r"\s+", " ", str(item.get("loser", ""))).strip()
+    rnd = re.sub(r"\s+", " ", str(item.get("round", "Partidos"))).strip() or "Partidos"
+    raw_score = str(item.get("score", "")).strip()
+
+    if not winner or not loser or not raw_score:
+        return None
+
+    sets = re.findall(r"(\d{1,2})\s*[-–]\s*(\d{1,2})", raw_score)
+    if len(sets) < 2:
+        return None
+
+    return {
+        "round": rnd,
+        "winner": winner,
+        "loser": loser,
+        "score": "  ".join(f"{a}–{b}" for a, b in sets[:3]),
+        "date": str(item.get("date", "") or ""),
+        "status": "finalizado",
+    }
+
+
+def _normalize_next_match(item: dict | None) -> dict | None:
+    """Normaliza el próximo partido para el cuadro visual de En juego."""
+    if not isinstance(item, dict):
+        return None
+
+    pair1 = re.sub(r"\s+", " ", str(item.get("pair1", ""))).strip()
+    pair2 = re.sub(r"\s+", " ", str(item.get("pair2", ""))).strip()
+
+    if not pair1 or not pair2:
+        return None
+
+    return {
+        "round": re.sub(r"\s+", " ", str(item.get("round", "Próximo partido"))).strip() or "Próximo partido",
+        "pair1": pair1,
+        "pair2": pair2,
+        "when": str(item.get("when", "") or "Horario por confirmar"),
+        "iso_madrid": str(item.get("iso_madrid", "") or ""),
+        "status": "próximo",
+    }
 
 
 async def get_tournament_now(gender: str = "female") -> dict:
