@@ -2205,11 +2205,10 @@ def _fallback_next_match(results: list, next_match: dict | None, event: dict) ->
 
 async def _extract_current_womens_match(event: dict) -> dict | None:
     """
-    Consulta exclusivamente la vista Live Score de FIP.
+    Consulta exclusivamente Live Score de FIP.
 
-    NO modifica ni reutiliza el extractor de resultados históricos.
-    Devuelve partido femenino actual solo si FIP muestra 4 jugadoras
-    del ranking femenino en el mismo bloque de live score.
+    Solo devuelve un partido como EN DIRECTO si hay evidencia explícita de que el
+    bloque está en curso. No deduce "live" por la hora.
     """
     if async_playwright is None:
         return None
@@ -2228,14 +2227,12 @@ async def _extract_current_womens_match(event: dict) -> dict | None:
         return None
 
     browser = None
-
     try:
         async with async_playwright() as p:
             browser = await p.chromium.launch(
                 headless=True,
                 args=["--no-sandbox", "--disable-dev-shm-usage"],
             )
-
             page = await browser.new_page(
                 viewport={"width": 1440, "height": 1600},
                 locale="en-US",
@@ -2250,14 +2247,13 @@ async def _extract_current_womens_match(event: dict) -> dict | None:
                     loc = page.get_by_text(label, exact=True).first
                     if await loc.count() and await loc.is_visible():
                         await loc.click(force=True, timeout=2500)
-                        await page.wait_for_timeout(1000)
+                        await page.wait_for_timeout(900)
                         live_opened = True
                         break
                 except Exception:
                     pass
 
             if not live_opened:
-                # Some FIP pages expose Live Score as a tab/anchor with surrounding text.
                 try:
                     live_opened = await page.evaluate(
                         r"""
@@ -2273,22 +2269,21 @@ async def _extract_current_womens_match(event: dict) -> dict | None:
                         """
                     )
                     if live_opened:
-                        await page.wait_for_timeout(1000)
+                        await page.wait_for_timeout(900)
                 except Exception:
                     pass
 
-            # Activate Female ONLY inside Live Score probe.
+            # Female only inside this probe.
             for label in ("Female", "Women", "Femenino", "Femenina"):
                 try:
                     loc = page.get_by_text(label, exact=True).first
                     if await loc.count() and await loc.is_visible():
                         await loc.click(force=True, timeout=2200)
-                        await page.wait_for_timeout(900)
+                        await page.wait_for_timeout(800)
                         break
                 except Exception:
                     pass
 
-            # Find the smallest visible container with exactly four ranked women.
             state = await page.evaluate(
                 r"""
                 (ranking) => {
@@ -2297,14 +2292,21 @@ async def _extract_current_womens_match(event: dict) -> dict | None:
                     .toLowerCase().replace(/[^a-z0-9]+/g,' ')
                     .replace(/\s+/g,' ').trim();
                   const clean=s=>(s||'').replace(/\s+/g,' ').trim();
+
+                  const liveRx=/\b(live|in progress|playing|on court|court \d+|set \d+|directo|en juego|en curso)\b/i;
+                  const finishedRx=/\b(finalizado|finished|completed|winner|ganador)\b/i;
+
                   const all=Array.from(document.querySelectorAll('body *'));
                   const candidates=[];
 
                   for(const el of all){
                     const style=getComputedStyle(el);
                     if(style.display==='none'||style.visibility==='hidden')continue;
+
                     const text=clean(el.innerText);
                     if(!text||text.length<25||text.length>1800)continue;
+                    if(!liveRx.test(text) || finishedRx.test(text))continue;
+
                     const nt=' '+norm(text)+' ';
                     const players=[...new Set(ranking.filter(p=>p && nt.includes(' '+p+' ')))];
                     if(players.length!==4)continue;
@@ -2325,15 +2327,10 @@ async def _extract_current_womens_match(event: dict) -> dict | None:
 
                   if(!minimal.length)return null;
 
-                  // Prefer blocks that explicitly look live/in progress.
-                  minimal.sort((a,b)=>{
-                    const score=t=>/\b(live|in progress|playing|set|court|directo|en juego)\b/i.test(t)?1:0;
-                    return score(b.text)-score(a.text);
-                  });
-
+                  // Prefer the most compact true-live block.
+                  minimal.sort((a,b)=>a.text.length-b.text.length);
                   const c=minimal[0];
 
-                  // Player order by occurrence in visible text.
                   const nt=' '+norm(c.text)+' ';
                   const ordered=c.players
                     .map(p=>({p,i:nt.indexOf(' '+p+' ')}))
@@ -2341,11 +2338,7 @@ async def _extract_current_womens_match(event: dict) -> dict | None:
                     .sort((a,b)=>a.i-b.i)
                     .map(x=>x.p);
 
-                  return {
-                    text:c.text,
-                    players:ordered,
-                    scores:c.scores
-                  };
+                  return {text:c.text,players:ordered,scores:c.scores};
                 }
                 """,
                 ranking_norm,
@@ -2355,6 +2348,7 @@ async def _extract_current_womens_match(event: dict) -> dict | None:
             browser = None
 
             if not state or len(state.get("players", [])) != 4:
+                print("  live-score: no hay partido femenino en directo confirmado")
                 return None
 
             players = [str(x).title() for x in state["players"]]
@@ -2364,8 +2358,6 @@ async def _extract_current_womens_match(event: dict) -> dict | None:
             pair1 = f"{players[0]} / {players[1]}"
             pair2 = f"{players[2]} / {players[3]}"
 
-            # Display raw current score conservatively.
-            # We do not infer winner because the match is still live.
             score_text = ""
             if len(scores) >= 2:
                 if len(scores) % 2 == 0:
@@ -2388,6 +2380,8 @@ async def _extract_current_womens_match(event: dict) -> dict | None:
             else:
                 rnd = _stage_from_event(event)
 
+            print(f"  live-score CONFIRMADO: {pair1} vs {pair2} · {rnd} · {score_text or 'sin score visible'}")
+
             return {
                 "status": "live",
                 "status_label": "EN DIRECTO",
@@ -2397,7 +2391,7 @@ async def _extract_current_womens_match(event: dict) -> dict | None:
                 "score": score_text,
                 "when": "Ahora · hora de España",
                 "iso_madrid": datetime.now(ZoneInfo("Europe/Madrid")).isoformat(),
-                "status_detail": "Cuando termine, el resultado pasará automáticamente al bloque de resultados.",
+                "status_detail": "Partido en curso · al finalizar pasará automáticamente a resultados.",
                 "source": "FIP Live Score",
             }
 
@@ -2463,6 +2457,14 @@ async def get_tournament_now(gender: str = "female") -> dict:
 
     normalized_next = _normalize_next_match(next_match)
     normalized_current = current_match if isinstance(current_match, dict) else None
+
+    _LIVE_DEBUG_STATE["top_card"] = {
+        "mode": "live" if normalized_current else ("next" if normalized_next else "none"),
+        "current_pair1": (normalized_current or {}).get("pair1",""),
+        "current_pair2": (normalized_current or {}).get("pair2",""),
+        "next_pair1": (normalized_next or {}).get("pair1",""),
+        "next_pair2": (normalized_next or {}).get("pair2",""),
+    }
 
     return {
         "active": True,

@@ -82,7 +82,7 @@ async def api_live(gender: str = "female"):
         gender = "female"
 
     cache_key = f"live:{gender}"
-    cached = cache_get(cache_key, 3 * 60)
+    cached = cache_get(cache_key, 60)
     if cached:
         return cached
 
@@ -591,7 +591,7 @@ async def resumen_diario_padel_femenino():
 
 @app.get("/api/version")
 async def api_version():
-    return {"version": "v69-live-retry-stale-cache-2026-08-08"}
+    return {"version": "v70-real-live-next-auto-refresh-2026-08-08"}
 
 @app.get("/")
 async def index():
@@ -601,7 +601,7 @@ async def index():
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
-            "X-App-Version": "v69-live-retry-stale-cache-2026-08-08",
+            "X-App-Version": "v70-real-live-next-auto-refresh-2026-08-08",
         },
     )
 
