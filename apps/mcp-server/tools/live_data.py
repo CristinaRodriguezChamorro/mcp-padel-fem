@@ -2289,17 +2289,62 @@ async def _extract_fip_today_womens_cards(event: dict) -> list[dict]:
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
             await page.wait_for_timeout(1400)
 
-            # Open Order of Play / Matches when the event page has tabs.
-            for label in (
-                "Order of Play", "Order Of Play", "Matches",
-                "Schedule", "Orden de juego", "Partidos"
-            ):
+            # Open Order of Play robustly. FIP changes the tab markup often,
+            # so do not depend on exact visible text.
+            oop_clicked = False
+            try:
+                oop_clicked = await page.evaluate(
+                    r"""
+                    () => {
+                      const clean=s=>(s||'').replace(/\s+/g,' ').trim().toLowerCase();
+                      const nodes=Array.from(document.querySelectorAll(
+                        'a,button,[role=button],[role=tab],li,label,div'
+                      ));
+                      const wanted=[
+                        'order of play','order ofplay','schedule','matches',
+                        'orden de juego','partidos'
+                      ];
+                      // Prefer clickable/small nodes, not page wrappers.
+                      const matches=nodes.filter(el=>{
+                        const t=clean(el.innerText||el.textContent);
+                        if(!t || t.length>80)return false;
+                        return wanted.some(w=>t===w || t.includes(w));
+                      });
+                      const el=matches.find(x=>x.matches('a,button,[role=button],[role=tab]')) || matches[0];
+                      if(!el)return false;
+                      el.click();
+                      el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window}));
+                      return true;
+                    }
+                    """
+                )
+                if oop_clicked:
+                    await page.wait_for_timeout(1200)
+            except Exception:
+                pass
+
+            # If the tab is a real link and the JS click did not expose the
+            # schedule, follow an href containing order/schedule/matches.
+            try:
+                body_probe = (await page.locator("body").inner_text()).lower()
+            except Exception:
+                body_probe = ""
+            if not any(x in body_probe for x in ("women", "semifinals", "quarterfinals", "completed")):
                 try:
-                    loc = page.get_by_text(label, exact=True).first
-                    if await loc.count() and await loc.is_visible():
-                        await loc.click(force=True, timeout=2200)
-                        await page.wait_for_timeout(800)
-                        break
+                    href = await page.evaluate(
+                        r"""
+                        () => {
+                          const links=Array.from(document.querySelectorAll('a[href]'));
+                          const a=links.find(x=>/order[-_ ]?of[-_ ]?play|schedule|matches/i.test(
+                            (x.innerText||'')+' '+(x.getAttribute('href')||'')
+                          ));
+                          return a ? a.href : '';
+                        }
+                        """
+                    )
+                    if href:
+                        await page.goto(href, wait_until="domcontentloaded", timeout=45000)
+                        await page.wait_for_timeout(1200)
                 except Exception:
                     pass
 
@@ -2331,6 +2376,20 @@ async def _extract_fip_today_womens_cards(event: dict) -> list[dict]:
                 )
                 if clicked_today:
                     await page.wait_for_timeout(900)
+            except Exception:
+                pass
+
+            try:
+                probe_text = re.sub(r"\s+", " ", (await page.locator("body").inner_text()).strip())
+                print(
+                    "  FIP today probe:",
+                    f"oop_clicked={oop_clicked}",
+                    f"url={page.url}",
+                    f"women={'women' in probe_text.lower()}",
+                    f"completed={'completed' in probe_text.lower()}",
+                    f"semifinals={'semifinals' in probe_text.lower()}",
+                    f"chars={len(probe_text)}",
+                )
             except Exception:
                 pass
 
