@@ -931,25 +931,32 @@ def _norm_person_name(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
-async def _browser_fip_womens_results_text(event: dict) -> str:
+async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
     """
-    FIP carga Results / Female / fecha mediante JavaScript.
+    Reproduce FIP Results -> Female -> día con Chromium.
 
-    Requests/BeautifulSoup solo reciben de forma consistente el cuadro masculino
-    inicial. Por eso esta función reproduce exactamente lo que hace una persona:
-    abre el evento, entra en Results, selecciona Female y recorre los días
-    disponibles, recogiendo el texto ya renderizado por el navegador.
+    Además del texto del DOM, extrae BLOQUES DE PARTIDO alrededor del símbolo ✓.
+    FIP no representa el marcador como "6-3 6-4": suele renderizar nombres y
+    números en celdas separadas. Por eso un parser basado solo en regex de
+    "6-3" no encontraba nada aunque Playwright sí viera los resultados.
     """
+    diag = {
+        "playwright": False,
+        "female_clicked": False,
+        "snapshots": 0,
+        "match_blocks": 0,
+    }
+
     if async_playwright is None:
         print("  FIP browser: Playwright no disponible")
-        return ""
+        return "", diag
 
     url = event.get("url", "")
     if not url:
-        return ""
+        return "", diag
 
-    snapshots = []
     browser = None
+    chunks = []
 
     try:
         async with async_playwright() as p:
@@ -957,120 +964,177 @@ async def _browser_fip_womens_results_text(event: dict) -> str:
                 headless=True,
                 args=["--no-sandbox", "--disable-dev-shm-usage"],
             )
+            diag["playwright"] = True
             page = await browser.new_page(
                 viewport={"width": 1440, "height": 1200},
                 locale="en-US",
             )
 
-            # tab=Results ayuda a aterrizar en la pestaña correcta cuando FIP lo respeta.
             results_url = url + ("&" if "?" in url else "?") + "tab=Results"
             await page.goto(results_url, wait_until="domcontentloaded", timeout=45000)
             await page.wait_for_timeout(1800)
 
-            # 1) Abrir Results si la URL no ha activado la pestaña.
+            # Open Results.
             for label in ("Results", "Resultados"):
                 try:
                     loc = page.get_by_text(label, exact=True).first
                     if await loc.count() and await loc.is_visible():
-                        await loc.click(timeout=2500)
-                        await page.wait_for_timeout(1000)
+                        await loc.click(timeout=3000)
+                        await page.wait_for_timeout(900)
                         break
                 except Exception:
                     pass
 
-            # 2) Seleccionar Female/Femenino. FIP usa controles custom, por eso
-            # probamos label/button/text y también inputs cercanos.
-            female_clicked = False
-            for label in ("Female", "Femenino", "Women"):
+            # Click Female/Women.
+            for label in ("Female", "Women", "Femenino", "Femenina"):
                 try:
                     loc = page.get_by_text(label, exact=True).first
                     if await loc.count() and await loc.is_visible():
-                        await loc.click(timeout=2500)
-                        await page.wait_for_timeout(1200)
-                        female_clicked = True
+                        await loc.click(timeout=3000)
+                        await page.wait_for_timeout(1400)
+                        diag["female_clicked"] = True
                         break
                 except Exception:
                     pass
 
-            if not female_clicked:
-                # Fallback: labels asociados a radio/checkbox.
+            if not diag["female_clicked"]:
                 try:
                     labels = page.locator("label")
                     for i in range(await labels.count()):
-                        txt = (await labels.nth(i).inner_text()).strip().lower()
-                        if txt in {"female", "femenino", "women"}:
-                            await labels.nth(i).click()
-                            await page.wait_for_timeout(1200)
-                            female_clicked = True
+                        txt = re.sub(r"\s+", " ", (await labels.nth(i).inner_text()).strip()).lower()
+                        if txt in {"female", "women", "femenino", "femenina"}:
+                            await labels.nth(i).click(timeout=2500)
+                            await page.wait_for_timeout(1400)
+                            diag["female_clicked"] = True
                             break
                 except Exception:
                     pass
 
             async def capture(tag: str):
+                """
+                Captura:
+                1) body text para diagnóstico/contexto;
+                2) candidatos de partido: el ancestro más pequeño de cada ✓ que
+                   contiene texto suficiente pero no medio cuadro.
+                """
                 try:
-                    body = await page.locator("body").inner_text(timeout=5000)
-                    if body and len(body) > 200:
-                        snapshots.append(f"\n=== {tag} ===\n{body}")
+                    body = await page.locator("body").inner_text(timeout=6000)
+                    if body:
+                        chunks.append(f"\n=== PAGE {tag} ===\n{body}")
+                        diag["snapshots"] += 1
                 except Exception:
                     pass
 
+                try:
+                    blocks = await page.evaluate(r"""
+                    () => {
+                      const candidates = [];
+                      const all = Array.from(document.querySelectorAll('*'));
+
+                      const checks = all.filter(el => {
+                        const own = Array.from(el.childNodes)
+                          .filter(n => n.nodeType === Node.TEXT_NODE)
+                          .map(n => (n.textContent || '').trim())
+                          .join(' ');
+                        return own.includes('✓') || (el.children.length === 0 && (el.textContent || '').includes('✓'));
+                      });
+
+                      for (const check of checks) {
+                        let node = check;
+                        let chosen = null;
+
+                        for (let depth = 0; depth < 8 && node; depth++, node = node.parentElement) {
+                          const text = (node.innerText || '').trim();
+                          const lines = text.split(/\n+/).map(x => x.trim()).filter(Boolean);
+                          const numbers = lines.filter(x => /^\d{1,2}$/.test(x)).length;
+
+                          // A match normally has four player names and 4-6 score cells.
+                          // Keep the smallest plausible ancestor, reject entire draw containers.
+                          if (text.length >= 25 && text.length <= 900 &&
+                              lines.length >= 7 && lines.length <= 30 &&
+                              numbers >= 2) {
+                            chosen = node;
+                            break;
+                          }
+                        }
+
+                        if (chosen) {
+                          const text = (chosen.innerText || '').trim();
+                          if (!candidates.includes(text)) candidates.push(text);
+                        }
+                      }
+
+                      return candidates;
+                    }
+                    """)
+                    for b in blocks or []:
+                        if b and len(b) < 1200:
+                            chunks.append(f"\n=== MATCHBLOCK {tag} ===\n{b}")
+                            diag["match_blocks"] += 1
+                except Exception as exc:
+                    print(f"  FIP match-block extraction error: {exc}")
+
             await capture("female-current")
 
-            # 3) Recorrer selects que parezcan fechas/días.
-            selects = page.locator("select")
-            for si in range(await selects.count()):
-                sel = selects.nth(si)
-                try:
-                    options = await sel.locator("option").all()
+            # Cycle date selects.
+            try:
+                selects = page.locator("select")
+                for si in range(await selects.count()):
+                    sel = selects.nth(si)
+                    opts = sel.locator("option")
                     option_data = []
-                    for opt in options:
-                        txt = (await opt.inner_text()).strip()
+                    for oi in range(await opts.count()):
+                        opt = opts.nth(oi)
+                        txt = re.sub(r"\s+", " ", (await opt.inner_text()).strip())
                         val = await opt.get_attribute("value")
                         if txt and re.search(
                             r"(?:\bMon\b|\bTue\b|\bWed\b|\bThu\b|\bFri\b|\bSat\b|\bSun\b|"
                             r"\bMonday\b|\bTuesday\b|\bWednesday\b|\bThursday\b|\bFriday\b|\bSaturday\b|\bSunday\b|"
-                            r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+(?:Aug|August))",
+                            r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9})",
                             txt, re.I
                         ):
                             option_data.append((val, txt))
-                    # Limitamos a días del torneo, no selects genéricos.
-                    if 1 <= len(option_data) <= 12:
+
+                    if 1 <= len(option_data) <= 14:
                         for val, txt in option_data:
                             try:
-                                if val is not None:
+                                if val:
                                     await sel.select_option(value=val)
                                 else:
                                     await sel.select_option(label=txt)
                                 await page.wait_for_timeout(900)
                                 await capture(f"date:{txt}")
                             except Exception:
-                                continue
-                except Exception:
-                    continue
+                                pass
+            except Exception:
+                pass
 
-            # 4) Algunos controles de fecha son botones/chips, no <select>.
-            date_candidates = page.locator("button, [role=button], .date, [class*=date]")
-            seen_labels = set()
-            count = min(await date_candidates.count(), 80)
-            for i in range(count):
-                el = date_candidates.nth(i)
-                try:
-                    txt = re.sub(r"\s+", " ", (await el.inner_text()).strip())
-                    if not txt or txt in seen_labels:
-                        continue
-                    if not re.search(
-                        r"(?:\bMon\b|\bTue\b|\bWed\b|\bThu\b|\bFri\b|\bSat\b|\bSun\b|"
-                        r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+(?:Aug|August))",
-                        txt, re.I
-                    ):
-                        continue
-                    seen_labels.add(txt)
-                    if await el.is_visible():
+            # Cycle date buttons/chips.
+            try:
+                candidates = page.locator("button, [role=button], [class*=date]")
+                seen = set()
+                for i in range(min(await candidates.count(), 100)):
+                    el = candidates.nth(i)
+                    try:
+                        txt = re.sub(r"\s+", " ", (await el.inner_text()).strip())
+                        if not txt or txt in seen:
+                            continue
+                        if not re.search(
+                            r"(?:\bMon\b|\bTue\b|\bWed\b|\bThu\b|\bFri\b|\bSat\b|\bSun\b|"
+                            r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9})",
+                            txt, re.I
+                        ):
+                            continue
+                        if not await el.is_visible():
+                            continue
+                        seen.add(txt)
                         await el.click(timeout=1800)
                         await page.wait_for_timeout(800)
                         await capture(f"date-button:{txt}")
-                except Exception:
-                    continue
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
             await browser.close()
             browser = None
@@ -1082,19 +1146,23 @@ async def _browser_fip_womens_results_text(event: dict) -> str:
                 await browser.close()
             except Exception:
                 pass
-        return ""
 
-    # Dedupe snapshots because FIP may expose the same day through two controls.
+    # Dedupe chunks.
     unique = []
     seen = set()
-    for snap in snapshots:
-        key = re.sub(r"\s+", " ", snap)[:3000]
+    for chunk in chunks:
+        key = re.sub(r"\s+", " ", chunk)[:3500]
         if key not in seen:
             seen.add(key)
-            unique.append(snap)
+            unique.append(chunk)
 
-    print(f"  FIP browser: {len(unique)} snapshots de Results/Female")
-    return "\n".join(unique)[:180000]
+    print(
+        "  FIP browser:",
+        f"female={diag['female_clicked']}",
+        f"snapshots={diag['snapshots']}",
+        f"match_blocks={diag['match_blocks']}",
+    )
+    return "\n".join(unique)[:250000], diag
 
 
 async def _womens_ranking_validation_sets() -> tuple[set[str], set[str], bool]:
@@ -1134,17 +1202,76 @@ def _pair_is_womens_ranking_pair(pair: str, ranking_full: set[str], ranking_surn
 
     return True
 
+def _round_from_snapshot(snapshot: str, event: dict) -> str:
+    """Infer round using date shown in snapshot + tournament structure."""
+    round_aliases = [
+        ("semi-final", "Semifinales"),
+        ("semifinal", "Semifinales"),
+        ("quarter-final", "Cuartos de final"),
+        ("quarter final", "Cuartos de final"),
+        ("round of 16", "Octavos de final"),
+        ("2nd round", "Segunda ronda"),
+        ("second round", "Segunda ronda"),
+        ("1st round", "Primera ronda"),
+        ("first round", "Primera ronda"),
+        ("final", "Final"),
+        ("qual", "Clasificación"),
+    ]
+
+    # If snapshot itself names the round, easiest path.
+    low = snapshot.lower()
+    for needle, label in round_aliases:
+        if needle in low:
+            return label
+
+    # Extract day/month from snapshot.
+    dm = re.search(
+        r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)?[,]?\s*(\d{1,2})\s+"
+        r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\b",
+        snapshot,
+        re.I,
+    )
+    if not dm:
+        return "Partidos"
+
+    day = str(int(dm.group(1)))
+    month = dm.group(2).lower()
+
+    event_text = _clean_text(BeautifulSoup(event.get("html", ""), "html.parser"))
+    event_low = event_text.lower()
+
+    # Find the occurrence of the date in tournament structure and inspect context before it.
+    date_pat = re.compile(rf"\b{re.escape(day)}\s+{re.escape(month)}[a-z]*\b", re.I)
+    for m in date_pat.finditer(event_low):
+        ctx = event_low[max(0, m.start() - 180):m.start() + 40]
+        for needle, label in round_aliases:
+            if needle in ctx:
+                return label
+
+    return "Partidos"
+
+
 async def _extract_official_results(event: dict, gender: str = "female") -> list:
     """
-    Extrae resultados finalizados SIN Groq.
+    Resultados femeninos SIN Groq.
 
-    Fuente principal: Playwright renderiza FIP Results -> Female -> fechas.
-    Parsing: texto/DOM/XHR determinista en Python.
+    La web FIP renderiza un partido como:
+      Jugadora A
+      Jugadora B
+      ✓
+      6
+      6
+      Jugadora C
+      Jugadora D
+      3
+      4
+
+    Por tanto NO buscamos "6-3 6-4". Recorremos el texto renderizado,
+    detectamos las cuatro jugadoras mediante el ranking femenino y
+    reconstruimos los sets a partir de las celdas numéricas.
     """
     gender = (gender or "female").strip().lower()
     if gender in {"women", "woman"}:
-        gender = "female"
-    if gender not in {"female", "male"}:
         gender = "female"
 
     source = ""
@@ -1153,242 +1280,210 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
     if gender == "female":
         try:
             result = await _browser_fip_womens_results_text(event)
-            # Compatibilidad con versiones que devuelvan str o (str, diag).
             if isinstance(result, tuple):
                 source, browser_diag = result
             else:
                 source = result or ""
         except Exception as exc:
-            print(f"  live browser results error: {exc}")
-
-    if not source:
-        source = await _collect_official_result_text(event, gender)
-        browser_diag = {"fallback": "static"}
+            print(f"  live browser results error: {type(exc).__name__}: {exc}")
 
     if not source:
         _LIVE_DEBUG_STATE.update({
             "browser": browser_diag,
+            "parser": "ranking-stream-v27",
+            "snapshots_seen": 0,
+            "female_player_hits": 0,
             "parsed_results": 0,
             "valid_results": 0,
             "source_chars": 0,
+            "groq_used": False,
         })
         return []
 
-    # Normalize source into lines while retaining possible JSON/XHR chunks.
-    raw = source
-    lines = [re.sub(r"\s+", " ", ln).strip() for ln in raw.splitlines()]
-    lines = [ln for ln in lines if ln]
+    ranking_full, ranking_surnames, _ = await _womens_ranking_validation_sets()
 
-    # If JSON payloads are present, flatten simple scalar strings as extra lines.
-    json_strings = []
-    for m in re.finditer(r'[\{\[].*?[\}\]]', raw, re.DOTALL):
-        chunk = m.group(0)
-        if len(chunk) > 60000:
-            continue
-        try:
-            obj = json.loads(chunk)
-        except Exception:
-            continue
+    def match_player(line: str) -> str | None:
+        norm = _norm_person_name(line)
+        if not norm:
+            return None
 
-        def walk(x):
-            if isinstance(x, dict):
-                for k, v in x.items():
-                    json_strings.append(str(k))
-                    walk(v)
-            elif isinstance(x, list):
-                for v in x:
-                    walk(v)
-            elif isinstance(x, (str, int, float)):
-                json_strings.append(str(x))
-        walk(obj)
+        # Strip seed / Q / WC / winner markers after normalization.
+        norm = re.sub(r"\b(?:q|wc|ll)\b", " ", norm)
+        norm = re.sub(r"\s+", " ", norm).strip()
 
-    if json_strings:
-        lines.extend(re.sub(r"\s+", " ", x).strip() for x in json_strings if str(x).strip())
+        # Exact match preferred.
+        if norm in ranking_full:
+            return norm
 
-    round_patterns = [
-        (r"\bfinal\b", "Final"),
-        (r"\bsemi[- ]?finals?\b|\bsf\b", "Semifinales"),
-        (r"\bquarter[- ]?finals?\b|\bqf\b", "Cuartos de final"),
-        (r"\bround of 16\b|\br16\b", "Octavos de final"),
-        (r"\b2nd round\b|\bsecond round\b|\br2\b", "Segunda ronda"),
-        (r"\b1st round\b|\bfirst round\b|\br1\b", "Primera ronda"),
-        (r"\bqual", "Clasificación"),
-    ]
+        # FIP can append seed markers to same line.
+        candidates = [name for name in ranking_full if name and name in norm]
+        if candidates:
+            return max(candidates, key=len)
 
-    score_re = re.compile(
-        r"(?<!\d)(\d{1,2})\s*[-–]\s*(\d{1,2})(?:\s*[,;/ ]+\s*(\d{1,2})\s*[-–]\s*(\d{1,2}))?(?:\s*[,;/ ]+\s*(\d{1,2})\s*[-–]\s*(\d{1,2}))?"
-    )
-    date_iso = re.compile(r"\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b")
-    date_dmy = re.compile(r"\b(\d{1,2})[-/](\d{1,2})[-/](20\d{2})\b")
+        return None
 
-    current_round = "Partidos"
-    current_date = ""
+    def score_numbers(lines: list[str]) -> list[int]:
+        nums = []
+        for line in lines:
+            text = line.strip()
+            # Scores in FIP are standalone integers. Ignore seeds like "(1)".
+            if re.fullmatch(r"\d{1,2}", text):
+                value = int(text)
+                if 0 <= value <= 20:
+                    nums.append(value)
+        return nums
+
+    # Browser extractor labels every body capture with === <tag> ===.
+    segments = re.split(r"\n===\s*([^=]+?)\s*===\n", source)
+    snapshots = []
+    if len(segments) >= 3:
+        for i in range(1, len(segments), 2):
+            tag = segments[i].strip()
+            body = segments[i + 1] if i + 1 < len(segments) else ""
+            # Matchblock fragments from v25 are not needed; full page snapshots are.
+            if "matchblock" not in tag.lower():
+                snapshots.append((tag, body))
+    else:
+        snapshots = [("current", source)]
+
     parsed = []
+    total_hits = 0
 
-    # First pass: detect dense lines containing pair-vs-pair + score.
-    pair_score_patterns = [
-        re.compile(
-            r"(?P<winner>[^|\n]{2,80}?(?:/|&)[^|\n]{2,80}?)\s+(?:def\.?|beat|beats|d\.?)\s+(?P<loser>[^|\n]{2,80}?(?:/|&)[^|\n]{2,80}?)\s+(?P<score>\d{1,2}\s*[-–]\s*\d{1,2}.*)$",
-            re.I,
-        ),
-        re.compile(
-            r"(?P<p1>[^|\n]{2,80}?(?:/|&)[^|\n]{2,80}?)\s+(?:vs\.?|v\.?)\s+(?P<p2>[^|\n]{2,80}?(?:/|&)[^|\n]{2,80}?).*?(?P<score>\d{1,2}\s*[-–]\s*\d{1,2}.*)$",
-            re.I,
-        ),
-    ]
+    for tag, body in snapshots:
+        lines = [re.sub(r"\s+", " ", x).strip() for x in body.splitlines()]
+        lines = [x for x in lines if x]
 
-    for i, ln in enumerate(lines):
-        low = ln.lower()
-
-        for pat, label in round_patterns:
-            if re.search(pat, low):
-                current_round = label
-                break
-
-        m = date_iso.search(ln)
-        if m:
-            current_date = f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
-        else:
-            m = date_dmy.search(ln)
-            if m:
-                current_date = f"{int(m.group(3)):04d}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
-
-        matched = False
-        for pat in pair_score_patterns:
-            pm = pat.search(ln)
-            if not pm:
-                continue
-
-            gd = pm.groupdict()
-            score_txt = gd.get("score", "")
-            sm = score_re.search(score_txt)
-            if not sm:
-                continue
-
-            sets = []
-            vals = sm.groups()
-            for a, b in zip(vals[0::2], vals[1::2]):
-                if a is not None and b is not None:
-                    sets.append((int(a), int(b)))
-            if len(sets) < 2:
-                continue
-
-            if "winner" in gd and gd.get("winner"):
-                winner = gd["winner"]
-                loser = gd["loser"]
-            else:
-                p1, p2 = gd["p1"], gd["p2"]
-                p1_sets = sum(1 for a,b in sets if a > b)
-                p2_sets = sum(1 for a,b in sets if b > a)
-                if p1_sets == p2_sets:
+        # Locate every line that is a known female-ranked player.
+        hits = []
+        for idx, line in enumerate(lines):
+            player = match_player(line)
+            if player:
+                # Same player can appear in a seed/duplicate adjacent DOM node.
+                if hits and hits[-1][0] == idx - 1 and hits[-1][1] == player:
                     continue
-                winner, loser = (p1, p2) if p1_sets > p2_sets else (p2, p1)
-                if p2_sets > p1_sets:
-                    sets = [(b,a) for a,b in sets]
+                hits.append((idx, player))
+
+        total_hits += len(hits)
+        if len(hits) < 4:
+            continue
+
+        round_name = _round_from_snapshot(f"{tag}\n{body[:1200]}", event)
+
+        # A match is four consecutive female-player hits in rendered order.
+        # We advance by one quartet only when a valid score layout is found;
+        # otherwise slide forward to tolerate duplicate draw content.
+        pos = 0
+        while pos + 3 < len(hits):
+            a_i, a = hits[pos]
+            b_i, b = hits[pos + 1]
+            c_i, c = hits[pos + 2]
+            d_i, d = hits[pos + 3]
+            next_i = hits[pos + 4][0] if pos + 4 < len(hits) else len(lines)
+
+            # Pair A scores sit after its second player and before pair B begins.
+            a_scores = score_numbers(lines[b_i + 1:c_i])
+
+            # Pair B scores sit after its second player and before next match.
+            b_scores = score_numbers(lines[d_i + 1:next_i])
+
+            # Winner marker location.
+            first_pair_text = " ".join(lines[a_i:c_i])
+            second_pair_text = " ".join(lines[c_i:next_i])
+            tick_a = "✓" in first_pair_text
+            tick_b = "✓" in second_pair_text
+
+            # Completed match: each pair needs at least two set scores.
+            sets_count = min(len(a_scores), len(b_scores), 3)
+
+            # Some FIP layouts put all score cells after all 4 names.
+            if sets_count < 2:
+                combined = score_numbers(lines[d_i + 1:next_i])
+                if len(combined) in {4, 6}:
+                    half = len(combined) // 2
+                    a_scores = combined[:half]
+                    b_scores = combined[half:]
+                    sets_count = min(len(a_scores), len(b_scores), 3)
+
+            if sets_count < 2:
+                pos += 1
+                continue
+
+            a_scores = a_scores[:sets_count]
+            b_scores = b_scores[:sets_count]
+
+            a_sets = sum(1 for x, y in zip(a_scores, b_scores) if x > y)
+            b_sets = sum(1 for x, y in zip(a_scores, b_scores) if y > x)
+
+            # Winner tick is authoritative when present; otherwise infer by sets.
+            if tick_a and not tick_b:
+                winner_side = "a"
+            elif tick_b and not tick_a:
+                winner_side = "b"
+            elif a_sets != b_sets:
+                winner_side = "a" if a_sets > b_sets else "b"
+            else:
+                pos += 1
+                continue
+
+            pair_a = f"{a.title()} / {b.title()}"
+            pair_b = f"{c.title()} / {d.title()}"
+
+            if winner_side == "a":
+                winner, loser = pair_a, pair_b
+                score = "  ".join(f"{x}-{y}" for x, y in zip(a_scores, b_scores))
+            else:
+                winner, loser = pair_b, pair_a
+                score = "  ".join(f"{y}-{x}" for x, y in zip(a_scores, b_scores))
 
             parsed.append({
-                "round": current_round,
-                "winner": re.sub(r"\s*&\s*", " / ", winner).strip(" -|"),
-                "loser": re.sub(r"\s*&\s*", " / ", loser).strip(" -|"),
-                "score": "  ".join(f"{a}-{b}" for a,b in sets),
-                "date": current_date,
+                "round": round_name,
+                "winner": winner,
+                "loser": loser,
+                "score": score,
+                "date": "",
             })
-            matched = True
-            break
 
-        if matched:
-            continue
+            pos += 4
 
-        # Second pass fallback: score line with nearby player lines.
-        sm = score_re.fullmatch(ln)
-        if sm and i >= 4:
-            vals = sm.groups()
-            sets = []
-            for a, b in zip(vals[0::2], vals[1::2]):
-                if a is not None and b is not None:
-                    sets.append((int(a), int(b)))
-            if len(sets) < 2:
-                continue
-
-            prev = [x for x in lines[max(0, i-8):i] if x]
-            # Exclude obvious headers.
-            players = []
-            for x in reversed(prev):
-                if re.search(r"\b(women|female|men|male|result|court|round|final|semi|quarter|qual|score)\b", x, re.I):
-                    continue
-                if re.search(r"\d{1,2}:\d{2}", x):
-                    continue
-                if score_re.search(x):
-                    continue
-                if len(x) < 2 or len(x) > 70:
-                    continue
-                if re.search(r"[A-Za-zÀ-ÿ]", x):
-                    players.append(x)
-                if len(players) >= 4:
-                    break
-
-            if len(players) >= 4:
-                players = list(reversed(players[:4]))
-                p1 = f"{players[0]} / {players[1]}"
-                p2 = f"{players[2]} / {players[3]}"
-                p1_sets = sum(1 for a,b in sets if a>b)
-                p2_sets = sum(1 for a,b in sets if b>a)
-                if p1_sets != p2_sets:
-                    if p1_sets > p2_sets:
-                        winner, loser = p1, p2
-                    else:
-                        winner, loser = p2, p1
-                        sets = [(b,a) for a,b in sets]
-                    parsed.append({
-                        "round": current_round,
-                        "winner": winner,
-                        "loser": loser,
-                        "score": "  ".join(f"{a}-{b}" for a,b in sets),
-                        "date": current_date,
-                    })
-
-    # Dedupe + sanity.
+    # Dedupe snapshots/days.
     valid = []
     seen = set()
     for item in parsed:
-        winner = re.sub(r"\s+", " ", item["winner"]).strip()
-        loser = re.sub(r"\s+", " ", item["loser"]).strip()
-        score = item["score"].strip()
-
-        if not winner or not loser or winner == loser:
-            continue
-        if "/" not in winner or "/" not in loser:
-            continue
-        if not re.search(r"\d+-\d+", score):
-            continue
-
-        key = (item["round"], winner.lower(), loser.lower(), score, item["date"])
+        key = (
+            item["round"],
+            item["winner"].casefold(),
+            item["loser"].casefold(),
+            item["score"],
+        )
         if key in seen:
             continue
         seen.add(key)
-
-        valid.append({
-            "round": item["round"],
-            "winner": winner,
-            "loser": loser,
-            "score": score,
-            "date": item["date"],
-        })
+        valid.append(item)
 
     valid.sort(
-        key=lambda x: (ROUND_ORDER.get(x["round"], 0), x.get("date", "")),
+        key=lambda x: ROUND_ORDER.get(x["round"], 0),
         reverse=True,
     )
 
     _LIVE_DEBUG_STATE.update({
         "browser": browser_diag,
-        "parser": "python-deterministic-v20",
+        "parser": "ranking-stream-v27",
+        "snapshots_seen": len(snapshots),
+        "female_player_hits": total_hits,
         "parsed_results": len(parsed),
         "valid_results": len(valid),
+        "ranking_players_seen": len(ranking_full),
         "source_chars": len(source),
         "groq_used": False,
     })
 
+    print(
+        "  live parser:",
+        f"snapshots={len(snapshots)}",
+        f"female_hits={total_hits}",
+        f"parsed={len(parsed)}",
+        f"valid={len(valid)}",
+    )
     return valid
 
 

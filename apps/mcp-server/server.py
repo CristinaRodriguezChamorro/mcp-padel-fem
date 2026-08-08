@@ -1,3 +1,4 @@
+from datetime import date
 import os
 import time
 import httpx
@@ -32,9 +33,19 @@ async def api_news():
     cached = cache_get("news", 30 * 60)
     if cached:
         return cached
-    data = await get_latest_news()
-    cache_set("news", data)
-    return data
+
+    try:
+        data = await get_latest_news()
+        cache_set("news", data)
+        return data
+    except Exception as exc:
+        print(f"  /api/news fatal error: {type(exc).__name__}: {exc}")
+        return {
+            "date": date.today().isoformat(),
+            "resumen_diario": [],
+            "error": True,
+            "message": "No se pudieron actualizar las noticias",
+        }
 
 
 @app.get("/api/ranking")
@@ -153,7 +164,7 @@ async def resumen_diario_padel_femenino():
 
 @app.get("/api/version")
 async def api_version():
-    return {"version": "v24-news-no-display-cap-2026-08-08"}
+    return {"version": "v27-live-ranking-stream-news-fixed-2026-08-08"}
 
 @app.get("/")
 async def index():
@@ -163,7 +174,7 @@ async def index():
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
-            "X-App-Version": "v24-news-no-display-cap-2026-08-08",
+            "X-App-Version": "v27-live-ranking-stream-news-fixed-2026-08-08",
         },
     )
 

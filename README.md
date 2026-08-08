@@ -179,3 +179,16 @@ Groq se usa únicamente como mejora editorial de Noticias. Si devuelve `429`:
 
 ### Número de noticias
 No existe un límite fijo de 4 noticias. Se muestran todas las noticias que superan el filtro de pádel femenino, ordenadas de más reciente a más antigua.
+
+
+### Parser de resultados FIP
+FIP renderiza nombres y juegos en celdas separadas, no como `6-3 6-4`.
+La extracción de `En juego` captura cada bloque de partido alrededor del símbolo de ganador `✓`, identifica las cuatro jugadoras mediante el ranking femenino y reconstruye el marcador set a set sin utilizar un LLM.
+
+
+### Corrección v26
+El fallback determinista de Noticias vuelve a incluir `_sentencias_completas`, que había desaparecido en una refactorización y provocaba `NameError` + HTTP 500. Además `/api/news` tiene protección final para que un fallo de procesamiento no tumbe la pestaña.
+
+
+### Corrección v27 de En juego
+El parser ya no depende de encontrar un marcador `6-3` ni de localizar el símbolo `✓` como nodo HTML. Recorre el texto realmente renderizado por FIP, identifica las jugadoras mediante el ranking femenino y reconstruye cada set a partir de las celdas numéricas situadas entre parejas.

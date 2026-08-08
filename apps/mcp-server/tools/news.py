@@ -408,6 +408,32 @@ Solo pádel femenino. No inventes datos ni menciones jugadores masculinos.
             return None
 
 
+
+def _sentencias_completas(texto: str) -> list[str]:
+    """
+    Separa el contenido en frases completas para construir el fallback de Noticias.
+    Nunca devuelve fragmentos truncados con "...".
+    """
+    texto = clean_text(texto or "")
+    if not texto:
+        return []
+
+    partes = re.split(r"(?<=[.!?])\s+", texto)
+    salida = []
+
+    for parte in partes:
+        parte = parte.strip()
+        if len(parte) < 25:
+            continue
+        if parte.endswith(("...", "…")):
+            continue
+        if parte[-1:] not in ".!?":
+            parte += "."
+        salida.append(parte)
+
+    return salida
+
+
 def _ranking_surnames_from_names(ranking_names: set[str]) -> set[str]:
     surnames = set()
     for full_name in ranking_names:
@@ -768,7 +794,12 @@ async def get_latest_news() -> dict:
             if art.get("url", "") in usados_urls:
                 continue
 
-            fallback = generar_fallback_sin_ia(art, ranking_names)
+            try:
+                fallback = generar_fallback_sin_ia(art, ranking_names)
+            except Exception as exc:
+                print(f"  fallback noticias error: {type(exc).__name__}: {exc}")
+                fallback = None
+
             if fallback:
                 noticias.append(fallback)
                 usados_urls.add(art.get("url", ""))
