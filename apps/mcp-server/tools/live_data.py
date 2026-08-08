@@ -2162,6 +2162,176 @@ def _annotate_result_rounds(results: list, next_match: dict | None, event: dict)
     return results
 
 
+def _pair_key(value: str) -> str:
+    """Canonical pair key, independent of accents/order spacing."""
+    parts = [
+        _norm_person_name(x)
+        for x in re.split(r"\s*/\s*", value or "")
+        if _norm_person_name(x)
+    ]
+    return " / ".join(parts)
+
+
+def _concrete_pair(value: str) -> bool:
+    """True only when a real pair is known, not a placeholder."""
+    key = _pair_key(value)
+    return bool(key and "confirmar" not in key and len(key.split("/")) >= 2)
+
+
+def _next_round_after(round_name: str) -> str | None:
+    chain = [
+        "Octavos de final",
+        "Cuartos de final",
+        "Semifinales",
+        "Final",
+    ]
+    try:
+        idx = chain.index(round_name)
+    except ValueError:
+        return None
+    return chain[idx + 1] if idx + 1 < len(chain) else None
+
+
+def _round_before(round_name: str) -> str | None:
+    chain = [
+        "Octavos de final",
+        "Cuartos de final",
+        "Semifinales",
+        "Final",
+    ]
+    try:
+        idx = chain.index(round_name)
+    except ValueError:
+        return None
+    return chain[idx - 1] if idx > 0 else None
+
+
+def _derive_next_match_from_bracket(results: list, event: dict) -> dict | None:
+    """
+    Deterministic fallback based on completed FIP results.
+
+    This avoids depending on FIP Order-of-Play DOM, which has proved unstable.
+
+    Example on semifinal day:
+      - 4 quarterfinal winners are known.
+      - 1 semifinal is already completed.
+      - The 2 quarterfinal winners not present in that completed semifinal
+        MUST be the remaining semifinal.
+
+    When the whole current round is complete, the winners form the next round.
+    """
+    if not results:
+        return None
+
+    stage = _stage_from_event(event)
+    if stage not in {"Cuartos de final", "Semifinales", "Final"}:
+        return None
+
+    current = [x for x in results if (x.get("round") or "") == stage]
+    capacity = _round_capacity(stage)
+
+    # If today's round is already complete, derive the next round from its winners.
+    if capacity and len(current) >= capacity:
+        next_round = _next_round_after(stage)
+        if not next_round:
+            return None
+
+        winners = []
+        seen = set()
+        for item in current:
+            pair = str(item.get("winner", "") or "").strip()
+            key = _pair_key(pair)
+            if _concrete_pair(pair) and key not in seen:
+                seen.add(key)
+                winners.append(pair)
+
+        if len(winners) >= 2:
+            tomorrow = date.today() + timedelta(days=1)
+            return {
+                "round": next_round,
+                "pair1": winners[0],
+                "pair2": winners[1],
+                "date": tomorrow.isoformat(),
+                "time": "",
+                "time_type": "unknown",
+                "when": "Mañana · horario por confirmar (hora de España)",
+                "iso_madrid": "",
+                "source": "cuadro FIP · ganadoras de la ronda anterior",
+                "derived_from_bracket": True,
+            }
+        return None
+
+    previous_round = _round_before(stage)
+    if not previous_round:
+        return None
+
+    previous = [x for x in results if (x.get("round") or "") == previous_round]
+    previous_capacity = _round_capacity(previous_round)
+    if previous_capacity and len(previous) < previous_capacity:
+        return None
+
+    prev_winners = []
+    seen = set()
+    for item in previous:
+        pair = str(item.get("winner", "") or "").strip()
+        key = _pair_key(pair)
+        if _concrete_pair(pair) and key not in seen:
+            seen.add(key)
+            prev_winners.append(pair)
+
+    if len(prev_winners) < 2:
+        return None
+
+    # Remove every pair that has already appeared in a completed current-round match.
+    used = set()
+    for item in current:
+        for field in ("winner", "loser"):
+            pair = str(item.get(field, "") or "").strip()
+            if _concrete_pair(pair):
+                used.add(_pair_key(pair))
+
+    remaining = [p for p in prev_winners if _pair_key(p) not in used]
+
+    # Best case: only two pairs remain -> the next match is unambiguous.
+    if len(remaining) == 2:
+        return {
+            "round": stage,
+            "pair1": remaining[0],
+            "pair2": remaining[1],
+            "date": date.today().isoformat(),
+            "time": "",
+            "time_type": "unknown",
+            "when": "Hoy · horario por confirmar (hora de España)",
+            "iso_madrid": "",
+            "source": "cuadro FIP · cruce restante",
+            "derived_from_bracket": True,
+        }
+
+    # If no current match has finished yet, bracket order is deterministic:
+    # QF1/QF2 feed SF1, QF3/QF4 feed SF2; same principle for later rounds.
+    if not current and len(prev_winners) >= 2:
+        pairings = [
+            (prev_winners[i], prev_winners[i + 1])
+            for i in range(0, len(prev_winners) - 1, 2)
+        ]
+        if pairings:
+            p1, p2 = pairings[0]
+            return {
+                "round": stage,
+                "pair1": p1,
+                "pair2": p2,
+                "date": date.today().isoformat(),
+                "time": "",
+                "time_type": "unknown",
+                "when": "Hoy · horario por confirmar (hora de España)",
+                "iso_madrid": "",
+                "source": "cuadro FIP · siguiente cruce",
+                "derived_from_bracket": True,
+            }
+
+    return None
+
+
 def _fallback_next_match(results: list, next_match: dict | None, event: dict) -> dict | None:
     """
     Si Order of Play no devuelve nada, la web sigue diciendo al menos:
@@ -2233,6 +2403,203 @@ def _player_schedule_profiles(names: list[str]) -> list[dict]:
             "aliases": sorted(aliases, key=len, reverse=True),
         })
     return out
+
+
+async def _scan_fip_schedule_frames(page, profiles: list[dict]) -> tuple[list[dict], list[dict]]:
+    """
+    FIP's Order of Play can render inside an iframe/widget rather than in the
+    event page DOM. Scan every frame, including cross-page iframe documents.
+    Returns (cards, diagnostics).
+    """
+    diagnostics = []
+    all_cards = []
+
+    parser_js = r"""
+    (profiles) => {
+      const norm=s=>(s||'')
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+        .toLowerCase().replace(/[^a-z0-9]+/g,' ')
+        .replace(/\s+/g,' ').trim();
+      const clean=s=>(s||'').replace(/\s+/g,' ').trim();
+
+      const matchPlayer = text => {
+        const n=norm(text);
+        if(!n || n.length<3)return null;
+        for(const p of profiles){
+          for(const a of p.aliases){
+            if(n===a || n.includes(a) || a.includes(n)){
+              if(Math.min(n.length,a.length)>=4)return p;
+            }
+          }
+        }
+        return null;
+      };
+
+      const visible=el=>{
+        const st=getComputedStyle(el);
+        const r=el.getBoundingClientRect();
+        return st.display!=='none' && st.visibility!=='hidden' &&
+               r.width>0 && r.height>0;
+      };
+
+      const all=Array.from(document.querySelectorAll('body *')).filter(visible);
+      const candidates=[];
+
+      for(const el of all){
+        const text=clean(el.innerText);
+        if(!text || text.length<28 || text.length>2200)continue;
+
+        // Match either explicit WOMEN/FEMALE or a 4-player card made entirely
+        // from known female ranking players.
+        const leaves=Array.from(el.querySelectorAll('*'))
+          .filter(x=>x.children.length===0 && visible(x))
+          .map(x=>{
+            const r=x.getBoundingClientRect();
+            return {
+              text:clean(x.textContent),
+              n:norm(x.textContent),
+              y:r.top+r.height/2,
+              x:r.left+r.width/2
+            };
+          })
+          .filter(x=>x.text);
+
+        const hits=[];
+        for(const leaf of leaves){
+          const p=matchPlayer(leaf.text);
+          if(p && !hits.some(h=>h.canonical===p.canonical)){
+            hits.push({...p,y:leaf.y,x:leaf.x,leafText:leaf.text});
+          }
+        }
+
+        const explicitWomen=/\b(women|female|femenin)\b/i.test(text);
+        if(!explicitWomen && hits.length!==4)continue;
+        if(hits.length<2 || hits.length>4)continue;
+
+        const scoreLeaves=leaves
+          .filter(x=>/^\d{1,2}$/.test(x.text))
+          .map(x=>({...x,value:Number(x.text)}))
+          .filter(x=>x.value>=0 && x.value<=20);
+
+        const completed=/\b(completed|finished|finalizado|finalizada)\b/i.test(text);
+        const explicitLive=/\b(live|in progress|playing|on court|directo|en juego|en curso)\b/i.test(text);
+
+        const status=completed
+          ? 'completed'
+          : ((explicitLive || scoreLeaves.length>=2) ? 'live' : 'upcoming');
+
+        let round='Partido';
+        if(/\bsemi[- ]?finals?\b/i.test(text))round='Semifinales';
+        else if(/\bquarter[- ]?finals?\b/i.test(text))round='Cuartos de final';
+        else if(/\bround of 16\b|\boctav/i.test(text))round='Octavos de final';
+        else if(/\bfinal\b/i.test(text))round='Final';
+        else if(/\bsecond round\b|\b2nd round\b/i.test(text))round='Segunda ronda';
+        else if(/\bfirst round\b|\b1st round\b/i.test(text))round='Primera ronda';
+        else if(/\bqual/i.test(text))round='Clasificación';
+
+        candidates.push({el,text,hits,scoreLeaves,status,round});
+      }
+
+      const minimal=candidates.filter(c=>
+        !candidates.some(o=>o!==c && c.el.contains(o.el))
+      );
+
+      const out=[];
+      const seen=new Set();
+
+      for(const c of minimal){
+        const ordered=[...c.hits].sort((a,b)=>a.y-b.y || a.x-b.x);
+
+        let teamA=[],teamB=[];
+        if(ordered.length>=4){
+          teamA=ordered.slice(0,2);
+          teamB=ordered.slice(2,4);
+        }else{
+          teamA=ordered.slice(0,2);
+        }
+
+        const pair1=teamA.map(x=>x.display).join(' / ');
+        const pair2=teamB.length
+          ? teamB.map(x=>x.display).join(' / ')
+          : 'Pareja por confirmar';
+
+        let aScores=[],bScores=[];
+        if(teamA.length && teamB.length && c.scoreLeaves.length){
+          const ay=teamA.reduce((a,x)=>a+x.y,0)/teamA.length;
+          const by=teamB.reduce((a,x)=>a+x.y,0)/teamB.length;
+
+          aScores=c.scoreLeaves
+            .filter(sc=>Math.abs(sc.y-ay)<=Math.abs(sc.y-by))
+            .sort((a,b)=>a.x-b.x)
+            .map(sc=>sc.value);
+
+          bScores=c.scoreLeaves
+            .filter(sc=>Math.abs(sc.y-by)<Math.abs(sc.y-ay))
+            .sort((a,b)=>a.x-b.x)
+            .map(sc=>sc.value);
+        }
+
+        const key=[c.round,pair1,pair2,c.status,aScores.join(','),bScores.join(',')].join('|');
+        if(seen.has(key))continue;
+        seen.add(key);
+
+        out.push({
+          round:c.round,
+          pair1,pair2,
+          status:c.status,
+          team_a_scores:aScores,
+          team_b_scores:bScores,
+          raw:c.text.slice(0,1400)
+        });
+      }
+
+      return out;
+    }
+    """
+
+    for idx, frame in enumerate(page.frames):
+        try:
+            body = re.sub(r"\s+", " ", (await frame.locator("body").inner_text()).strip())
+        except Exception:
+            body = ""
+
+        diag = {
+            "index": idx,
+            "url": frame.url,
+            "chars": len(body),
+            "women": bool(re.search(r"\b(women|female|femenin)", body, re.I)),
+            "completed": "completed" in body.lower(),
+            "semifinals": "semifinals" in body.lower(),
+        }
+
+        try:
+            cards = await frame.evaluate(parser_js, profiles)
+        except Exception as exc:
+            cards = []
+            diag["error"] = f"{type(exc).__name__}: {exc}"
+
+        diag["cards"] = len(cards or [])
+        diagnostics.append(diag)
+        all_cards.extend(cards or [])
+
+    # Dedupe cards across parent frame + iframe(s).
+    deduped = []
+    seen = set()
+    for card in all_cards:
+        key = (
+            card.get("round",""),
+            card.get("pair1",""),
+            card.get("pair2",""),
+            card.get("status",""),
+            tuple(card.get("team_a_scores") or []),
+            tuple(card.get("team_b_scores") or []),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(card)
+
+    return deduped, diagnostics
 
 
 async def _extract_fip_today_womens_cards(event: dict) -> list[dict]:
@@ -2389,173 +2756,25 @@ async def _extract_fip_today_womens_cards(event: dict) -> list[dict]:
                     f"completed={'completed' in probe_text.lower()}",
                     f"semifinals={'semifinals' in probe_text.lower()}",
                     f"chars={len(probe_text)}",
+                    f"frames={len(page.frames)}",
                 )
             except Exception:
                 pass
 
-            cards = await page.evaluate(
-                r"""
-                (profiles) => {
-                  const norm=s=>(s||'')
-                    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-                    .toLowerCase().replace(/[^a-z0-9]+/g,' ')
-                    .replace(/\s+/g,' ').trim();
-                  const clean=s=>(s||'').replace(/\s+/g,' ').trim();
+            cards, frame_diag = await _scan_fip_schedule_frames(page, profiles)
 
-                  const matchPlayer = text => {
-                    const n=norm(text);
-                    if(!n || n.length<3)return null;
-                    for(const p of profiles){
-                      for(const a of p.aliases){
-                        if(n===a || n.includes(a) || a.includes(n)){
-                          // Avoid matching a single initial / tiny fragment.
-                          if(Math.min(n.length,a.length) >= 4)return p;
-                        }
-                      }
-                    }
-                    return null;
-                  };
+            for fd in frame_diag:
+                print(
+                    "  FIP frame probe:",
+                    f"idx={fd.get('index')}",
+                    f"cards={fd.get('cards',0)}",
+                    f"women={fd.get('women')}",
+                    f"completed={fd.get('completed')}",
+                    f"semifinals={fd.get('semifinals')}",
+                    f"chars={fd.get('chars',0)}",
+                    f"url={fd.get('url','')[:180]}",
+                )
 
-                  const visible=el=>{
-                    const st=getComputedStyle(el);
-                    const r=el.getBoundingClientRect();
-                    return st.display!=='none' && st.visibility!=='hidden' &&
-                           r.width>0 && r.height>0;
-                  };
-
-                  const all=Array.from(document.querySelectorAll('body *'))
-                    .filter(visible);
-
-                  const candidates=[];
-
-                  for(const el of all){
-                    const text=clean(el.innerText);
-                    if(!text || text.length<35 || text.length>1800)continue;
-
-                    // We only want women's match cards.
-                    if(!/\b(women|female|femenin)\b/i.test(text))continue;
-
-                    const leaves=Array.from(el.querySelectorAll('*'))
-                      .filter(x=>x.children.length===0 && visible(x))
-                      .map(x=>{
-                        const r=x.getBoundingClientRect();
-                        return {
-                          text:clean(x.textContent),
-                          n:norm(x.textContent),
-                          y:r.top+r.height/2,
-                          x:r.left+r.width/2
-                        };
-                      })
-                      .filter(x=>x.text);
-
-                    const hits=[];
-                    for(const leaf of leaves){
-                      const p=matchPlayer(leaf.text);
-                      if(p && !hits.some(h=>h.canonical===p.canonical)){
-                        hits.push({...p,y:leaf.y,x:leaf.x,leafText:leaf.text});
-                      }
-                    }
-
-                    // Completed/live cards normally have 4 players.
-                    // Upcoming cards can temporarily expose only one known pair.
-                    if(hits.length < 2 || hits.length > 4)continue;
-
-                    const scoreLeaves=leaves
-                      .filter(x=>/^\d{1,2}$/.test(x.text))
-                      .map(x=>({...x,value:Number(x.text)}))
-                      .filter(x=>x.value>=0 && x.value<=20);
-
-                    const completed=/\b(completed|finished|finalizado|finalizada)\b/i.test(text);
-                    const explicitLive=/\b(live|in progress|playing|on court|directo|en juego|en curso)\b/i.test(text);
-
-                    // A non-completed card with score cells is also in progress.
-                    const status = completed
-                      ? 'completed'
-                      : ((explicitLive || scoreLeaves.length>=2) ? 'live' : 'upcoming');
-
-                    let round='Partido';
-                    if(/\bsemi[- ]?finals?\b/i.test(text))round='Semifinales';
-                    else if(/\bquarter[- ]?finals?\b/i.test(text))round='Cuartos de final';
-                    else if(/\bround of 16\b|\boctav/i.test(text))round='Octavos de final';
-                    else if(/\bfinal\b/i.test(text))round='Final';
-                    else if(/\bsecond round\b|\b2nd round\b/i.test(text))round='Segunda ronda';
-                    else if(/\bfirst round\b|\b1st round\b/i.test(text))round='Primera ronda';
-                    else if(/\bqual/i.test(text))round='Clasificación';
-
-                    // Smallest player-containing card wins later.
-                    candidates.push({
-                      el,text,hits,scoreLeaves,status,round,
-                      area:el.getBoundingClientRect().width*el.getBoundingClientRect().height
-                    });
-                  }
-
-                  // Keep minimal DOM cards, not page-level wrappers.
-                  const minimal=candidates.filter(c=>
-                    !candidates.some(o=>o!==c && c.el.contains(o.el))
-                  );
-
-                  const out=[];
-                  const seen=new Set();
-
-                  for(const c of minimal){
-                    const ordered=[...c.hits].sort((a,b)=>a.y-b.y || a.x-b.x);
-
-                    // Split the players into two teams by vertical position.
-                    // With 4 players: first 2 vs last 2.
-                    // With 2 players: known pair vs TBD.
-                    let teamA=[], teamB=[];
-                    if(ordered.length>=4){
-                      teamA=ordered.slice(0,2);
-                      teamB=ordered.slice(2,4);
-                    }else{
-                      teamA=ordered.slice(0,2);
-                    }
-
-                    const pair1=teamA.map(x=>x.display).join(' / ');
-                    const pair2=teamB.length
-                      ? teamB.map(x=>x.display).join(' / ')
-                      : 'Pareja por confirmar';
-
-                    // Associate scores to the closest team vertically.
-                    let aScores=[], bScores=[];
-                    if(teamA.length && teamB.length && c.scoreLeaves.length){
-                      const ay=teamA.reduce((a,x)=>a+x.y,0)/teamA.length;
-                      const by=teamB.reduce((a,x)=>a+x.y,0)/teamB.length;
-                      for(const sc of c.scoreLeaves){
-                        if(Math.abs(sc.y-ay)<=Math.abs(sc.y-by))aScores.push(sc.value);
-                        else bScores.push(sc.value);
-                      }
-                      // DOM x-position gives set order.
-                      const sortByX=(vals,teamY)=>c.scoreLeaves
-                        .filter(sc=>{
-                          const otherY=teamY===ay?by:ay;
-                          return Math.abs(sc.y-teamY)<=Math.abs(sc.y-otherY);
-                        })
-                        .sort((a,b)=>a.x-b.x)
-                        .map(sc=>sc.value);
-                      aScores=sortByX(aScores,ay);
-                      bScores=sortByX(bScores,by);
-                    }
-
-                    const key=[c.round,pair1,pair2,c.status,aScores.join(','),bScores.join(',')].join('|');
-                    if(seen.has(key))continue;
-                    seen.add(key);
-
-                    out.push({
-                      round:c.round,
-                      pair1,pair2,
-                      status:c.status,
-                      team_a_scores:aScores,
-                      team_b_scores:bScores,
-                      raw:c.text.slice(0,1200)
-                    });
-                  }
-
-                  return out;
-                }
-                """,
-                profiles,
-            )
 
             await browser.close()
             browser = None
@@ -2878,96 +3097,84 @@ async def _extract_current_womens_match(event: dict) -> dict | None:
 
 async def get_tournament_now(gender: str = "female") -> dict:
     """
-    Torneo actual + resultados femeninos acumulados mientras el torneo está en curso.
-    No se espera a la final: cada partido terminado se muestra en cuanto FIP lo publica.
+    Stable En juego pipeline.
+
+    Source of truth:
+      1. v39 completed-results parser (proven stable).
+      2. FIP Live Score only if it explicitly confirms a live women's match.
+      3. Official Order of Play when it yields a concrete next match.
+      4. Deterministic bracket inference from completed results.
+
+    We no longer depend on the fragile Order-of-Play card/iframe DOM for the
+    basic top card, so En juego remains useful even when FIP changes that UI.
     """
     today_str = date.today().strftime("%d/%m/%Y")
     event = await _get_official_live_event()
+
     if not event:
         return {
-            "active": False, "name": "", "place": "", "dates": "",
-            "watch": [], "results": [], "next_match": None, "updated": today_str,
+            "active": False,
+            "name": "",
+            "place": "",
+            "dates": "",
+            "watch": [],
+            "results": [],
+            "next_match": None,
+            "current_match": None,
+            "updated": today_str,
             "gender": gender,
-            "source": "FIP", "source_url": FIP_PREMIER_CALENDAR_URL.format(year=date.today().year),
+            "source": "FIP",
+            "source_url": FIP_PREMIER_CALENDAR_URL.format(year=date.today().year),
         }
+
+    female = gender in {"female", "women", "woman"}
 
     parts = await asyncio.gather(
         _get_watch_official(),
         _extract_official_results(event, gender),
-        _extract_next_womens_match(event) if gender in {"female", "women", "woman"} else asyncio.sleep(0, result=None),
-        _extract_fip_today_womens_cards(event) if gender in {"female", "women", "woman"} else asyncio.sleep(0, result=[]),
+        _extract_next_womens_match(event) if female else asyncio.sleep(0, result=None),
+        _extract_current_womens_match(event) if female else asyncio.sleep(0, result=None),
         return_exceptions=True,
     )
 
-    watch, results, next_match, today_cards = parts
-    current_match = None
+    watch, results, oop_next, current_match = parts
 
     if isinstance(watch, Exception):
         print(f"  live watch error: {watch}")
         watch = []
+
     if isinstance(results, Exception):
         print(f"  live results error: {results}")
         results = []
-    if isinstance(next_match, Exception):
-        print(f"  live next-match error: {next_match}")
-        next_match = None
-    if isinstance(today_cards, Exception):
-        print(f"  FIP today-cards error: {today_cards}")
-        today_cards = []
 
-    today_cards = today_cards or []
+    if isinstance(oop_next, Exception):
+        print(f"  live next-match error: {oop_next}")
+        oop_next = None
 
-    # 1) Merge today's completed FIP cards into historical results immediately.
-    for card in today_cards:
-        completed = _completed_card_to_result(card)
-        if completed:
-            results = list(results or [])
-            key = (
-                completed["winner"].casefold(),
-                completed["loser"].casefold(),
-                completed["score"],
-            )
-            existing = {
-                (
-                    str(x.get("winner","")).casefold(),
-                    str(x.get("loser","")).casefold(),
-                    str(x.get("score","")),
-                )
-                for x in results
-            }
-            if key not in existing:
-                results.append(completed)
-                print(
-                    "  FIP completed card merged:",
-                    completed["round"],
-                    completed["winner"],
-                    completed["score"],
-                )
+    if isinstance(current_match, Exception):
+        print(f"  current live-match error: {current_match}")
+        current_match = None
 
-    # 2) Prefer an actual FIP live card.
-    live_cards = [x for x in today_cards if x.get("status")=="live"]
-    if live_cards:
-        current_match = _card_to_top_match(live_cards[0])
-    else:
-        # Keep the older Live Score probe only as fallback.
-        current_match = await _extract_current_womens_match(event)
+    # First label all v39 results using today's stage.
+    # If OOP provides a round, it improves the annotation, but results do not depend on it.
+    results = _annotate_result_rounds(results or [], oop_next, event)
 
-    # 3) If no live match, prefer today's next known FIP card.
-    if not current_match:
-        upcoming_cards = [x for x in today_cards if x.get("status")=="upcoming"]
-        if upcoming_cards:
-            fip_next = _card_to_top_match(upcoming_cards[0])
-            if fip_next:
-                # Preserve a known OOP time if the older parser had one.
-                if next_match and next_match.get("when") and next_match.get("when")!="Horario por confirmar":
-                    fip_next["when"] = next_match.get("when")
-                    fip_next["iso_madrid"] = next_match.get("iso_madrid","")
-                next_match = fip_next
+    # Build a deterministic next match from the actual completed bracket.
+    bracket_next = _derive_next_match_from_bracket(results, event)
 
-    # IMPORTANT: extractor v39 remains untouched.
-    # Round labels and next-match fallback are applied only AFTER extraction.
-    results = _annotate_result_rounds(results or [], next_match, event)
-    next_match = _fallback_next_match(results, next_match, event)
+    # Prefer OOP only when it has REAL pairs; otherwise bracket-derived pairs are better.
+    next_match = None
+    if isinstance(oop_next, dict):
+        p1 = str(oop_next.get("pair1", "") or "")
+        p2 = str(oop_next.get("pair2", "") or "")
+        if _concrete_pair(p1) and _concrete_pair(p2):
+            next_match = oop_next
+
+    if not next_match and bracket_next:
+        next_match = bracket_next
+
+    if not next_match:
+        next_match = _fallback_next_match(results, oop_next, event)
 
     normalized_results = []
     for result in (results or []):
@@ -2978,20 +3185,36 @@ async def get_tournament_now(gender: str = "female") -> dict:
     normalized_next = _normalize_next_match(next_match)
     normalized_current = current_match if isinstance(current_match, dict) else None
 
-    _LIVE_DEBUG_STATE["today_cards"] = {
-        "total": len(today_cards),
-        "completed": len([x for x in today_cards if x.get("status")=="completed"]),
-        "live": len([x for x in today_cards if x.get("status")=="live"]),
-        "upcoming": len([x for x in today_cards if x.get("status")=="upcoming"]),
+    # Extra UX detail: if the pair is known from the bracket but FIP hasn't
+    # published an exact time, explain why it is still useful.
+    if normalized_next and isinstance(next_match, dict) and next_match.get("derived_from_bracket"):
+        normalized_next["status_detail"] = (
+            "Cruce calculado a partir del cuadro oficial FIP. "
+            "La hora exacta se actualizará cuando FIP la publique."
+        )
+
+    _LIVE_DEBUG_STATE["stable_top_card"] = {
+        "mode": "live" if normalized_current else ("next" if normalized_next else "none"),
+        "next_source": (next_match or {}).get("source", ""),
+        "stage_today": _stage_from_event(event),
+        "completed_current_round": len([
+            x for x in (results or [])
+            if x.get("round") == _stage_from_event(event)
+        ]),
+        "current_pair1": (normalized_current or {}).get("pair1", ""),
+        "current_pair2": (normalized_current or {}).get("pair2", ""),
+        "next_pair1": (normalized_next or {}).get("pair1", ""),
+        "next_pair2": (normalized_next or {}).get("pair2", ""),
     }
 
-    _LIVE_DEBUG_STATE["top_card"] = {
-        "mode": "live" if normalized_current else ("next" if normalized_next else "none"),
-        "current_pair1": (normalized_current or {}).get("pair1",""),
-        "current_pair2": (normalized_current or {}).get("pair2",""),
-        "next_pair1": (normalized_next or {}).get("pair1",""),
-        "next_pair2": (normalized_next or {}).get("pair2",""),
-    }
+    print(
+        "  live stable:",
+        f"stage={_stage_from_event(event)}",
+        f"results={len(normalized_results)}",
+        f"current={'yes' if normalized_current else 'no'}",
+        f"next={(normalized_next or {}).get('pair1','')} vs {(normalized_next or {}).get('pair2','')}",
+        f"source={(next_match or {}).get('source','')}",
+    )
 
     return {
         "active": True,
