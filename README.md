@@ -154,3 +154,10 @@ La sección de resultados es determinista:
 `FIP → Playwright/HTTP → parser Python → /api/live → frontend`
 
 Los marcadores, rondas y próximo partido no dependen de cuotas ni disponibilidad de un modelo de lenguaje.
+
+
+### Railway / Playwright
+Chromium se instala en `/ms-playwright` mediante `PLAYWRIGHT_BROWSERS_PATH`, de forma que el usuario no-root que ejecuta la aplicación puede encontrar el navegador.
+
+### Resiliencia de Noticias
+Groq sigue generando el titular-resumen y la síntesis cuando está disponible. Si devuelve `429`, Noticias no queda vacía: se usa un fallback determinista basado únicamente en artículos cuyo titular ya es inequívocamente femenino y en frases completas del contenido filtrado.

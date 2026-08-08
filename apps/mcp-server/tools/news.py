@@ -343,6 +343,80 @@ Reglas:
             return None
 
 
+
+def _sentencias_completas(texto: str) -> list[str]:
+    """Devuelve frases completas y legibles, nunca texto cortado."""
+    texto = clean_text(texto or "")
+    if not texto:
+        return []
+
+    partes = re.split(r"(?<=[.!?])\s+", texto)
+    salida = []
+    for parte in partes:
+        parte = parte.strip()
+        if len(parte) < 35:
+            continue
+        if parte.endswith(("...", "…")):
+            continue
+        if parte[-1:] not in ".!?":
+            parte += "."
+        salida.append(parte)
+    return salida
+
+
+def _titulo_pasa_filtro(titulo: str, ranking_names: set[str]) -> bool:
+    """
+    El fallback sin IA solo usa el titular original si el TITULAR por sí solo
+    demuestra que la noticia es femenina. Así nunca publicamos como fallback
+    un titular claramente masculino cuyo cuerpo mencione de pasada a mujeres.
+    """
+    return es_noticia_femenina(titulo, "", ranking_names)
+
+
+def generar_fallback_sin_ia(art: dict, ranking_names: set[str]) -> dict | None:
+    """
+    Fallback determinista para cuando Groq devuelve 429.
+
+    - Solo acepta artículos cuyo TITULAR ya pasa el filtro femenino.
+    - El resumen se construye con 2-3 frases COMPLETAS del contenido femenino.
+    - Nunca recorta texto con "...".
+    - Conserva la fecha real.
+    """
+    titulo = clean_text(art.get("titulo", ""))
+    if not titulo or not _titulo_pasa_filtro(titulo, ranking_names):
+        return None
+
+    frases = _sentencias_completas(art.get("texto", ""))
+    if not frases:
+        return None
+
+    # 2-3 frases; si solo hay una frase completa, no la publicamos como "resumen".
+    if len(frases) < 2:
+        return None
+
+    resumen = " ".join(frases[:3])
+    if len(resumen) > 650:
+        # No cortar a mitad: reducimos a dos frases completas.
+        resumen = " ".join(frases[:2])
+
+    url = art.get("url", "")
+    fuentes = []
+    if url:
+        fuentes.append({
+            "domain": urlparse(url).netloc.replace("www.", ""),
+            "titulo": titulo,
+            "url": url,
+        })
+
+    return {
+        "titular": titulo,
+        "resumen": resumen,
+        "fecha": art.get("published_date") or datetime.date.today().isoformat(),
+        "fuentes": fuentes,
+        "generated_by": "deterministic-fallback",
+    }
+
+
 def agrupar(articulos: list) -> list[list]:
     grupos = []
     usados = set()
@@ -515,7 +589,28 @@ async def get_latest_news() -> dict:
                 if item and len(noticias) < 4:
                     noticias.append(item)
 
-    # Si el modelo no puede producir un resumen fiable, esa noticia no se publica.
+    # Si Groq está sin cuota (429) o no genera suficiente contenido,
+    # rellenamos con resúmenes deterministas de artículos claramente femeninos.
+    # De esta forma Noticias NO desaparece por una dependencia externa.
+    if len(noticias) < min(4, len(femeninos)):
+        usados_urls = {
+            f.get("url", "")
+            for noticia in noticias
+            for f in noticia.get("fuentes", [])
+        }
+
+        for art in femeninos:
+            if len(noticias) >= 4:
+                break
+            if art.get("url", "") in usados_urls:
+                continue
+
+            fallback = generar_fallback_sin_ia(art, ranking_names)
+            if fallback:
+                noticias.append(fallback)
+                usados_urls.add(art.get("url", ""))
+
+        print(f"Noticias tras fallback determinista: {len(noticias)}")
 
     return {
         "date": datetime.date.today().isoformat(),
