@@ -933,31 +933,21 @@ def _norm_person_name(value: str) -> str:
 
 async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
     """
-    Extrae partidos femeninos directamente del DOM renderizado de FIP.
+    EN JUEGO ONLY — v33
 
-    v29 confirmó que la página sí contiene jugadoras:
-      verified=True, visible_hits=100
-    pero el parser lineal no encontró marcadores:
-      parsed=0
+    Flujo:
+      1) leer TODOS los bloques de resultados que FIP renderiza;
+      2) NO filtrar género durante la lectura;
+      3) devolver nombres/celdas de score en bruto;
+      4) el filtro femenino se aplica DESPUÉS en Python.
 
-    Eso significa que el problema ya no es el selector Female, sino la estructura
-    del DOM. FIP no coloca necesariamente "jugadora jugadora 6 6 jugadora jugadora 3 4"
-    en un stream lineal predecible.
-
-    v30 localiza CONTENEDORES DE PARTIDO:
-    - exactamente 4 jugadoras del ranking femenino;
-    - 4-8 celdas numéricas de score;
-    - el contenedor más pequeño posible;
-    y devuelve cada partido como JSON estructurado.
+    No se pulsa Female y no se usa Groq.
     """
     diag = {
         "playwright": False,
-        "results_clicked": False,
-        "female_verified": False,
-        "visible_female_hits": 0,
-        "match_containers": 0,
-        "candidate_containers": 0,
-        "source_mode": "structured-dom",
+        "raw_blocks": 0,
+        "states_scanned": 0,
+        "source_mode": "read-all-organize-filter",
     }
 
     if async_playwright is None:
@@ -967,16 +957,8 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
     if not url:
         return "", diag
 
-    try:
-        ranking_names = await get_womens_ranking_names(limit=200)
-    except Exception:
-        ranking_names = []
-
-    ranking_norm = [_norm_person_name(x) for x in ranking_names if x]
-    if not ranking_norm:
-        return "", diag
-
     browser = None
+    raw_blocks = []
 
     try:
         async with async_playwright() as p:
@@ -991,206 +973,69 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                 locale="en-US",
             )
 
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            results_url = url + ("&" if "?" in url else "?") + "tab=Results"
+            await page.goto(results_url, wait_until="domcontentloaded", timeout=45000)
             await page.wait_for_timeout(1800)
 
-            # Activate Results as robustly as possible.
+            # Abrir Results, sin tocar Male/Female.
             for label in ("Results", "Resultados"):
                 try:
                     loc = page.get_by_text(label, exact=True).first
                     if await loc.count():
                         await loc.click(force=True, timeout=2500)
-                        await page.wait_for_timeout(1000)
-                        diag["results_clicked"] = True
-                        break
-                except Exception:
-                    pass
-
-            # Try Female, but matching containers against the women's ranking means
-            # we no longer depend on the visual switch being perfect.
-            for label in ("Female", "Women", "Femenino", "Femenina"):
-                try:
-                    loc = page.get_by_text(label, exact=True).first
-                    if await loc.count():
-                        await loc.click(force=True, timeout=1800)
                         await page.wait_for_timeout(900)
                         break
                 except Exception:
                     pass
 
-            # Count visible women.
-            try:
-                body = await page.locator("body").inner_text(timeout=6000)
-            except Exception:
-                body = ""
-
-            body_norm = _norm_person_name(body)
-            diag["visible_female_hits"] = len({
-                name for name in ranking_norm
-                if name and f" {name} " in f" {body_norm} "
-            })
-            diag["female_verified"] = diag["visible_female_hits"] >= 4
-
-            # Discover smallest plausible match containers in rendered DOM.
-            # Pass the normalized ranking into JS.
-            structured = await page.evaluate(
-                r"""
-                (ranking) => {
-                  const norm = (s) => (s || '')
-                    .normalize('NFD')
-                    .replace(/[\u0300-\u036f]/g, '')
-                    .toLowerCase()
-                    .replace(/[^a-z0-9]+/g, ' ')
-                    .replace(/\s+/g, ' ')
-                    .trim();
-
-                  const ranked = ranking.filter(Boolean);
-                  const rankSet = new Set(ranked);
-
-                  const playerHitsIn = (el) => {
-                    const text = ' ' + norm(el.innerText || '') + ' ';
-                    const hits = [];
-                    for (const name of ranked) {
-                      if (text.includes(' ' + name + ' ')) hits.push(name);
-                    }
-                    return [...new Set(hits)];
-                  };
-
-                  const scoreLeavesIn = (el) => {
-                    const leaves = Array.from(el.querySelectorAll('*'))
-                      .filter(x => x.children.length === 0)
-                      .map(x => (x.textContent || '').trim())
-                      .filter(x => /^\d{1,2}$/.test(x))
-                      .map(Number)
-                      .filter(n => n >= 0 && n <= 20);
-                    return leaves;
-                  };
-
-                  const all = Array.from(document.querySelectorAll('body *'));
-                  const candidates = [];
-
-                  for (const el of all) {
-                    const txt = (el.innerText || '').trim();
-                    if (!txt || txt.length < 20 || txt.length > 1200) continue;
-
-                    const players = playerHitsIn(el);
-                    if (players.length !== 4) continue;
-
-                    const scores = scoreLeavesIn(el);
-                    if (scores.length < 4 || scores.length > 10) continue;
-
-                    candidates.push({
-                      el,
-                      players,
-                      scores,
-                      text: txt
-                    });
-                  }
-
-                  // Keep smallest containers only:
-                  // discard a candidate if it contains another candidate node.
-                  const minimal = candidates.filter(c =>
-                    !candidates.some(other => other !== c && c.el.contains(other.el))
-                  );
-
-                  const out = [];
-                  const seen = new Set();
-
-                  for (const c of minimal) {
-                    // Preserve DOM order of players by locating the first descendant
-                    // whose text is an exact/near-exact ranked name.
-                    const playerNodes = Array.from(c.el.querySelectorAll('*'))
-                      .filter(x => x.children.length === 0)
-                      .map(x => ({el:x, text:(x.textContent||'').trim(), n:norm(x.textContent||'')}))
-                      .filter(x => ranked.some(r => x.n === r || x.n.includes(r)))
-                      .map(x => {
-                        const match = ranked.find(r => x.n === r) ||
-                                      ranked.find(r => x.n.includes(r));
-                        return {name: match, node: x.el};
-                      });
-
-                    const orderedPlayers = [];
-                    for (const p of playerNodes) {
-                      if (p.name && !orderedPlayers.includes(p.name)) orderedPlayers.push(p.name);
-                    }
-
-                    if (orderedPlayers.length !== 4) continue;
-
-                    // Collect score leaves in DOM order.
-                    const scoreNodes = Array.from(c.el.querySelectorAll('*'))
-                      .filter(x => x.children.length === 0)
-                      .map(x => (x.textContent||'').trim())
-                      .filter(x => /^\d{1,2}$/.test(x))
-                      .map(Number)
-                      .filter(n => n >= 0 && n <= 20);
-
-                    if (scoreNodes.length < 4) continue;
-
-                    const key = orderedPlayers.join('|') + '::' + scoreNodes.join(',');
-                    if (seen.has(key)) continue;
-                    seen.add(key);
-
-                    out.push({
-                      players: orderedPlayers,
-                      scores: scoreNodes,
-                      text: c.text.slice(0, 1000),
-                      html: c.el.outerHTML.slice(0, 5000)
-                    });
-                  }
-
-                  return {
-                    candidates: candidates.length,
-                    matches: out
-                  };
-                }
-                """,
-                ranking_norm,
-            )
-
-            diag["candidate_containers"] = int(structured.get("candidates", 0))
-            matches = structured.get("matches", []) or []
-            diag["match_containers"] = len(matches)
-
-            # Try date controls if current day has few/no completed matches.
-            # Capture and merge containers from each state.
-            merged = list(matches)
-            seen_match_keys = {
-                "|".join(m.get("players", [])) + "::" + ",".join(map(str, m.get("scores", [])))
-                for m in merged
-            }
-
-            async def collect_state():
+            async def collect_state(tag: str):
+                diag["states_scanned"] += 1
                 try:
-                    state = await page.evaluate(
+                    data = await page.evaluate(
                         r"""
-                        (ranking) => {
-                          const norm = (s) => (s || '')
-                            .normalize('NFD')
-                            .replace(/[\u0300-\u036f]/g, '')
-                            .toLowerCase()
-                            .replace(/[^a-z0-9]+/g, ' ')
-                            .replace(/\s+/g, ' ')
-                            .trim();
-                          const ranked = ranking.filter(Boolean);
+                        (tag) => {
+                          const clean = s => (s || '').replace(/\s+/g,' ').trim();
                           const all = Array.from(document.querySelectorAll('body *'));
                           const candidates = [];
 
-                          for (const el of all) {
-                            const txt = (el.innerText || '').trim();
-                            if (!txt || txt.length < 20 || txt.length > 1200) continue;
-                            const nt = ' ' + norm(txt) + ' ';
-                            const players = ranked.filter(r => nt.includes(' ' + r + ' '));
-                            if ([...new Set(players)].length !== 4) continue;
+                          const leafNodes = el => Array.from(el.querySelectorAll('*'))
+                            .filter(x => x.children.length === 0);
 
-                            const scores = Array.from(el.querySelectorAll('*'))
-                              .filter(x => x.children.length === 0)
-                              .map(x => (x.textContent||'').trim())
+                          for (const el of all) {
+                            const text = clean(el.innerText);
+                            if (!text || text.length < 18 || text.length > 1800) continue;
+
+                            const leaves = leafNodes(el);
+                            if (!leaves.length) continue;
+
+                            // Marcadores: valores numéricos que aparecen como celdas.
+                            const scoreCells = leaves
+                              .map(x => clean(x.textContent))
                               .filter(x => /^\d{1,2}$/.test(x))
                               .map(Number)
                               .filter(n => n >= 0 && n <= 20);
 
-                            if (scores.length < 4 || scores.length > 10) continue;
-                            candidates.push({el, players:[...new Set(players)], scores, text:txt});
+                            if (scoreCells.length < 4 || scoreCells.length > 12) continue;
+
+                            // Leemos nombres SIN saber todavía si son hombres o mujeres.
+                            const nameCells = leaves
+                              .map(x => clean(x.textContent))
+                              .filter(x => {
+                                if (x.length < 3 || x.length > 90) return false;
+                                if (/^\d+$/.test(x)) return false;
+                                if (/^(results?|resultados?|female|male|women|men|court|pista|score|sets?)$/i.test(x)) return false;
+                                if (/^\d{1,2}:\d{2}$/.test(x)) return false;
+                                return /[A-Za-zÀ-ÿ]/.test(x);
+                              });
+
+                            // Queremos el contenedor más pequeño de un partido.
+                            candidates.push({
+                              el,
+                              tag,
+                              text,
+                              scores: scoreCells,
+                              names: nameCells
+                            });
                           }
 
                           const minimal = candidates.filter(c =>
@@ -1198,70 +1043,109 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                           );
 
                           return minimal.map(c => ({
-                            players:c.players,
-                            scores:c.scores,
-                            text:c.text.slice(0,1000)
+                            tag: c.tag,
+                            text: c.text.slice(0,1400),
+                            scores: c.scores,
+                            names: c.names.slice(0,30)
                           }));
                         }
                         """,
-                        ranking_norm,
+                        tag,
                     )
-                    return state or []
+                    raw_blocks.extend(data or [])
                 except Exception:
-                    return []
+                    pass
 
-            # Selects.
+            # Estado inicial.
+            await collect_state("current")
+
+            # Todos los días disponibles en selects.
             try:
                 selects = page.locator("select")
                 for si in range(await selects.count()):
                     sel = selects.nth(si)
                     opts = sel.locator("option")
-                    if await opts.count() < 2 or await opts.count() > 15:
+                    count = await opts.count()
+                    if not 2 <= count <= 15:
                         continue
-                    for oi in range(await opts.count()):
+
+                    for oi in range(count):
                         try:
                             val = await opts.nth(oi).get_attribute("value")
-                            label = (await opts.nth(oi).inner_text()).strip()
+                            label = clean_label = re.sub(r"\s+", " ", (await opts.nth(oi).inner_text()).strip())
                             if val is not None:
                                 await sel.select_option(value=val)
                             else:
                                 await sel.select_option(label=label)
-                            await page.wait_for_timeout(700)
-                            for m in await collect_state():
-                                key = "|".join(m.get("players", [])) + "::" + ",".join(map(str, m.get("scores", [])))
-                                if key not in seen_match_keys:
-                                    seen_match_keys.add(key)
-                                    merged.append(m)
+                            await page.wait_for_timeout(650)
+                            await collect_state(f"select:{clean_label}")
                         except Exception:
                             pass
+            except Exception:
+                pass
+
+            # Todos los días disponibles en botones/chips.
+            try:
+                buttons = page.locator("button, [role=button], [class*=date]")
+                seen_labels = set()
+                for bi in range(min(await buttons.count(), 100)):
+                    el = buttons.nth(bi)
+                    try:
+                        label = re.sub(r"\s+", " ", (await el.inner_text()).strip())
+                        if not label or label in seen_labels:
+                            continue
+                        if not re.search(
+                            r"(?:\bMon\b|\bTue\b|\bWed\b|\bThu\b|\bFri\b|\bSat\b|\bSun\b|"
+                            r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9})",
+                            label, re.I
+                        ):
+                            continue
+                        if not await el.is_visible():
+                            continue
+                        seen_labels.add(label)
+                        await el.click(force=True, timeout=1800)
+                        await page.wait_for_timeout(650)
+                        await collect_state(f"button:{label}")
+                    except Exception:
+                        pass
             except Exception:
                 pass
 
             await browser.close()
             browser = None
 
-            diag["match_containers"] = len(merged)
-
-            print(
-                "  FIP structured DOM:",
-                f"female_hits={diag['visible_female_hits']}",
-                f"candidates={diag['candidate_containers']}",
-                f"matches={diag['match_containers']}",
-            )
-
-            return json.dumps({
-                "matches": merged,
-                "diag": diag,
-            }, ensure_ascii=False), diag
-
     except Exception as exc:
-        print(f"  FIP structured DOM error: {type(exc).__name__}: {exc}")
+        print(f"  FIP raw capture error: {type(exc).__name__}: {exc}")
         if browser is not None:
             try:
                 await browser.close()
             except Exception:
                 pass
         return "", diag
+
+    # Dedupe raw blocks, still NO gender filter.
+    unique = []
+    seen = set()
+    for block in raw_blocks:
+        key = (
+            tuple(block.get("scores", [])),
+            tuple(block.get("names", [])[:12]),
+            re.sub(r"\s+", " ", block.get("text", ""))[:260],
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(block)
+
+    diag["raw_blocks"] = len(unique)
+
+    print(
+        "  FIP raw results:",
+        f"states={diag['states_scanned']}",
+        f"raw_blocks={diag['raw_blocks']}",
+    )
+
+    return json.dumps({"blocks": unique, "diag": diag}, ensure_ascii=False), diag
 
 
 async def _womens_ranking_validation_sets() -> tuple[set[str], set[str], bool]:
@@ -1352,87 +1236,161 @@ def _round_from_snapshot(snapshot: str, event: dict) -> str:
 
 async def _extract_official_results(event: dict, gender: str = "female") -> list:
     """
-    Parse structured match containers produced by Playwright.
-    No Groq, no line-stream heuristics.
+    EN JUEGO ONLY — organizar primero, filtrar después.
+
+    Etapas:
+      raw_blocks -> organized_matches -> female_matches -> final_results
+
+    Un bloque se considera femenino SOLO al final si se pueden asociar sus
+    cuatro participantes al ranking femenino dinámico.
     """
     source = ""
-    browser_diag = {}
+    capture_diag = {}
 
     try:
-        source, browser_diag = await _browser_fip_womens_results_text(event)
+        source, capture_diag = await _browser_fip_womens_results_text(event)
     except Exception as exc:
-        print(f"  live structured source error: {type(exc).__name__}: {exc}")
+        print(f"  live raw-source error: {type(exc).__name__}: {exc}")
 
     if not source:
         _LIVE_DEBUG_STATE.update({
-            "browser": browser_diag,
-            "parser": "structured-dom-v30",
+            "parser": "organize-then-filter-v33",
+            "raw_blocks": 0,
+            "organized_matches": 0,
+            "female_matches": 0,
             "parsed_results": 0,
             "valid_results": 0,
-            "source_chars": 0,
             "groq_used": False,
         })
         return []
 
     try:
-        payload = json.loads(source)
-        matches = payload.get("matches", [])
+        raw_blocks = json.loads(source).get("blocks", [])
     except Exception as exc:
-        print(f"  structured JSON parse error: {exc}")
-        matches = []
+        print(f"  raw blocks JSON error: {exc}")
+        raw_blocks = []
 
-    parsed = []
+    # Ranking solo entra AHORA, después de leer los bloques.
+    ranking_full, ranking_surnames, _ = await _womens_ranking_validation_sets()
 
-    for match in matches:
-        players = match.get("players", [])
-        scores = [int(x) for x in match.get("scores", []) if str(x).isdigit()]
-        text = match.get("text", "")
+    def map_to_female(name: str) -> str | None:
+        norm = _norm_person_name(name)
+        if not norm:
+            return None
 
-        if len(players) != 4 or len(scores) < 4:
+        if norm in ranking_full:
+            return norm
+
+        # FIP puede añadir seed/WC/país al mismo leaf.
+        candidates = [
+            ranked for ranked in ranking_full
+            if ranked and (ranked in norm or norm in ranked)
+        ]
+        if candidates:
+            return max(candidates, key=len)
+
+        return None
+
+    # -----------------------------
+    # A) ORGANIZAR SIN FILTRAR SEXO
+    # -----------------------------
+    organized = []
+
+    for block in raw_blocks:
+        names = []
+        for raw_name in block.get("names", []):
+            cleaned = re.sub(r"\s+", " ", str(raw_name)).strip()
+            if cleaned and cleaned.casefold() not in {x.casefold() for x in names}:
+                names.append(cleaned)
+
+        scores = [
+            int(x) for x in block.get("scores", [])
+            if str(x).isdigit() and 0 <= int(x) <= 20
+        ]
+
+        if len(names) < 4 or len(scores) < 4:
             continue
 
-        # FIP score cells can be:
-        # A1 A2 [A3] B1 B2 [B3]
-        # or interleaved A1 B1 A2 B2 [A3 B3].
-        candidates = []
+        # Guardamos toda la info; todavía no sabemos género.
+        organized.append({
+            "tag": block.get("tag", ""),
+            "text": block.get("text", ""),
+            "names": names,
+            "scores": scores,
+        })
 
-        if len(scores) in {4, 6}:
-            half = len(scores) // 2
-            candidates.append((scores[:half], scores[half:]))  # grouped
-            candidates.append((scores[0::2], scores[1::2]))    # interleaved
-        else:
-            # Keep first plausible 4 or 6.
-            for n in (6, 4):
-                if len(scores) >= n:
-                    chunk = scores[:n]
-                    half = n // 2
-                    candidates.append((chunk[:half], chunk[half:]))
-                    candidates.append((chunk[0::2], chunk[1::2]))
+    # -----------------------------
+    # B) FILTRAR SOLO MUJERES
+    # -----------------------------
+    female_matches = []
+
+    for match in organized:
+        mapped = []
+        for raw_name in match["names"]:
+            female = map_to_female(raw_name)
+            if female and female not in mapped:
+                mapped.append(female)
+
+        # Un partido femenino válido tiene exactamente 4 jugadoras identificables.
+        if len(mapped) != 4:
+            continue
+
+        female_matches.append({
+            **match,
+            "players": mapped,
+        })
+
+    # -----------------------------
+    # C) RECONSTRUIR GANADOR + SCORE
+    # -----------------------------
+    parsed = []
+
+    for match in female_matches:
+        players = match["players"]
+        scores = match["scores"]
+
+        layouts = []
+        # Probamos layouts agrupados e intercalados, porque FIP cambia DOM.
+        for n in (6, 4):
+            if len(scores) >= n:
+                chunk = scores[:n]
+                half = n // 2
+                layouts.append((chunk[:half], chunk[half:]))
+                layouts.append((chunk[0::2], chunk[1::2]))
 
         chosen = None
-        for a_scores, b_scores in candidates:
+
+        for a_scores, b_scores in layouts:
             if len(a_scores) != len(b_scores) or len(a_scores) < 2:
                 continue
 
-            # Plausibility: each set has one normal winner (6/7) except retirements.
+            a_sets = 0
+            b_sets = 0
             plausible = True
+
             for a, b in zip(a_scores, b_scores):
-                if max(a, b) < 6 and max(a, b) != 0:
+                hi, lo = max(a, b), min(a, b)
+
+                # Marcador normal de pádel.
+                if hi == 6 and 0 <= lo <= 4:
+                    pass
+                elif hi == 7 and lo in {5, 6}:
+                    pass
+                else:
                     plausible = False
                     break
-                if abs(a - b) < 1:
+
+                if a > b:
+                    a_sets += 1
+                elif b > a:
+                    b_sets += 1
+                else:
                     plausible = False
                     break
+
             if not plausible:
                 continue
-
-            a_sets = sum(1 for a, b in zip(a_scores, b_scores) if a > b)
-            b_sets = sum(1 for a, b in zip(a_scores, b_scores) if b > a)
-            if a_sets == b_sets:
-                continue
-
-            # Completed best-of-3 normally has a side with 2 set wins.
-            if max(a_sets, b_sets) < 2:
+            if a_sets == b_sets or max(a_sets, b_sets) < 2:
                 continue
 
             chosen = (a_scores, b_scores, a_sets, b_sets)
@@ -1442,20 +1400,19 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
             continue
 
         a_scores, b_scores, a_sets, b_sets = chosen
+
         p1, p2, p3, p4 = [str(x).title() for x in players]
         pair_a = f"{p1} / {p2}"
         pair_b = f"{p3} / {p4}"
 
         if a_sets > b_sets:
             winner, loser = pair_a, pair_b
-            display = list(zip(a_scores, b_scores))
+            display_sets = list(zip(a_scores, b_scores))
         else:
             winner, loser = pair_b, pair_a
-            display = list(zip(b_scores, a_scores))
+            display_sets = list(zip(b_scores, a_scores))
 
-        # Round from container text if available.
-        rnd = "Partidos"
-        low = text.lower()
+        low = (match.get("text", "") + " " + match.get("tag", "")).lower()
         if re.search(r"semi[- ]?final", low):
             rnd = "Semifinales"
         elif re.search(r"quarter[- ]?final", low):
@@ -1464,16 +1421,20 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
             rnd = "Octavos de final"
         elif re.search(r"\bfinal\b", low):
             rnd = "Final"
+        elif re.search(r"\bqual", low):
+            rnd = "Clasificación"
+        else:
+            rnd = "Partidos"
 
         parsed.append({
             "round": rnd,
             "winner": winner,
             "loser": loser,
-            "score": "  ".join(f"{a}-{b}" for a, b in display),
+            "score": "  ".join(f"{a}-{b}" for a, b in display_sets),
             "date": "",
         })
 
-    # Dedupe.
+    # Dedupe final.
     valid = []
     seen = set()
     for item in parsed:
@@ -1488,84 +1449,27 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         valid.append(item)
 
     _LIVE_DEBUG_STATE.update({
-        "browser": browser_diag,
-        "parser": "structured-dom-v30",
+        "browser": capture_diag,
+        "parser": "organize-then-filter-v33",
+        "raw_blocks": len(raw_blocks),
+        "organized_matches": len(organized),
+        "female_matches": len(female_matches),
         "parsed_results": len(parsed),
         "valid_results": len(valid),
-        "source_chars": len(source),
+        "ranking_players_seen": len(ranking_full),
         "groq_used": False,
     })
 
     print(
-        "  live structured parser:",
-        f"containers={browser_diag.get('match_containers', 0)}",
+        "  live v33:",
+        f"raw={len(raw_blocks)}",
+        f"organized={len(organized)}",
+        f"female={len(female_matches)}",
         f"parsed={len(parsed)}",
         f"valid={len(valid)}",
     )
 
     return valid
-
-
-def _normalize_scoreboard_result(item: dict) -> dict | None:
-    """
-    Contrato único para el frontend de En juego.
-
-    Cada partido FINALIZADO debe tener:
-      round   -> "Semifinales"
-      winner  -> "Triay / Brea"
-      loser   -> "Josemaría / Sánchez"
-      score   -> "6–3  6–4"
-      date    -> YYYY-MM-DD o ""
-      status  -> "finalizado"
-
-    El marcador siempre se presenta desde la perspectiva de la pareja ganadora.
-    """
-    if not isinstance(item, dict):
-        return None
-
-    winner = re.sub(r"\s+", " ", str(item.get("winner", ""))).strip()
-    loser = re.sub(r"\s+", " ", str(item.get("loser", ""))).strip()
-    rnd = re.sub(r"\s+", " ", str(item.get("round", "Partidos"))).strip() or "Partidos"
-    raw_score = str(item.get("score", "")).strip()
-
-    if not winner or not loser or not raw_score:
-        return None
-
-    # Canonical visual score: en dash + double space between sets.
-    sets = re.findall(r"(\d{1,2})\s*[-–]\s*(\d{1,2})", raw_score)
-    if len(sets) < 2:
-        return None
-
-    score = "  ".join(f"{a}–{b}" for a, b in sets[:3])
-
-    return {
-        "round": rnd,
-        "winner": winner,
-        "loser": loser,
-        "score": score,
-        "date": str(item.get("date", "") or ""),
-        "status": "finalizado",
-    }
-
-
-def _normalize_next_match(item: dict | None) -> dict | None:
-    """Contrato visual del bloque Próximo partido."""
-    if not isinstance(item, dict):
-        return None
-
-    pair1 = re.sub(r"\s+", " ", str(item.get("pair1", ""))).strip()
-    pair2 = re.sub(r"\s+", " ", str(item.get("pair2", ""))).strip()
-    if not pair1 or not pair2:
-        return None
-
-    return {
-        "round": re.sub(r"\s+", " ", str(item.get("round", "Próximo partido"))).strip(),
-        "pair1": pair1,
-        "pair2": pair2,
-        "when": str(item.get("when", "") or "Horario por confirmar"),
-        "iso_madrid": str(item.get("iso_madrid", "") or ""),
-        "status": "próximo",
-    }
 
 
 async def get_tournament_now(gender: str = "female") -> dict:

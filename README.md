@@ -218,3 +218,7 @@ Visualmente:
 - debajo, cada partido con `Ganadoras 🏆`, perdedoras y marcador;
 - marcador con `–` y desde la perspectiva de la pareja ganadora;
 - estado `Finalizado` y fecha cuando FIP la proporciona.
+
+
+### Estrategia v32 de En juego
+Se elimina la dependencia del selector Female. Playwright captura todos los bloques de resultados visibles para cada día; después el backend filtra cada partido contra el ranking femenino dinámico. Solo se conserva un bloque si contiene exactamente cuatro jugadoras del ranking. A partir de ese bloque se determina la pareja ganadora, la perdedora y el marcador.
