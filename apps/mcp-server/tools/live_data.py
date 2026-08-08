@@ -9,6 +9,7 @@ import asyncio
 import aiohttp
 import os
 import re
+import time
 import json
 import io
 import unicodedata
@@ -27,6 +28,9 @@ COUNTRY_FLAGS = {
     "BRA": "🇧🇷", "FRA": "🇫🇷", "BEL": "🇧🇪", "URU": "🇺🇾",
     "PAR": "🇵🇾", "CHI": "🇨🇱", "COL": "🇨🇴", "MEX": "🇲🇽",
 }
+
+
+_LAST_GOOD_LIVE_RESULTS = {"results": [], "ts": 0.0}
 
 
 async def _fetch(url: str) -> str:
@@ -1706,7 +1710,24 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         blocks = []
 
     if not blocks:
-        print("  live results: v39 devolvió 0 bloques; activando flat fallback")
+        for attempt in range(1, 3):
+            print(f"  live results: v39 devolvió 0 bloques; reintento {attempt}/2")
+            await asyncio.sleep(1.2 * attempt)
+            try:
+                retry_source, retry_diag = await _browser_fip_womens_results_text(event)
+                retry_blocks = json.loads(retry_source).get("blocks", []) if retry_source else []
+            except Exception as exc:
+                print(f"  live retry {attempt} error: {type(exc).__name__}: {exc}")
+                retry_blocks = []
+
+            if retry_blocks:
+                blocks = retry_blocks
+                capture_diag = retry_diag
+                print(f"  live retry {attempt}: recuperados {len(blocks)} bloques")
+                break
+
+    if not blocks:
+        print("  live results: reintentos v39 sin datos; activando flat fallback")
         blocks = await _browser_fip_flat_results_fallback(event)
 
     month_map = {
@@ -1896,6 +1917,21 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         f"valid={len(valid)}",
         f"dates={len(dates)}",
     )
+
+    global _LAST_GOOD_LIVE_RESULTS
+
+    if valid:
+        _LAST_GOOD_LIVE_RESULTS = {
+            "results": [dict(x) for x in valid],
+            "ts": time.time(),
+        }
+        return valid
+
+    cached = _LAST_GOOD_LIVE_RESULTS.get("results") or []
+    age = time.time() - float(_LAST_GOOD_LIVE_RESULTS.get("ts") or 0)
+    if cached and age <= 6 * 60 * 60:
+        print(f"  live stale-cache: usando {len(cached)} resultados previos · age={int(age)}s")
+        return [dict(x) for x in cached]
 
     return valid
 
