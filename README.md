@@ -161,3 +161,17 @@ Chromium se instala en `/ms-playwright` mediante `PLAYWRIGHT_BROWSERS_PATH`, de 
 
 ### Resiliencia de Noticias
 Groq sigue generando el titular-resumen y la síntesis cuando está disponible. Si devuelve `429`, Noticias no queda vacía: se usa un fallback determinista basado únicamente en artículos cuyo titular ya es inequívocamente femenino y en frases completas del contenido filtrado.
+
+
+### Noticias cuando Groq está limitado
+Si Groq devuelve `429`, la web mantiene varias noticias usando un fallback determinista sobre el contenido femenino ya filtrado. Se aceptan titulares con términos femeninos, nombres completos o combinaciones de al menos dos apellidos del ranking; los titulares explícitamente masculinos se rechazan salvo que el cuerpo contenga una sección femenina clara.
+
+
+### Groq es opcional
+Groq se usa únicamente como mejora editorial de Noticias. Si devuelve `429`:
+- se abre un circuit breaker de 30 minutos;
+- no se hacen más llamadas durante ese periodo;
+- Noticias continúa con fallback determinista;
+- resúmenes ya generados se reutilizan desde caché durante 24 horas.
+
+`En juego`, Ranking y Calendario no dependen de Groq.

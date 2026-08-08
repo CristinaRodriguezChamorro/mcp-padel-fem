@@ -200,54 +200,109 @@ def _is_live(day_str: str, month_str: str) -> bool:
 
 
 async def get_calendar_live() -> list:
-    client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
-
+    """
+    Calendario SIN Groq.
+    Intenta parsear directamente padelspeak.com y cae al calendario local si la
+    estructura externa cambia.
+    """
     html = await _fetch("https://padelspeak.com/en/premier-padel-calendar/")
-    raw_text = ""
+    torneos = []
+
     if html:
-        soup = BeautifulSoup(html, "html.parser")
-        for tag in soup.find_all(["script", "style", "nav", "footer"]):
-            tag.decompose()
-        raw_text = soup.get_text(separator=" ", strip=True)[:4000]
+        try:
+            soup = BeautifulSoup(html, "html.parser")
 
-    today_str = date.today().strftime("%d %b %Y")
+            # 1) Tables
+            for table in soup.find_all("table"):
+                rows = table.find_all("tr")
+                for row in rows[1:]:
+                    cols = [re.sub(r"\s+", " ", c.get_text(" ", strip=True)).strip()
+                            for c in row.find_all(["td", "th"])]
+                    if len(cols) < 2:
+                        continue
+                    text = " | ".join(cols)
+                    if not re.search(r"\b(P1|P2|Major|Finals?|FIP)\b", text, re.I):
+                        continue
 
-    if raw_text:
-        prompt = f"""Datos del calendario Premier Padel 2026:
-{raw_text}
+                    # Date/range
+                    dm = re.search(
+                        r"(\d{1,2})(?:\s*[-–]\s*(\d{1,2}))?\s+"
+                        r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)",
+                        text, re.I
+                    )
+                    if not dm:
+                        continue
+                    d1, d2, mon = dm.group(1), dm.group(2), dm.group(3).title()
+                    day = f"{d1}-{d2}" if d2 else d1
 
-Hoy es {today_str}. Extrae los próximos 6 torneos a partir de hoy.
-SOLO este JSON sin texto extra, y pon live:false en todos (lo calculo yo):
-[{{"day":"10-17","month":"May","name":"Buenos Aires P1","place":"Buenos Aires 🇦🇷","badge":"p1","badgeText":"P1","tv":"Red Bull TV · Movistar+","live":false}},...]
-badge: "major", "p1", "p2", "fip"."""
-    else:
-        prompt = f"""Próximos 6 torneos Premier Padel desde hoy {today_str}.
-SOLO JSON, live:false en todos:
-[{{"day":"10-17","month":"May","name":"Buenos Aires P1","place":"Buenos Aires 🇦🇷","badge":"p1","badgeText":"P1","tv":"Red Bull TV · Movistar+","live":false}},...]"""
+                    # Tournament name = cell containing event class.
+                    name = next((c for c in cols if re.search(r"\b(P1|P2|Major|Finals?|FIP)\b", c, re.I)), "")
+                    place = cols[-1] if cols[-1] != name else ""
 
-    torneos = None
-    try:
-        resp = await asyncio.to_thread(lambda: client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            max_tokens=600,
-            temperature=0,
-            messages=[{"role": "user", "content": prompt}]
-        ))
-        raw = resp.choices[0].message.content.strip()
-        match = re.search(r'\[.*\]', raw, re.DOTALL)
-        if match:
-            torneos = json.loads(match.group())
-    except Exception as e:
-        print(f"  calendar Groq error: {e}")
+                    badge = "major" if "major" in name.lower() else ("p2" if "p2" in name.lower() else ("fip" if "fip" in name.lower() else "p1"))
+                    badge_text = "MAJOR" if badge == "major" else ("FIP" if badge == "fip" else badge.upper())
 
+                    torneos.append({
+                        "day": day,
+                        "month": mon,
+                        "name": name,
+                        "place": place,
+                        "badge": badge,
+                        "badgeText": badge_text,
+                        "tv": "Red Bull TV · Movistar+",
+                        "live": False,
+                    })
+
+            # 2) Cards/articles fallback
+            if not torneos:
+                for node in soup.find_all(["article", "li", "div"]):
+                    text = re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip()
+                    if len(text) > 500 or not re.search(r"\b(P1|P2|Major|Finals?)\b", text, re.I):
+                        continue
+                    dm = re.search(
+                        r"(\d{1,2})(?:\s*[-–]\s*(\d{1,2}))?\s+"
+                        r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)",
+                        text, re.I
+                    )
+                    nm = re.search(r"([A-Za-zÀ-ÿ0-9 .'-]+?\b(?:P1|P2|Major|Finals?))", text, re.I)
+                    if not dm or not nm:
+                        continue
+                    d1, d2, mon = dm.group(1), dm.group(2), dm.group(3).title()
+                    name = re.sub(r"\s+", " ", nm.group(1)).strip()
+                    badge = "major" if "major" in name.lower() else ("p2" if "p2" in name.lower() else "p1")
+                    torneos.append({
+                        "day": f"{d1}-{d2}" if d2 else d1,
+                        "month": mon,
+                        "name": name,
+                        "place": "",
+                        "badge": badge,
+                        "badgeText": "MAJOR" if badge == "major" else badge.upper(),
+                        "tv": "Red Bull TV · Movistar+",
+                        "live": False,
+                    })
+        except Exception as exc:
+            print(f"  calendar parser error: {exc}")
+
+    # Deduplicate and keep future/current 6.
     if not torneos:
         torneos = _fallback_calendar()
+    else:
+        dedup = []
+        seen = set()
+        for t in torneos:
+            key = (t["name"].lower(), t["day"], t["month"])
+            if key not in seen:
+                seen.add(key)
+                dedup.append(t)
+        torneos = dedup
 
-    # Calcular live con fechas reales, ignorando lo que devuelva la IA
     for t in torneos:
         t["live"] = _is_live(t.get("day", ""), t.get("month", ""))
 
-    return torneos
+    # Current/live first, then as source order; cap to 6 for UI.
+    live_now = [t for t in torneos if t["live"]]
+    rest = [t for t in torneos if not t["live"]]
+    return (live_now + rest)[:6]
 
 
 def _fallback_ranking() -> list:
