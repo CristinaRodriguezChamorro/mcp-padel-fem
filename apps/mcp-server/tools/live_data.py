@@ -120,8 +120,10 @@ async def get_ranking_live() -> list:
                 continue
 
             pos = int(pos_text)
-            name_parts = name_text.split()
-            name = " ".join(name_parts[:3]) if len(name_parts) > 2 else name_text
+            # Keep the complete player name from the ranking source.
+            # Truncating to 3 tokens produced broken names such as
+            # "Alejandra Alonso De", which also made photo resolution fail.
+            name = re.sub(r"\s+", " ", name_text).strip()
             flag = COUNTRY_FLAGS.get(country_text, "🌍")
 
             try:

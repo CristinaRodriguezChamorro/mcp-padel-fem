@@ -132,116 +132,153 @@ def _photo_norm(value: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
 
 
-def _photo_title_matches(name: str, title: str) -> bool:
+def _photo_aliases(name: str, wiki_title: str = "") -> list[str]:
     """
-    Evita fotos de personas equivocadas.
-    Exige nombre + apellido principal en el título del artículo/archivo.
+    Ranking sources often use complete civil names:
+      "Gemma Triay Pons" -> article "Gemma Triay"
+      "Marta Ortega Gallego" -> article "Marta Ortega"
+
+    Generate conservative aliases without hardcoding each player.
     """
-    n = [x for x in _photo_norm(name).split() if len(x) > 1]
+    raw = re.sub(r"\s+", " ", (name or "").strip())
+    parts = raw.split()
+
+    aliases = []
+
+    # Prioridad absoluta: nombre + primer apellido.
+    # Es la forma pública/deportiva más habitual.
+    if len(parts) >= 2:
+        aliases.append(" ".join(parts[:2]))
+
+    if raw:
+        aliases.append(raw)
+
+    if len(parts) >= 3:
+        aliases.append(" ".join(parts[:3]))
+
+    # Explicit title from Sponsors dataset if available.
+    if wiki_title:
+        aliases.append(wiki_title.replace("_", " "))
+
+    # Accentless forms are useful for APIs whose index is inconsistent.
+    aliases += [
+        unicodedata.normalize("NFD", a).encode("ascii", "ignore").decode("ascii")
+        for a in list(aliases)
+    ]
+
+    out = []
+    seen = set()
+    for a in aliases:
+        a = re.sub(r"\s+", " ", a).strip()
+        key = _photo_norm(a)
+        if a and key not in seen:
+            seen.add(key)
+            out.append(a)
+    return out
+
+
+def _photo_title_matches(alias: str, title: str) -> bool:
+    a = [x for x in _photo_norm(alias).split() if len(x) > 1]
     t = _photo_norm(title)
-    if not n or not t:
+    if len(a) < 2 or not t:
         return False
 
-    first = n[0]
-    # Los rankings pueden traer apellidos compuestos; cualquiera de los tokens
-    # posteriores puede actuar como apellido identificador.
-    surnames = n[1:] or n
-    return first in t and any(s in t for s in surnames)
+    # Basta con que coincidan nombre + primer apellido.
+    # Ej.: "Gemma Triay Pons" encaja con "Gemma Triay".
+    first_name = a[0]
+    first_surname = a[1]
+    return first_name in t and first_surname in t
 
 
 async def _wiki_player_photo(name: str, wiki_title: str = "") -> str | None:
     """
-    Resuelve una foto pública de la jugadora desde Wikipedia/Wikimedia.
-    Se ejecuta en backend, no en el navegador, y queda cacheado.
+    Resolve a public photo server-side using aliases, Wikipedia ES/EN and Commons.
     """
-    cache_key = f"player-photo:{_photo_norm(name)}:{_photo_norm(wiki_title)}"
+    cache_key = f"player-photo-v56:{_photo_norm(name)}:{_photo_norm(wiki_title)}"
     cached = cache_get(cache_key, 7 * 24 * 60 * 60)
     if cached is not None:
         return cached or None
 
-    timeout = httpx.Timeout(10.0)
+    aliases = _photo_aliases(name, wiki_title)
+    timeout = httpx.Timeout(12.0)
     headers = {"User-Agent": "PadelFemMCP/1.0 (player-photo resolver)"}
 
     async with httpx.AsyncClient(follow_redirects=True, timeout=timeout, headers=headers) as client:
-        # 1. Artículo exacto en Wikipedia ES/EN.
-        exact_titles = [x for x in {
-            wiki_title,
-            name,
-            name.replace(" ", "_"),
-        } if x]
-
+        # 1) Exact / redirected Wikipedia articles for every alias.
         for base in ("https://es.wikipedia.org/w/api.php", "https://en.wikipedia.org/w/api.php"):
-            for title in exact_titles:
+            for alias in aliases:
                 try:
                     resp = await client.get(base, params={
                         "action": "query",
                         "redirects": "1",
-                        "titles": title,
+                        "titles": alias,
                         "prop": "pageimages",
+                        "piprop": "thumbnail|original",
                         "pithumbsize": "1000",
                         "format": "json",
                     })
-                    data = resp.json()
-                    page = next(iter((data.get("query", {}).get("pages", {}) or {}).values()), {})
-                    src = (page.get("thumbnail") or {}).get("source")
-                    page_title = page.get("title", "")
-                    if src and (_photo_title_matches(name, page_title) or _photo_norm(page_title) == _photo_norm(title)):
+                    page = next(iter((resp.json().get("query", {}).get("pages", {}) or {}).values()), {})
+                    src = (page.get("thumbnail") or {}).get("source") or (page.get("original") or {}).get("source")
+                    title = page.get("title", "")
+                    if src and any(_photo_title_matches(a, title) for a in aliases):
                         cache_set(cache_key, src)
-                        print(f"  photo: {name} -> Wikipedia ({page_title})")
+                        print(f"  photo: {name} -> Wikipedia ({title}) alias={alias}")
                         return src
                 except Exception:
                     pass
 
-        # 2. Buscar artículo por nombre exacto.
+        # 2) Wikipedia searches. Do NOT quote the full civil name.
         for base in ("https://es.wikipedia.org/w/api.php", "https://en.wikipedia.org/w/api.php"):
+            for alias in aliases[:4]:
+                try:
+                    resp = await client.get(base, params={
+                        "action": "query",
+                        "generator": "search",
+                        "gsrsearch": f"{alias} padel",
+                        "gsrlimit": "10",
+                        "prop": "pageimages",
+                        "piprop": "thumbnail|original",
+                        "pithumbsize": "1000",
+                        "format": "json",
+                    })
+                    pages = list((resp.json().get("query", {}).get("pages", {}) or {}).values())
+                    for page in pages:
+                        title = page.get("title", "")
+                        src = (page.get("thumbnail") or {}).get("source") or (page.get("original") or {}).get("source")
+                        if src and _photo_title_matches(alias, title):
+                            cache_set(cache_key, src)
+                            print(f"  photo: {name} -> search ({title}) alias={alias}")
+                            return src
+                except Exception:
+                    pass
+
+        # 3) Wikimedia Commons searches using public sporting aliases.
+        for alias in aliases[:4]:
             try:
-                resp = await client.get(base, params={
+                resp = await client.get("https://commons.wikimedia.org/w/api.php", params={
                     "action": "query",
                     "generator": "search",
-                    "gsrsearch": f'"{name}" padel',
-                    "gsrlimit": "8",
-                    "prop": "pageimages",
-                    "pithumbsize": "1000",
+                    "gsrsearch": alias,
+                    "gsrnamespace": "6",
+                    "gsrlimit": "20",
+                    "prop": "imageinfo",
+                    "iiprop": "url",
+                    "iiurlwidth": "1000",
                     "format": "json",
                 })
                 pages = list((resp.json().get("query", {}).get("pages", {}) or {}).values())
                 for page in pages:
-                    src = (page.get("thumbnail") or {}).get("source")
-                    if src and _photo_title_matches(name, page.get("title", "")):
+                    title = page.get("title", "")
+                    info = (page.get("imageinfo") or [{}])[0]
+                    src = info.get("thumburl") or info.get("url")
+                    if src and _photo_title_matches(alias, title):
                         cache_set(cache_key, src)
-                        print(f"  photo: {name} -> search ({page.get('title','')})")
+                        print(f"  photo: {name} -> Commons ({title}) alias={alias}")
                         return src
             except Exception:
                 pass
 
-        # 3. Wikimedia Commons: útil para jugadoras sin artículo con pageimage.
-        try:
-            resp = await client.get("https://commons.wikimedia.org/w/api.php", params={
-                "action": "query",
-                "generator": "search",
-                "gsrsearch": f'"{name}"',
-                "gsrnamespace": "6",
-                "gsrlimit": "12",
-                "prop": "imageinfo",
-                "iiprop": "url",
-                "iiurlwidth": "1000",
-                "format": "json",
-            })
-            pages = list((resp.json().get("query", {}).get("pages", {}) or {}).values())
-            for page in pages:
-                title = page.get("title", "")
-                info = (page.get("imageinfo") or [{}])[0]
-                src = info.get("thumburl") or info.get("url")
-                if src and _photo_title_matches(name, title):
-                    cache_set(cache_key, src)
-                    print(f"  photo: {name} -> Commons ({title})")
-                    return src
-        except Exception:
-            pass
-
-    # Cache negative only 30 min instead of a week.
-    _cache[cache_key] = {"ts": time.time() - (7 * 24 * 60 * 60) + (30 * 60), "data": ""}
-    print(f"  photo: {name} -> no encontrada")
+    print(f"  photo: {name} -> no encontrada aliases={aliases[:4]}")
     return None
 
 
@@ -301,7 +338,7 @@ async def resumen_diario_padel_femenino():
 
 @app.get("/api/version")
 async def api_version():
-    return {"version": "v55-server-side-player-photos-2026-08-08"}
+    return {"version": "v57-photo-first-surname-match-2026-08-08"}
 
 @app.get("/")
 async def index():
@@ -311,7 +348,7 @@ async def index():
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
-            "X-App-Version": "v55-server-side-player-photos-2026-08-08",
+            "X-App-Version": "v57-photo-first-surname-match-2026-08-08",
         },
     )
 
