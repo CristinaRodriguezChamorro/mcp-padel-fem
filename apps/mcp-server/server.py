@@ -395,24 +395,67 @@ async def api_player_photo(name: str, wiki_title: str = ""):
 
 @app.get("/api/photo")
 async def api_photo(url: str):
-    """Proxy para imágenes de Wikimedia — evita hotlink block."""
+    """
+    Proxy de imágenes externas.
+
+    Importante: FIP y Wikimedia requieren Referer diferente. La versión anterior
+    mandaba siempre el de Commons, así que una URL válida de padelfip.com podía
+    responder con HTML/bloqueo en vez de la foto.
+    """
     try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            resp = await client.get(
-                url,
-                headers={
-                    "User-Agent": "PadelFemMCP/1.0 httpx/0.27",
-                    "Referer": "https://commons.wikimedia.org/",
-                },
-                timeout=10,
+        parsed = httpx.URL(url)
+        host = (parsed.host or "").lower()
+
+        if "padelfip.com" in host:
+            referer = "https://www.padelfip.com/"
+        elif "wikimedia.org" in host or "wikipedia.org" in host:
+            referer = "https://commons.wikimedia.org/"
+        else:
+            referer = f"{parsed.scheme}://{host}/" if parsed.scheme and host else ""
+
+        headers = {
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/150.0.0.0 Safari/537.36"
+            ),
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        }
+        if referer:
+            headers["Referer"] = referer
+
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15) as client:
+            resp = await client.get(url, headers=headers)
+
+        ct = (resp.headers.get("content-type") or "").lower()
+
+        # Do not send HTML/error pages as <img>.
+        if resp.status_code != 200 or not ct.startswith("image/") or not resp.content:
+            print(
+                "  photo proxy failed:",
+                f"status={resp.status_code}",
+                f"content_type={ct or 'none'}",
+                f"host={host}",
             )
-            ct = resp.headers.get("content-type", "image/jpeg")
-            return StreamingResponse(
-                iter([resp.content]),
-                media_type=ct,
-                headers={"Cache-Control": "public, max-age=86400"},
-            )
-    except Exception:
+            return Response(status_code=404)
+
+        print(
+            "  photo proxy ok:",
+            f"host={host}",
+            f"type={ct.split(';')[0]}",
+            f"bytes={len(resp.content)}",
+        )
+
+        return Response(
+            content=resp.content,
+            media_type=ct.split(";")[0],
+            headers={
+                "Cache-Control": "public, max-age=86400",
+                "X-Photo-Source": host,
+            },
+        )
+    except Exception as exc:
+        print(f"  photo proxy exception: {type(exc).__name__}: {exc}")
         return Response(status_code=404)
 
 
