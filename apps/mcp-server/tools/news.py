@@ -42,16 +42,31 @@ BASURA = [
 ]
 
 
-def es_noticia_femenina(titulo: str) -> bool:
-    t = titulo.lower()
+FILTRO_FEMENINO = (
+    "female", "women", "woman",
+    "femenino", "femenina", "femeninos", "femeninas", "mujeres",
+)
+
+
+def es_noticia_femenina(titulo: str, texto: str = "") -> bool:
+    """Filtro femenino compartiendo los términos usados en En juego."""
+    t = f"{titulo} {texto}".lower()
+
+    # Nombre de jugadora conocida = señal femenina fuerte.
     if any(j in t for j in JUGADORAS):
         return True
-    if any(b in t for b in BASURA):
+
+    # female / women / woman / femenino / femenina / mujeres.
+    if any(f in t for f in FILTRO_FEMENINO):
+        return True
+
+    if any(b in titulo.lower() for b in BASURA):
         return False
+
+    # Referencia únicamente masculina: descartar.
     if any(m in t for m in MASCULINOS):
         return False
-    if "femenin" in t:
-        return True
+
     return False
 
 
@@ -232,6 +247,26 @@ async def get_latest_news() -> dict:
 
     noticias = [r for r in generados if isinstance(r, dict)]
     print(f"Noticias generadas: {len(noticias)}")
+
+    # Fallback robusto: si Groq falla, se queda sin cuota o devuelve algo no parseable,
+    # NO dejamos vacía la pestaña Noticias. Mostramos directamente las noticias
+    # femeninas encontradas en los RSS con su titular, un resumen corto y la fuente.
+    if not noticias:
+        print("  noticias: usando fallback RSS sin IA")
+        for art in femeninos[:4]:
+            resumen = clean_text(art.get("texto", ""))
+            if not resumen:
+                resumen = "Última información publicada sobre el circuito profesional femenino de pádel."
+            if len(resumen) > 420:
+                resumen = resumen[:417].rsplit(" ", 1)[0] + "..."
+            url = art.get("url", "")
+            domain = urlparse(url).netloc.replace("www.", "") if url else ""
+            fuentes = [{"domain": domain, "titulo": art.get("titulo", ""), "url": url}] if url else []
+            noticias.append({
+                "titular": art.get("titulo", "Noticia de pádel femenino"),
+                "resumen": resumen,
+                "fuentes": fuentes,
+            })
 
     return {
         "date": datetime.date.today().isoformat(),

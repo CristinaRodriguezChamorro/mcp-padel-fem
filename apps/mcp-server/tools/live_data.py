@@ -225,9 +225,10 @@ def _fallback_calendar() -> list:
 #   - Premier Padel (premierpadel.com): dónde verlo en España.
 
 from datetime import datetime
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse, parse_qsl, urlencode, urlunparse
 
 FIP_LIVE_URL = "https://www.padelfip.com/live/"
+FIP_PREMIER_CALENDAR_URL = "https://www.padelfip.com/calendar-premier-padel/?events-year={year}"
 PREMIER_WATCH_URL = "https://premierpadel.com/en/news/where-to-watch-dont-miss-any-of-the-action-at-any-tournament"
 
 
@@ -265,27 +266,37 @@ def _format_dates_es(start, end) -> str:
 
 
 async def _get_official_live_event() -> dict | None:
-    """Localiza en la página oficial FIP el Premier Padel que está activo hoy."""
-    html = await _fetch(FIP_LIVE_URL)
+    """
+    Localiza el Premier Padel activo HOY por FECHAS, no por la etiqueta "Live".
+    Esto es importante porque la portada/calendario de FIP puede tardar en cambiar
+    el estado visual de "Registration Closed" a "Live".
+    """
+    today = date.today()
+    calendar_url = FIP_PREMIER_CALENDAR_URL.format(year=today.year)
+    html = await _fetch(calendar_url)
+
+    # Fallback a la página de live si el calendario falla.
+    if not html:
+        html = await _fetch(FIP_LIVE_URL)
     if not html:
         return None
 
     soup = BeautifulSoup(html, "html.parser")
-    today = date.today()
     seen = set()
 
     for a in soup.find_all("a", href=True):
         href = a.get("href", "")
-        if "/event" not in href and "/evento" not in href:
+        if "/events/" not in href and "/eventos/" not in href:
             continue
-        event_url = urljoin(FIP_LIVE_URL, href)
+
+        event_url = urljoin(calendar_url, href)
         if event_url in seen:
             continue
         seen.add(event_url)
 
         node = a
         block = ""
-        for _ in range(6):
+        for _ in range(8):
             node = getattr(node, "parent", None)
             if not node:
                 break
@@ -298,6 +309,7 @@ async def _get_official_live_event() -> dict | None:
 
         if not _is_premier_name(block):
             continue
+
         dates = _parse_fip_dates(block)
         if not dates:
             continue
@@ -308,19 +320,32 @@ async def _get_official_live_event() -> dict | None:
         event_html = await _fetch(event_url)
         if not event_html:
             continue
+
         event_soup = BeautifulSoup(event_html, "html.parser")
         event_text = _clean_text(event_soup)
-        if "Female" not in event_text and "Femenino" not in event_text:
+
+        # El evento debe incluir cuadro femenino.
+        if not re.search(r"\b(Female|Women|Femenino|Mujeres)\b", event_text, re.I):
             continue
 
         h1 = event_soup.find("h1")
         name = _clean_text(h1) if h1 else ""
         if not name or not _is_premier_name(name):
-            candidates = [x.strip() for x in re.split(r"\s{2,}|\n", block) if _is_premier_name(x)]
-            name = candidates[0][:80] if candidates else "Premier Padel"
+            # El texto del bloque suele empezar por el nombre del torneo.
+            m_name = re.search(
+                r"([A-ZÁÉÍÓÚÜÑ0-9 .'-]+(?:P1|P2|MAJOR|FINALS))",
+                block,
+                re.I,
+            )
+            name = m_name.group(1).strip() if m_name else "Premier Padel"
 
         place = ""
-        m_place = re.search(r"([A-Za-zÀ-ÿ .'-]+\s*-\s*[A-Za-zÀ-ÿ .'-]+)\s*[|\n ]+\d{1,2}/\d{1,2}/\d{4}", event_text)
+        # Primero intentamos extraer "Ciudad - País" del encabezado oficial.
+        m_place = re.search(
+            r"([A-Za-zÀ-ÿ .'-]+?\s*-\s*[A-Za-zÀ-ÿ .'-]+?)\s+"
+            r"\d{1,2}/\d{1,2}/\d{4}",
+            event_text,
+        )
         if m_place:
             place = re.sub(r"\s+", " ", m_place.group(1)).strip()
 
@@ -331,6 +356,7 @@ async def _get_official_live_event() -> dict | None:
             "url": event_url,
             "html": event_html,
         }
+
     return None
 
 
@@ -351,7 +377,80 @@ async def _get_watch_official() -> list[str]:
     return watch or ["Premier Padel YouTube", "Red Bull TV"]
 
 
-async def _extract_official_womens_results(event: dict) -> list:
+
+def _gender_aliases(gender: str) -> tuple[str, ...]:
+    gender = (gender or "female").strip().lower()
+    if gender == "male":
+        return ("male", "men", "masculino", "hombres")
+    return ("female", "women", "woman", "femenino", "femenina", "mujeres")
+
+
+def _add_query(url: str, **params) -> str:
+    parsed = urlparse(url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query.update({k: str(v) for k, v in params.items()})
+    return urlunparse(parsed._replace(query=urlencode(query)))
+
+
+async def _get_gender_filtered_event_html(event: dict, gender: str = "female") -> str:
+    # Filtro usado SOLO por la pestaña En juego.
+    base_html = event.get("html", "")
+    base_url = event.get("url", "")
+    if not base_html or not base_url:
+        return base_html
+
+    aliases = _gender_aliases(gender)
+    soup = BeautifulSoup(base_html, "html.parser")
+    candidates = []
+
+    for el in soup.find_all(True):
+        for attr in ("href", "src", "data-url", "data-href", "data-src", "data-endpoint", "data-ajax-url", "action"):
+            value = el.get(attr)
+            if isinstance(value, str) and any(a in value.lower() for a in aliases):
+                candidates.append(urljoin(base_url, value))
+
+    canonical = "female" if gender != "male" else "male"
+    candidates.extend([
+        _add_query(base_url, gender=canonical),
+        _add_query(base_url, sex=canonical),
+        _add_query(base_url, category=canonical),
+        _add_query(base_url, division=canonical),
+    ])
+
+    base_host = urlparse(base_url).netloc.lower()
+    unique = []
+    seen = set()
+    for url in candidates:
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        host = urlparse(url).netloc.lower()
+        if host and host != base_host:
+            continue
+        unique.append(url)
+
+    def score(html: str) -> int:
+        if not html:
+            return -1
+        text = _clean_text(BeautifulSoup(html, "html.parser")).lower()
+        gender_hits = sum(text.count(a) for a in aliases)
+        result_hits = sum(text.count(k) for k in ("result", "draw", "score", "round"))
+        return gender_hits + (result_hits * 3)
+
+    best_html = base_html
+    best_score = score(base_html)
+
+    for url in unique[:8]:
+        html = await _fetch(url)
+        sc = score(html)
+        if sc > best_score:
+            best_html = html
+            best_score = sc
+
+    return best_html
+
+
+async def _extract_official_results(event: dict, gender: str = "female") -> list:
     """
     Devuelve los partidos femeninos YA TERMINADOS del torneo que sigue en curso.
 
@@ -359,7 +458,13 @@ async def _extract_official_womens_results(event: dict) -> list:
     publica un partido finalizado (primera ronda, octavos, cuartos, etc.), ese
     resultado puede aparecer en "En juego" en la siguiente actualización.
     """
-    soup = BeautifulSoup(event["html"], "html.parser")
+    gender = (gender or "female").strip().lower()
+    if gender == "women":
+        gender = "female"
+    if gender not in {"female", "male"}:
+        gender = "female"
+    filtered_html = await _get_gender_filtered_event_html(event, gender)
+    soup = BeautifulSoup(filtered_html, "html.parser")
     for tag in soup.find_all(["script", "style", "nav", "footer", "header"]):
         tag.decompose()
     official_text = _clean_text(soup)
@@ -371,9 +476,44 @@ async def _extract_official_womens_results(event: dict) -> list:
         print("  live results: GROQ_API_KEY no configurada")
         return []
 
-    source = official_text[:60000]
+    # La página de FIP coloca normalmente primero el cuadro masculino y después
+    # el femenino. En la versión anterior cortábamos los primeros 60k caracteres,
+    # por lo que muchas veces Groq ni siquiera recibía los partidos femeninos.
+    #
+    # Intentamos extraer contenedores cuyo id/class/atributos indiquen female/women.
+    gender_chunks = []
+    for el in soup.find_all(True):
+        attrs = " ".join([
+            str(el.get("id", "")),
+            " ".join(el.get("class", []) if isinstance(el.get("class", []), list) else [str(el.get("class", ""))]),
+            str(el.get("data-gender", "")),
+            str(el.get("data-category", "")),
+            str(el.get("aria-label", "")),
+        ]).lower()
+        if any(k in attrs for k in _gender_aliases(gender)):
+            txt = _clean_text(el)
+            if len(txt) > 120:
+                gender_chunks.append(txt)
+
+    # Quitamos duplicados conservando orden.
+    unique_chunks = []
+    seen_chunks = set()
+    for chunk in gender_chunks:
+        key = chunk[:500]
+        if key not in seen_chunks:
+            seen_chunks.add(key)
+            unique_chunks.append(chunk)
+
+    if unique_chunks:
+        source = "\n\n".join(unique_chunks)[:90000]
+    else:
+        # Fallback: usar la parte final del documento, donde FIP suele renderizar
+        # el cuadro femenino, en vez de la parte inicial dominada por el masculino.
+        source = official_text[-90000:]
+
     client = Groq(api_key=api_key)
-    prompt = f"""Extrae resultados del circuito FEMENINO únicamente del siguiente texto de la web OFICIAL FIP.
+    requested_label = "FEMENINO" if gender == "female" else "MASCULINO"
+    prompt = f"""Extrae resultados del circuito {requested_label} únicamente del siguiente texto de la web OFICIAL FIP.
 No uses conocimiento externo. No deduzcas marcadores. No completes nombres.
 
 FUENTE OFICIAL FIP:
@@ -387,7 +527,7 @@ Reglas:
 - winner es la pareja marcada como vencedora en FIP.
 - score es el resultado por sets desde el punto de vista de winner.
 - No incluyas partidos sin resultado final.
-- No incluyas masculino.
+- No incluyas el género contrario al solicitado ({requested_label}).
 - Si no puedes demostrar un partido con el texto, omítelo.
 - Si no hay resultados femeninos claros, devuelve []."""
 
@@ -428,7 +568,7 @@ Reglas:
     return valid
 
 
-async def get_tournament_now() -> dict:
+async def get_tournament_now(gender: str = "female") -> dict:
     """
     Torneo actual + resultados femeninos acumulados mientras el torneo está en curso.
     No se espera a la final: cada partido terminado se muestra en cuanto FIP lo publica.
@@ -439,12 +579,13 @@ async def get_tournament_now() -> dict:
         return {
             "active": False, "name": "", "place": "", "dates": "",
             "watch": [], "results": [], "updated": today_str,
-            "source": "FIP", "source_url": FIP_LIVE_URL,
+            "gender": gender,
+            "source": "FIP", "source_url": FIP_PREMIER_CALENDAR_URL.format(year=date.today().year),
         }
 
     watch, results = await asyncio.gather(
         _get_watch_official(),
-        _extract_official_womens_results(event),
+        _extract_official_results(event, gender),
     )
     return {
         "active": True,
@@ -454,6 +595,7 @@ async def get_tournament_now() -> dict:
         "watch": watch,
         "results": results,
         "updated": today_str,
+        "gender": gender,
         "source": "FIP · Premier Padel",
         "source_url": event["url"],
     }

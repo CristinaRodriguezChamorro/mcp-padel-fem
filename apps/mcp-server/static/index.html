@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-<!-- build: en-juego-v2-2026-08-08 -->
+<!-- build: en-juego-v3-news-safe-2026-08-08 -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pádel Femenino Español 🎾</title>
@@ -291,7 +291,7 @@ function renderFuentes(fuentes){if(!fuentes?.length)return'';return`<div class="
 
 async function loadNews(){
   try{
-    const data=await fetch('/api/news').then(r=>r.json());
+    const resp=await fetch('/api/news'); if(!resp.ok) throw new Error(`HTTP ${resp.status}`); const data=await resp.json();
     const items=data.resumen_diario||[];
     if(!items.length){document.getElementById('news-grid').innerHTML='<div class="empty-msg">No hay noticias ahora mismo.<br>Vuelve más tarde 🎾</div>';return;}
     const[featured,...rest]=items;
@@ -310,7 +310,7 @@ async function loadTorneos(){try{const data=await fetch('/api/calendar').then(r=
 async function loadEnJuego(){
   const el=document.getElementById('live-content');
   try{
-    const d=await fetch('/api/live').then(r=>r.json());
+    const d=await fetch('/api/live?gender=women').then(r=>r.json());
     if(!d.active){el.innerHTML='<div class="live-empty">Ahora mismo no hay ningún torneo Premier Padel en juego.</div>';return;}
     const watch=(d.watch||[]).map(x=>`<span class="live-watch-chip">📺 ${x}</span>`).join('');
     const results=(d.results||[]).map(r=>`<div class="result-row">${r.round?`<div class="result-round">${r.round}</div>`:''}<div class="result-pairs"><div class="result-winner">${r.winner||''} 🏆</div><div class="result-loser">${r.loser||''}</div><div class="result-score">${r.score||''}</div></div></div>`).join('');

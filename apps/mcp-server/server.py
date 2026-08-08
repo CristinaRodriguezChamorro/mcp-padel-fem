@@ -58,14 +58,42 @@ async def api_calendar():
 
 
 @app.get("/api/live")
-async def api_live():
-    # Marcadores oficiales cambian durante el día: caché de 3 minutos.
-    cached = cache_get("live", 3 * 60)
+async def api_live(gender: str = "female"):
+    # Filtro de género EXCLUSIVO de la pestaña "En juego".
+    gender = (gender or "female").strip().lower()
+    if gender == "women":
+        gender = "female"
+    if gender not in {"female", "male"}:
+        gender = "female"
+
+    cache_key = f"live:{gender}"
+    cached = cache_get(cache_key, 3 * 60)
     if cached:
         return cached
-    data = await get_tournament_now()
-    cache_set("live", data)
+
+    data = await get_tournament_now(gender=gender)
+    cache_set(cache_key, data)
     return data
+
+
+@app.get("/api/live-debug")
+async def api_live_debug(gender: str = "female"):
+    """Diagnóstico mínimo para comprobar qué ve la lógica de En juego."""
+    gender = (gender or "female").strip().lower()
+    if gender == "women":
+        gender = "female"
+    if gender not in {"female", "male"}:
+        gender = "female"
+    data = await get_tournament_now(gender=gender)
+    return {
+        "active": data.get("active", False),
+        "name": data.get("name", ""),
+        "place": data.get("place", ""),
+        "dates": data.get("dates", ""),
+        "gender": data.get("gender", gender),
+        "results_count": len(data.get("results", [])),
+        "source_url": data.get("source_url", ""),
+    }
 
 
 @app.get("/api/photo")
@@ -108,7 +136,7 @@ async def resumen_diario_padel_femenino():
 
 @app.get("/api/version")
 async def api_version():
-    return {"version": "en-juego-v2-2026-08-08"}
+    return {"version": "v7-female-women-news-live-2026-08-08"}
 
 @app.get("/")
 async def index():
@@ -118,7 +146,7 @@ async def index():
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
-            "X-App-Version": "en-juego-v2-2026-08-08",
+            "X-App-Version": "v7-female-women-news-live-2026-08-08",
         },
     )
 
