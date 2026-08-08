@@ -115,13 +115,43 @@ nav {
 .fuente-titulo { color:var(--muted); text-decoration:none; transition:color .2s; }
 .fuente-titulo:hover { color:#fff; }
 
-.ranking-list { display:flex; flex-direction:column; gap:8px; margin-top:4px; }
-.rank-row { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 20px; display:flex; align-items:center; gap:16px; animation:fadeUp .3s ease-out backwards; transition:background .2s; }
-.rank-row:hover { background:rgba(255,255,255,.08); }
-.rank-pos { font-size:1.2em; font-weight:900; width:30px; text-align:center; flex-shrink:0; }
+.ranking-list { display:flex; flex-direction:column; gap:13px; margin-top:8px; }
+.rank-row {
+  background:linear-gradient(135deg,rgba(24,26,37,.98),rgba(17,19,28,.98));
+  border:1px solid var(--border);
+  border-radius:16px;
+  padding:16px 22px;
+  display:grid;
+  grid-template-columns:48px 92px minmax(0,1fr) auto auto;
+  align-items:center;
+  gap:18px;
+  min-height:112px;
+  animation:fadeUp .3s ease-out backwards;
+  transition:transform .2s,border-color .2s,background .2s;
+}
+.rank-row:hover {
+  background:linear-gradient(135deg,rgba(31,34,47,.98),rgba(20,22,32,.98));
+  border-color:rgba(255,77,141,.26);
+  transform:translateY(-1px);
+}
+.rank-pos { font-size:1.38em; font-weight:1000; width:48px; text-align:center; flex-shrink:0; }
 .rank-pos.gold{color:#ffd700} .rank-pos.silver{color:#c0c0c0} .rank-pos.bronze{color:#cd7f32} .rank-pos.other{color:var(--muted)}
-.rank-info { flex:1; } .rank-name { font-weight:700; color:#fff; font-size:.97em; } .rank-pair { font-size:.78em; color:var(--muted); margin-top:2px; }
-.rank-flag { font-size:1.15em; flex-shrink:0; } .rank-pts { font-size:.84em; font-weight:700; color:var(--orange); flex-shrink:0; }
+.rank-photo {
+  width:92px;height:92px;border-radius:14px;overflow:hidden;
+  display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(145deg,var(--pink),#7652cf 60%,var(--orange));
+  border:1px solid rgba(255,255,255,.08);
+  box-shadow:0 8px 20px rgba(0,0,0,.18);
+  color:#fff;font-weight:1000;font-size:1.35em;
+}
+.rank-photo img { width:100%;height:100%;object-fit:cover;object-position:top center;display:block; }
+.rank-photo-fallback { display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px; }
+.rank-photo-ball { font-size:.8em;opacity:.9; }
+.rank-info { min-width:0; }
+.rank-name { font-weight:950;color:#fff;font-size:1.16em;letter-spacing:-.015em; }
+.rank-pair { font-size:.84em;color:var(--muted);margin-top:5px; }
+.rank-flag { font-size:1.45em;flex-shrink:0; }
+.rank-pts { font-size:.94em;font-weight:900;color:var(--orange);flex-shrink:0;white-space:nowrap; }
 
 .torneos-list { display:flex; flex-direction:column; gap:12px; margin-top:4px; }
 .torneo-card { background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden; animation:fadeUp .3s ease-out backwards; transition:background .2s; }
@@ -151,22 +181,94 @@ nav {
 .tv-chip.free     { border-color:rgba(255,200,0,.4);   color:#ffc800; background:rgba(255,200,0,.08); }
 .live-badge { display:inline-flex; align-items:center; gap:5px; font-size:.68em; font-weight:700; color:var(--pink); background:rgba(255,77,141,.1); border:1px solid rgba(255,77,141,.3); padding:2px 9px; border-radius:20px; }
 
-.sponsors-list { display:flex; flex-direction:column; gap:14px; margin-top:4px; }
-.sponsor-card { background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden; animation:fadeUp .35s ease-out backwards; transition:background .2s; }
-.sponsor-card:hover { background:rgba(255,255,255,.07); }
-.sponsor-header { display:flex; align-items:center; gap:16px; padding:18px 24px 16px; border-bottom:1px solid var(--border); }
-.sponsor-avatar { width:50px; height:50px; border-radius:50%; background:linear-gradient(135deg,var(--pink),var(--orange)); display:flex; align-items:center; justify-content:center; font-size:1.5em; flex-shrink:0; overflow:hidden; }
-.sponsor-avatar img { width:100%; height:100%; object-fit:cover; object-position:top center; }
-.sponsor-meta { flex:1; }
-.sponsor-name { font-size:1.02em; font-weight:800; color:#fff; }
-.sponsor-pair { font-size:.78em; color:var(--muted); margin-top:2px; }
-.sponsor-flag { font-size:1.35em; }
-.sponsor-rank-badge { font-size:.66em; font-weight:700; padding:3px 10px; border-radius:20px; background:linear-gradient(135deg,var(--pink),var(--orange)); color:#fff; }
-.sponsor-body { padding:16px 24px 20px; display:flex; flex-direction:column; gap:12px; }
-.sponsor-category { display:flex; flex-direction:column; gap:6px; }
-.category-label { font-size:.6em; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1.2px; }
+.sponsors-list { display:flex; flex-direction:column; gap:22px; margin-top:8px; }
+.sponsor-card {
+  background:linear-gradient(135deg,rgba(25,27,38,.98),rgba(17,19,28,.98));
+  border:1px solid var(--border);
+  border-radius:18px;
+  overflow:hidden;
+  animation:fadeUp .35s ease-out backwards;
+  transition:transform .22s ease,border-color .22s ease,background .22s;
+  box-shadow:0 14px 34px rgba(0,0,0,.16);
+}
+.sponsor-card:hover {
+  background:linear-gradient(135deg,rgba(31,34,47,.98),rgba(20,22,32,.98));
+  border-color:rgba(255,77,141,.28);
+  transform:translateY(-2px);
+}
+.sponsor-header {
+  display:grid;
+  grid-template-columns:150px minmax(0,1fr) auto auto;
+  align-items:center;
+  gap:24px;
+  padding:24px 28px;
+  border-bottom:1px solid var(--border);
+}
+.sponsor-avatar {
+  width:150px;
+  height:165px;
+  border-radius:14px;
+  background:
+    radial-gradient(circle at 30% 20%,rgba(255,255,255,.16),transparent 24%),
+    linear-gradient(135deg,var(--pink),#8c55d6 58%,var(--orange));
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:3.2em;
+  flex-shrink:0;
+  overflow:hidden;
+  box-shadow:0 10px 24px rgba(0,0,0,.22);
+  border:1px solid rgba(255,255,255,.08);
+}
+.sponsor-avatar img {
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  object-position:top center;
+  display:block;
+}
+.sponsor-avatar .sponsor-fallback {
+  width:100%;
+  height:100%;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:9px;
+  color:#fff;
+  background:
+    linear-gradient(145deg,rgba(255,77,141,.88),rgba(119,75,205,.9) 58%,rgba(255,139,61,.88));
+}
+.sponsor-fallback-initials {
+  font-size:.74em;
+  line-height:1;
+  font-weight:1000;
+  letter-spacing:.04em;
+}
+.sponsor-fallback-ball { font-size:.54em; opacity:.9; }
+.sponsor-meta { flex:1; min-width:0; }
+.sponsor-name { font-size:1.42em; font-weight:950; color:#fff; letter-spacing:-.02em; }
+.sponsor-pair { font-size:.9em; color:var(--muted); margin-top:7px; }
+.sponsor-flag { font-size:1.7em; }
+.sponsor-rank-badge {
+  font-size:.76em;
+  font-weight:850;
+  padding:6px 13px;
+  border-radius:20px;
+  background:linear-gradient(135deg,var(--pink),var(--orange));
+  color:#fff;
+  white-space:nowrap;
+}
+.sponsor-body {
+  padding:22px 28px 26px;
+  display:grid;
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:18px 28px;
+}
+.sponsor-category { display:flex; flex-direction:column; gap:8px; }
+.category-label { font-size:.68em; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1.2px; }
 .brand-chips { display:flex; flex-wrap:wrap; gap:6px; }
-.chip { display:inline-flex; align-items:center; gap:5px; font-size:.79em; font-weight:600; padding:4px 12px; border-radius:20px; border:1px solid var(--border); background:rgba(255,255,255,.04); color:var(--text); transition:all .2s; }
+.chip { display:inline-flex; align-items:center; gap:6px; font-size:.86em; font-weight:600; padding:4px 12px; border-radius:20px; border:1px solid var(--border); background:rgba(255,255,255,.04); color:var(--text); transition:all .2s; }
 .chip:hover { background:rgba(255,255,255,.1); color:#fff; }
 .chip.bullpadel { border-color:rgba(255,77,141,.4); color:var(--pink); background:rgba(255,77,141,.08); }
 .chip.head      { border-color:rgba(0,160,230,.4); color:#00a0e6; background:rgba(0,160,230,.08); }
@@ -177,7 +279,7 @@ nav {
 .chip.varlion   { border-color:rgba(255,80,120,.4); color:#ff5078; background:rgba(255,80,120,.08); }
 .chip.vibora    { border-color:rgba(180,100,255,.4); color:#b464ff; background:rgba(180,100,255,.08); }
 .chip.generic   { border-color:var(--border); color:var(--text); }
-.sponsor-note { font-size:.83em; line-height:1.65; color:var(--muted); padding-top:10px; border-top:1px solid var(--border); font-style:italic; }
+.sponsor-note { grid-column:1/-1; font-size:.9em; line-height:1.7; color:var(--muted); padding-top:15px; border-top:1px solid var(--border); font-style:italic; }
 
 .empty-msg { text-align:center; padding:50px 20px; color:var(--muted); font-size:.95em; background:var(--card); border-radius:14px; border:1px solid var(--border); }
 .loading { text-align:center; padding:60px 20px; color:var(--muted); }
@@ -193,7 +295,20 @@ nav {
   .news-featured-body .titular{font-size:1.3em}
   .news-card{padding:20px 20px 20px 22px}
   .news-card .card-num{display:none}
-  .sponsor-header{gap:12px} .sponsor-avatar{width:42px;height:42px;font-size:1.2em}
+  .rank-row{grid-template-columns:38px 70px minmax(0,1fr);gap:11px;padding:13px 14px;min-height:94px}
+  .rank-photo{width:70px;height:70px;border-radius:12px}
+  .rank-pos{width:38px;font-size:1.12em}
+  .rank-name{font-size:1em}
+  .rank-pair{font-size:.73em}
+  .rank-flag{display:none}
+  .rank-pts{grid-column:3;font-size:.82em}
+  .sponsor-header{grid-template-columns:94px minmax(0,1fr);gap:14px;padding:16px}
+  .sponsor-avatar{width:94px;height:112px;border-radius:12px;font-size:2em}
+  .sponsor-flag{justify-self:start}
+  .sponsor-rank-badge{justify-self:start}
+  .sponsor-name{font-size:1.08em}
+  .sponsor-body{grid-template-columns:1fr;padding:17px 16px 20px;gap:14px}
+  .sponsor-note{grid-column:1}
   .torneo-top{padding:14px 16px 12px} .torneo-tv-bar{padding:10px 16px}
 }
 
@@ -305,16 +420,7 @@ nav {
   padding:14px 54px 16px 24px;
   box-shadow:none;
 }
-.next-match:after{
-  content:"›";
-  position:absolute;
-  right:24px;
-  top:50%;
-  transform:translateY(-50%);
-  color:#aaa6b1;
-  font-size:2em;
-  font-weight:300;
-}
+
 .next-label{
   color:#bd76ed;
   font-size:.73em;
@@ -363,49 +469,18 @@ nav {
   margin-top:10px;
 }
 
-.next-status-row{
-  display:flex;
-  align-items:center;
-  gap:9px;
-  margin-bottom:8px;
-}
-.next-status-pill{
-  display:inline-flex;
-  align-items:center;
-  gap:6px;
-  padding:4px 8px;
-  border-radius:999px;
-  font-size:.62em;
+.next-live-score{
+  margin-top:10px;
+  color:#d88cff;
+  font-size:1.05em;
   font-weight:1000;
-  letter-spacing:.7px;
-  text-transform:uppercase;
-}
-.next-status-pill.live{
-  color:#fff;
-  background:rgba(225,42,73,.18);
-  border:1px solid rgba(255,72,103,.46);
-}
-.next-status-pill.live:before{
-  content:"";
-  width:7px;height:7px;border-radius:50%;
-  background:#ff405d;
-  box-shadow:0 0 10px rgba(255,64,93,.72);
-}
-.next-status-pill.scheduled{
-  color:#e8d8f4;
-  background:rgba(150,84,198,.14);
-  border:1px solid rgba(171,105,219,.34);
-}
-.next-status-pill.awaiting{
-  color:#c9c3cf;
-  background:rgba(255,255,255,.045);
-  border:1px solid #3d3945;
+  letter-spacing:.3px;
 }
 .next-status-detail{
-  color:#817c89;
+  margin-top:8px;
+  color:#7f7a87;
   font-size:.69em;
   font-weight:600;
-  margin-top:8px;
 }
 
 /* Cabecera resultados */
@@ -456,10 +531,10 @@ nav {
 .result-card{
   position:relative;
   display:grid;
-  grid-template-columns:38px minmax(0,1fr) 230px 155px 22px;
+  grid-template-columns:38px minmax(0,1fr) 230px 155px;
   grid-template-areas:
-    "trophy winner score date arrow"
-    "trophy loser score date arrow";
+    "trophy winner score date"
+    "trophy loser score date";
   align-items:center;
   column-gap:10px;
   row-gap:2px;
@@ -471,13 +546,7 @@ nav {
   grid-area:trophy;
   font-size:1.05em;
 }
-.result-card:after{
-  content:"›";
-  grid-area:arrow;
-  color:#aaa6b0;
-  font-size:1.5em;
-  font-weight:300;
-}
+
 .result-winner{
   grid-area:winner;
   color:#fff;
@@ -553,7 +622,7 @@ nav {
 .live-dates{justify-self:start}
 .live-watch{gap:9px}
 .next-match{padding:16px}
-.next-match:after{display:none}
+
 .next-versus{display:grid;grid-template-columns:1fr;gap:6px}
 .next-team.right{text-align:left}
 .results-title{align-items:flex-start;flex-direction:column;gap:4px}
@@ -565,7 +634,7 @@ nav {
   gap:4px 8px;
   padding:10px 12px;
 }
-.result-card:after{display:none}
+
 .result-meta{justify-content:flex-start}
 }
 </style>
@@ -679,7 +748,58 @@ async function loadNews(){
   }catch(e){document.getElementById('news-grid').innerHTML=`<div class="empty-msg">Error: ${e.message}</div>`;}
 }
 
-async function loadRanking(){try{const data=await fetch('/api/ranking').then(r=>r.json());const colors=['gold','gold','silver','silver','bronze','other','other','other','other','other'];document.getElementById('ranking-sub').textContent=`Top 10 mundial · ${new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}`;document.getElementById('ranking-list').innerHTML=data.map((p,i)=>`<div class="rank-row" style="animation-delay:${i*.06}s"><div class="rank-pos ${colors[i]||'other'}">${p.pos}</div><div class="rank-info"><div class="rank-name">${p.name}</div><div class="rank-pair">${p.pair||''}</div></div><div class="rank-flag">${p.flag||'🌍'}</div><div class="rank-pts">${p.pts} pts</div></div>`).join('');}catch(e){document.getElementById('ranking-list').innerHTML='<div class="empty-msg">No se pudo cargar el ranking</div>';}}
+async function loadRanking(){
+  const list=document.getElementById('ranking-list');
+
+  const initials=name=>(name||'').split(/\s+/).filter(Boolean).slice(0,2)
+    .map(x=>x[0]?.toUpperCase()||'').join('');
+
+  const fallback=name=>`<div class="rank-photo-fallback"><span>${initials(name)}</span><span class="rank-photo-ball">🎾</span></div>`;
+
+  const findPhoto=async(name)=>{
+    for(const api of ['https://es.wikipedia.org/w/api.php','https://en.wikipedia.org/w/api.php']){
+      try{
+        const url=`${api}?action=query&generator=search&gsrsearch=${encodeURIComponent(name+' pádel')}&gsrlimit=5&prop=pageimages&format=json&pithumbsize=700&origin=*`;
+        const d=await(await fetch(url)).json();
+        const pages=Object.values(d.query?.pages||{});
+        const src=pages.find(p=>p.thumbnail?.source)?.thumbnail?.source;
+        if(src)return src;
+      }catch(e){}
+    }
+    return null;
+  };
+
+  const loadPhoto=async(p,i)=>{
+    const box=document.getElementById(`rank-photo-${i}`);
+    if(!box)return;
+    const src=await findPhoto(p.name);
+    if(src){
+      box.innerHTML=`<img src="${src}" alt="${p.name}" loading="lazy" onerror="this.parentElement.innerHTML='${fallback(p.name).replace(/'/g,"&#39;")}'">`;
+    }
+  };
+
+  try{
+    const data=await fetch('/api/ranking').then(r=>r.json());
+    const colors=['gold','gold','silver','silver','bronze',...Array(30).fill('other')];
+    document.getElementById('ranking-sub').textContent=`Top 20 mundial · ${new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}`;
+
+    list.innerHTML=data.map((p,i)=>`
+      <div class="rank-row" style="animation-delay:${i*.045}s">
+        <div class="rank-pos ${colors[i]||'other'}">${p.pos}</div>
+        <div class="rank-photo" id="rank-photo-${i}">${fallback(p.name)}</div>
+        <div class="rank-info">
+          <div class="rank-name">${p.name}</div>
+          <div class="rank-pair">${p.pair||''}</div>
+        </div>
+        <div class="rank-flag">${p.flag||'🌍'}</div>
+        <div class="rank-pts">${p.pts} pts</div>
+      </div>`).join('');
+
+    data.forEach((p,i)=>loadPhoto(p,i));
+  }catch(e){
+    list.innerHTML='<div class="empty-msg">No se pudo cargar el ranking</div>';
+  }
+}
 
 const TV_BY_BADGE={major:[{name:'Red Bull TV',cls:'redbull',icon:'🐂'},{name:'Movistar+',cls:'movistar',icon:'📡'}],p1:[{name:'Red Bull TV',cls:'redbull',icon:'🐂'},{name:'Movistar+',cls:'movistar',icon:'📡'}],p2:[{name:'Movistar+',cls:'movistar',icon:'📡'},{name:'YouTube',cls:'youtube',icon:'▶️'}],fip:[{name:'YouTube',cls:'youtube',icon:'▶️'}]};
 function tvPlatforms(tvString,badge){if(tvString&&tvString.trim().length>0){const parts=tvString.split(/[·,&+\/]/).map(s=>s.trim()).filter(Boolean);if(parts.length>0)return parts.map(p=>{const pl=p.toLowerCase();let cls='generic',icon='📺';if(pl.includes('red bull')){cls='redbull';icon='🐂';}else if(pl.includes('movistar')){cls='movistar';icon='📡';}else if(pl.includes('youtube')){cls='youtube';icon='▶️';}else if(pl.includes('twitch')){cls='twitch';icon='🟣';}else if(pl.includes('dazn')){cls='dazn';icon='🟢';}else if(pl.includes('gratis')||pl.includes('free')){cls='free';icon='🆓';}return{name:p,cls,icon};});}return TV_BY_BADGE[badge]||TV_BY_BADGE['fip'];}
@@ -714,21 +834,19 @@ async function loadEnJuego(){
       .join('');
 
     let nextHtml='';
-    if(d.next_match){
-      const n=d.next_match;
-      const status=n.status||'scheduled';
-      const statusLabel=n.status_label||'PRÓXIMO PARTIDO';
+    const topMatch=d.current_match||d.next_match;
+    if(topMatch){
+      const n=topMatch;
+      const isLive=n.status==='live';
       nextHtml=`<div class="next-match">
-        <div class="next-status-row">
-          <span class="next-status-pill ${status}">${statusLabel}</span>
-        </div>
-        <div class="next-label">${status==='live'?'Partido en curso':'Próximo partido'}</div>
+        <div class="next-label">${isLive?'🔴 EN DIRECTO':'Próximo partido'}</div>
         <div class="next-round">${n.round||'Próximo partido'}</div>
         <div class="next-versus">
           <div class="next-team">${n.pair1||''}</div>
           <div class="next-vs">vs</div>
           <div class="next-team right">${n.pair2||''}</div>
         </div>
+        ${isLive&&n.score?`<div class="next-live-score">${n.score}</div>`:''}
         <div class="next-when">🕒 ${n.when||'Horario por confirmar'}</div>
         ${n.status_detail?`<div class="next-status-detail">${n.status_detail}</div>`:''}
       </div>`;
@@ -805,7 +923,86 @@ async function loadEnJuego(){
 }
 
 const SPONSORS_DATA=[{name:"Gemma Triay",pair:"Pareja: Delfina Brea",flag:"🇪🇸",emoji:"👑",rank:"#1",wikiTitle:"Gemma_Triay",note:"La número 1 del mundo. Bullpadel construyó su pala más vendida en torno a ella. Contrato hasta 2027.",categories:[{label:"🏏 Pala",brands:[{name:"Bullpadel Elite W 2026",cls:"bullpadel"}]},{label:"👕 Ropa",brands:[{name:"Bullpadel",cls:"bullpadel"}]},{label:"👟 Calzado",brands:[{name:"Bullpadel Hack",cls:"bullpadel"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Delfina Brea",pair:"Pareja: Gemma Triay",flag:"🇦🇷",emoji:"⭐",rank:"#2",wikiTitle:"Delfina_Brea",note:"La argentina más dominante de la historia del circuito. Bullpadel la tiene como embajadora global.",categories:[{label:"🏏 Pala",brands:[{name:"Bullpadel Vertex 05 W 2026",cls:"bullpadel"}]},{label:"👕 Ropa",brands:[{name:"Bullpadel",cls:"bullpadel"}]},{label:"👟 Calzado",brands:[{name:"Bullpadel Hack",cls:"bullpadel"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Ari Sánchez",pair:"Pareja: Paula Josemaría",flag:"🇪🇸",emoji:"🔥",rank:"#3",wikiTitle:"Ari_Sánchez",note:"Fichaje estrella de Adidas en 2025. Su carisma la convierte en la cara más marketiniana del pádel femenino español.",categories:[{label:"🏏 Pala",brands:[{name:"Adidas Metalbone W 2026",cls:"adidas"}]},{label:"👕 Ropa",brands:[{name:"Adidas",cls:"adidas"}]},{label:"👟 Calzado",brands:[{name:"Adidas Adizero",cls:"adidas"}]},{label:"⌚ Otros",brands:[{name:"Garmin",cls:"generic"}]}]},{name:"Paula Josemaría",pair:"Pareja: Ari Sánchez",flag:"🇪🇸",emoji:"💥",rank:"#4",wikiTitle:"Paula_Josemaría",note:"La pegada más potente del circuito. Head la fichó hace años y sigue siendo una de sus apuestas más claras.",categories:[{label:"🏏 Pala",brands:[{name:"Head Delta Pro W 2026",cls:"head"}]},{label:"👕 Ropa",brands:[{name:"Head",cls:"head"}]},{label:"👟 Calzado",brands:[{name:"Head Sprint Pro",cls:"head"}]},{label:"🥤 Nutrición",brands:[{name:"HSN",cls:"generic"}]}]},{name:"Alejandra Salazar",pair:"Pareja: Lucía Sainz",flag:"🇪🇸",emoji:"🏆",rank:"#5",wikiTitle:"Alejandra_Salazar",note:"Leyenda viva del circuito. Adidas la ha renovado season tras season; uno de los contratos más longevos del pádel femenino español.",categories:[{label:"🏏 Pala",brands:[{name:"Adidas Adipower W 2026",cls:"adidas"}]},{label:"👕 Ropa",brands:[{name:"Adidas",cls:"adidas"}]},{label:"👟 Calzado",brands:[{name:"Adidas Adizero",cls:"adidas"}]},{label:"🎾 Pelotas",brands:[{name:"Adidas",cls:"adidas"}]}]},{name:"Lucía Sainz",pair:"Pareja: Alejandra Salazar",flag:"🇪🇸",emoji:"✨",rank:"#6",wikiTitle:"Lucía_Sainz",note:"Nox la apoya desde sus inicios. Una de las jugadoras más seguidas en redes; clave para la marca en Europa.",categories:[{label:"🏏 Pala",brands:[{name:"Nox ML10 Pro Cup W 2026",cls:"nox"}]},{label:"👕 Ropa",brands:[{name:"Nox",cls:"nox"}]},{label:"👟 Calzado",brands:[{name:"K-Swiss Ultrashot",cls:"k-swiss"}]},{label:"🧴 Recuperación",brands:[{name:"Pilexil",cls:"generic"}]}]},{name:"Marta Ortega",pair:"Pareja: Ariana Sánchez",flag:"🇪🇸",emoji:"🎯",rank:"#7",wikiTitle:"Marta_Ortega_Gallego",note:"Nox apostó fuerte por ella y le está saliendo de lujo. Marta es la imagen de la renovación de la marca.",categories:[{label:"🏏 Pala",brands:[{name:"Nox AT10 Luxury W 2026",cls:"nox"}]},{label:"👕 Ropa",brands:[{name:"Nox",cls:"nox"}]},{label:"👟 Calzado",brands:[{name:"K-Swiss Ultrashot",cls:"k-swiss"}]},{label:"⌚ Otros",brands:[{name:"Garmin",cls:"generic"}]}]},{name:"Ariana Sánchez",pair:"Pareja: Marta Ortega",flag:"🇪🇸",emoji:"🚀",rank:"#8",wikiTitle:"Ariana_Sánchez_Fallada",note:"Head la tiene muy bien atada. Su nueva pareja con Marta promete resultados y más visibilidad para la marca.",categories:[{label:"🏏 Pala",brands:[{name:"Head Graphene W 2026",cls:"head"}]},{label:"👕 Ropa",brands:[{name:"Head",cls:"head"}]},{label:"👟 Calzado",brands:[{name:"Head Sprint Pro",cls:"head"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Jessica Castello",pair:"Pareja: Tamara Icardo",flag:"🇪🇸",emoji:"🌟",rank:"Top 10",wikiTitle:"Jessica_Castello",note:"Vibora la ha hecho su bandera en el pádel femenino español. Muy activa en RRSS y con una comunidad fiel.",categories:[{label:"🏏 Pala",brands:[{name:"Vibora Yarara Edition W",cls:"vibora"}]},{label:"👕 Ropa",brands:[{name:"Vibora",cls:"vibora"}]},{label:"👟 Calzado",brands:[{name:"Asics Gel-Padel",cls:"asics"}]}]},{name:"Tamara Icardo",pair:"Pareja: Jessica Castello",flag:"🇪🇸",emoji:"💪",rank:"Top 10",wikiTitle:"Tamara_Icardo",note:"Varlion la acompaña desde que debutó en el circuito profesional. Imagen de la elegancia dentro de la pista.",categories:[{label:"🏏 Pala",brands:[{name:"Varlion LW Carbon W 2026",cls:"varlion"}]},{label:"👕 Ropa",brands:[{name:"Varlion",cls:"varlion"}]},{label:"👟 Calzado",brands:[{name:"Asics Gel-Padel",cls:"asics"}]},{label:"🥤 Nutrición",brands:[{name:"Powerade",cls:"generic"}]}]}];
-function renderSponsors(){const list=document.getElementById('sponsors-list');const fetchPhoto=async(title,idx)=>{if(!title)return;try{const url=`https://es.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&format=json&pithumbsize=400&origin=*`;const d=await(await fetch(url)).json();const src=Object.values(d.query.pages)[0]?.thumbnail?.source;if(src){const av=document.getElementById(`av-${idx}`);if(av)av.innerHTML=`<img src="${src}" alt="">`;}}catch{}};list.innerHTML=SPONSORS_DATA.map((p,i)=>`<div class="sponsor-card" style="animation-delay:${i*.07}s"><div class="sponsor-header"><div class="sponsor-avatar" id="av-${i}">${p.emoji}</div><div class="sponsor-meta"><div class="sponsor-name">${p.name}</div><div class="sponsor-pair">${p.pair}</div></div><div class="sponsor-flag">${p.flag}</div><div class="sponsor-rank-badge">${p.rank}</div></div><div class="sponsor-body">${p.categories.map(cat=>`<div class="sponsor-category"><div class="category-label">${cat.label}</div><div class="brand-chips">${cat.brands.map(b=>`<span class="chip ${b.cls}"><span style="font-size:.9em">▸</span>${b.name}</span>`).join('')}</div></div>`).join('')}<div class="sponsor-note">${p.note}</div></div></div>`).join('');SPONSORS_DATA.forEach((p,i)=>fetchPhoto(p.wikiTitle,i));}
+function renderSponsors(){
+  const list=document.getElementById('sponsors-list');
+
+  const initials=name=>(name||'')
+    .split(/\s+/).filter(Boolean).slice(0,2)
+    .map(x=>x[0]?.toUpperCase()||'').join('');
+
+  const fallbackMarkup=p=>`
+    <div class="sponsor-fallback" aria-label="Imagen de ${p.name}">
+      <div class="sponsor-fallback-initials">${initials(p.name)}</div>
+      <div class="sponsor-fallback-ball">🎾</div>
+    </div>`;
+
+  const getWikiThumb=async(api,title)=>{
+    if(!title)return null;
+    const url=`${api}?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&format=json&pithumbsize=900&origin=*`;
+    const d=await(await fetch(url)).json();
+    return Object.values(d.query?.pages||{})[0]?.thumbnail?.source||null;
+  };
+
+  const searchWikiThumb=async(api,name)=>{
+    const url=`${api}?action=query&generator=search&gsrsearch=${encodeURIComponent(name+' pádel')}&gsrlimit=5&prop=pageimages&format=json&pithumbsize=900&origin=*`;
+    const d=await(await fetch(url)).json();
+    const pages=Object.values(d.query?.pages||{});
+    return pages.find(x=>x.thumbnail?.source)?.thumbnail?.source||null;
+  };
+
+  const fetchPhoto=async(p,idx)=>{
+    const av=document.getElementById(`av-${idx}`);
+    if(!av)return;
+
+    const apis=[
+      'https://es.wikipedia.org/w/api.php',
+      'https://en.wikipedia.org/w/api.php'
+    ];
+
+    let src=null;
+    try{
+      // 1) exact configured Wikipedia page
+      src=await getWikiThumb(apis[0],p.wikiTitle);
+      // 2) Spanish Wikipedia search by player name
+      if(!src)src=await searchWikiThumb(apis[0],p.name);
+      // 3) English Wikipedia exact/search fallback
+      if(!src)src=await getWikiThumb(apis[1],p.wikiTitle);
+      if(!src)src=await searchWikiThumb(apis[1],p.name);
+    }catch(e){}
+
+    if(src){
+      av.innerHTML=`<img src="${src}" alt="${p.name}" loading="lazy"
+        onerror="this.parentElement.innerHTML=\`${fallbackMarkup(p).replace(/`/g,'\\`')}\`">`;
+    }else{
+      av.innerHTML=fallbackMarkup(p);
+    }
+  };
+
+  list.innerHTML=SPONSORS_DATA.map((p,i)=>`
+    <div class="sponsor-card" style="animation-delay:${i*.07}s">
+      <div class="sponsor-header">
+        <div class="sponsor-avatar" id="av-${i}">${fallbackMarkup(p)}</div>
+        <div class="sponsor-meta">
+          <div class="sponsor-name">${p.name}</div>
+          <div class="sponsor-pair">${p.pair}</div>
+        </div>
+        <div class="sponsor-flag">${p.flag}</div>
+        <div class="sponsor-rank-badge">${p.rank}</div>
+      </div>
+      <div class="sponsor-body">
+        ${p.categories.map(cat=>`
+          <div class="sponsor-category">
+            <div class="category-label">${cat.label}</div>
+            <div class="brand-chips">
+              ${cat.brands.map(b=>`<span class="chip ${b.cls}"><span style="font-size:.9em">▸</span>${b.name}</span>`).join('')}
+            </div>
+          </div>`).join('')}
+        <div class="sponsor-note">${p.note}</div>
+      </div>
+    </div>`).join('');
+
+  SPONSORS_DATA.forEach((p,i)=>fetchPhoto(p,i));
+}
 
 buildSlideshow();loadNews();loadEnJuego();loadRanking();loadTorneos();renderSponsors();
 </script>

@@ -132,7 +132,7 @@ async def get_ranking_live() -> list:
 
             ranking.append({"pos": pos, "name": name, "pair": "", "flag": flag, "pts": pts})
 
-            if len(ranking) >= 10:
+            if len(ranking) >= 20:
                 break
 
         except Exception as e:
@@ -197,6 +197,24 @@ def _is_live(day_str: str, month_str: str) -> bool:
         return start <= today <= end
     except Exception:
         return False
+
+
+def _calendar_end_date(t: dict) -> date | None:
+    MONTHS = {
+        "Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,
+        "Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12,
+    }
+    try:
+        month = MONTHS.get(str(t.get("month",""))[:3].title())
+        if not month:
+            return None
+        nums = [int(x) for x in re.findall(r"\d+", str(t.get("day","")))]
+        if not nums:
+            return None
+        end_day = nums[-1]
+        return date(date.today().year, month, end_day)
+    except Exception:
+        return None
 
 
 async def get_calendar_live() -> list:
@@ -299,10 +317,51 @@ async def get_calendar_live() -> list:
     for t in torneos:
         t["live"] = _is_live(t.get("day", ""), t.get("month", ""))
 
-    # Current/live first, then as source order; cap to 6 for UI.
-    live_now = [t for t in torneos if t["live"]]
-    rest = [t for t in torneos if not t["live"]]
-    return (live_now + rest)[:6]
+    # Never show tournaments that already finished.
+    today = date.today()
+    filtered = []
+    for t in torneos:
+        end_dt = _calendar_end_date(t)
+        if end_dt is None:
+            # Keep only if we cannot determine the date and it is explicitly live.
+            if t.get("live"):
+                filtered.append(t)
+            continue
+        if end_dt >= today:
+            filtered.append(t)
+
+    # If the scraped source is unavailable/outdated, use a current official
+    # Premier Padel 2026 fallback from August onward.
+    if not filtered:
+        filtered = [
+            {"day":"3-9","month":"Aug","name":"London P1","place":"London 🇬🇧","badge":"p1","badgeText":"P1","tv":"Red Bull TV · Movistar+","live":_is_live("3-9","Aug")},
+            {"day":"31-6","month":"Aug","name":"Madrid P1","place":"Madrid 🇪🇸","badge":"p1","badgeText":"P1","tv":"Red Bull TV · Movistar+","live":False},
+            {"day":"7-13","month":"Sep","name":"Paris Major","place":"Paris 🇫🇷","badge":"major","badgeText":"MAJOR","tv":"Red Bull TV · Movistar+","live":False},
+            {"day":"28-4","month":"Sep","name":"Rotterdam P2","place":"Rotterdam 🇳🇱","badge":"p2","badgeText":"P2","tv":"Movistar+ · YouTube","live":False},
+            {"day":"5-11","month":"Oct","name":"Germany P2","place":"Germany 🇩🇪","badge":"p2","badgeText":"P2","tv":"Movistar+ · YouTube","live":False},
+            {"day":"12-18","month":"Oct","name":"Milano P1","place":"Milano 🇮🇹","badge":"p1","badgeText":"P1","tv":"Red Bull TV · Movistar+","live":False},
+            {"day":"26-31","month":"Oct","name":"Kuwait Major","place":"Kuwait 🇰🇼","badge":"major","badgeText":"MAJOR","tv":"Red Bull TV · Movistar+","live":False},
+            {"day":"8-15","month":"Nov","name":"Dubai P1","place":"Dubai 🇦🇪","badge":"p1","badgeText":"P1","tv":"Red Bull TV · Movistar+","live":False},
+            {"day":"23-29","month":"Nov","name":"Mexico Major","place":"Acapulco 🇲🇽","badge":"major","badgeText":"MAJOR","tv":"Red Bull TV · Movistar+","live":False},
+            {"day":"7-13","month":"Dec","name":"Premier Padel Finals","place":"Barcelona 🇪🇸","badge":"major","badgeText":"FINALS","tv":"Red Bull TV · Movistar+","live":False},
+        ]
+        filtered = [t for t in filtered if (_calendar_end_date(t) or today) >= today]
+
+    # Current tournament first, then future tournaments chronologically.
+    def sort_key(t):
+        end_dt = _calendar_end_date(t) or date.max
+        # approximate start date using first number in day range
+        try:
+            month_map={"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,"Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
+            month=month_map.get(str(t.get("month",""))[:3].title(),12)
+            start_day=int(re.findall(r"\d+",str(t.get("day","")))[0])
+            start_dt=date(today.year,month,start_day)
+        except Exception:
+            start_dt=end_dt
+        return (0 if t.get("live") else 1, start_dt)
+
+    filtered.sort(key=sort_key)
+    return filtered[:10]
 
 
 def _fallback_ranking() -> list:
@@ -1875,71 +1934,213 @@ def _fallback_next_match(results: list, next_match: dict | None, event: dict) ->
     }
 
 
-def _decorate_next_match_status(next_match: dict | None, event: dict) -> dict | None:
+async def _extract_current_womens_match(event: dict) -> dict | None:
     """
-    Añade estado visual al bloque superior SIN cambiar cómo se obtiene el partido.
+    Consulta exclusivamente la vista Live Score de FIP.
 
-    status:
-      scheduled -> todavía no ha empezado
-      live      -> por hora debería estar disputándose
-      awaiting  -> FIP no dio parejas/hora exactas todavía
-
-    No inventa marcador ni resultado.
+    NO modifica ni reutiliza el extractor de resultados históricos.
+    Devuelve partido femenino actual solo si FIP muestra 4 jugadoras
+    del ranking femenino en el mismo bloque de live score.
     """
-    if not isinstance(next_match, dict):
-        return next_match
+    if async_playwright is None:
+        return None
 
-    out = dict(next_match)
-    now_madrid = datetime.now(ZoneInfo("Europe/Madrid"))
+    url = event.get("url", "")
+    if not url:
+        return None
 
-    iso = str(out.get("iso_madrid", "") or "").strip()
-    pair1 = str(out.get("pair1", "") or "").strip()
-    pair2 = str(out.get("pair2", "") or "").strip()
+    try:
+        ranking_names = await get_womens_ranking_names(limit=250)
+    except Exception:
+        ranking_names = []
 
-    placeholder = (
-        not pair1 or not pair2 or
-        "por confirmar" in pair1.casefold() or
-        "por confirmar" in pair2.casefold()
-    )
+    ranking_norm = [_norm_person_name(x) for x in ranking_names if x]
+    if not ranking_norm:
+        return None
 
-    if iso:
-        try:
-            start = datetime.fromisoformat(iso)
-            if start.tzinfo is None:
-                start = start.replace(tzinfo=ZoneInfo("Europe/Madrid"))
+    browser = None
+
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            )
+
+            page = await browser.new_page(
+                viewport={"width": 1440, "height": 1600},
+                locale="en-US",
+            )
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            await page.wait_for_timeout(1200)
+
+            # Open Live Score.
+            live_opened = False
+            for label in ("Live Score", "Live", "Marcador en directo", "Directo"):
+                try:
+                    loc = page.get_by_text(label, exact=True).first
+                    if await loc.count() and await loc.is_visible():
+                        await loc.click(force=True, timeout=2500)
+                        await page.wait_for_timeout(1000)
+                        live_opened = True
+                        break
+                except Exception:
+                    pass
+
+            if not live_opened:
+                # Some FIP pages expose Live Score as a tab/anchor with surrounding text.
+                try:
+                    live_opened = await page.evaluate(
+                        r"""
+                        () => {
+                          const clean=s=>(s||'').replace(/\s+/g,' ').trim().toLowerCase();
+                          const nodes=Array.from(document.querySelectorAll('a,button,[role=tab],[role=button]'));
+                          const el=nodes.find(x=>['live score','live','directo','marcador en directo'].includes(clean(x.textContent)));
+                          if(!el)return false;
+                          el.click();
+                          el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                          return true;
+                        }
+                        """
+                    )
+                    if live_opened:
+                        await page.wait_for_timeout(1000)
+                except Exception:
+                    pass
+
+            # Activate Female ONLY inside Live Score probe.
+            for label in ("Female", "Women", "Femenino", "Femenina"):
+                try:
+                    loc = page.get_by_text(label, exact=True).first
+                    if await loc.count() and await loc.is_visible():
+                        await loc.click(force=True, timeout=2200)
+                        await page.wait_for_timeout(900)
+                        break
+                except Exception:
+                    pass
+
+            # Find the smallest visible container with exactly four ranked women.
+            state = await page.evaluate(
+                r"""
+                (ranking) => {
+                  const norm=s=>(s||'')
+                    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+                    .toLowerCase().replace(/[^a-z0-9]+/g,' ')
+                    .replace(/\s+/g,' ').trim();
+                  const clean=s=>(s||'').replace(/\s+/g,' ').trim();
+                  const all=Array.from(document.querySelectorAll('body *'));
+                  const candidates=[];
+
+                  for(const el of all){
+                    const style=getComputedStyle(el);
+                    if(style.display==='none'||style.visibility==='hidden')continue;
+                    const text=clean(el.innerText);
+                    if(!text||text.length<25||text.length>1800)continue;
+                    const nt=' '+norm(text)+' ';
+                    const players=[...new Set(ranking.filter(p=>p && nt.includes(' '+p+' ')))];
+                    if(players.length!==4)continue;
+
+                    const scoreCells=Array.from(el.querySelectorAll('*'))
+                      .filter(x=>x.children.length===0)
+                      .map(x=>clean(x.textContent))
+                      .filter(x=>/^\d{1,2}$/.test(x))
+                      .map(Number)
+                      .filter(n=>n>=0&&n<=20);
+
+                    candidates.push({el,text,players,scores:scoreCells});
+                  }
+
+                  const minimal=candidates.filter(c=>
+                    !candidates.some(o=>o!==c && c.el.contains(o.el))
+                  );
+
+                  if(!minimal.length)return null;
+
+                  // Prefer blocks that explicitly look live/in progress.
+                  minimal.sort((a,b)=>{
+                    const score=t=>/\b(live|in progress|playing|set|court|directo|en juego)\b/i.test(t)?1:0;
+                    return score(b.text)-score(a.text);
+                  });
+
+                  const c=minimal[0];
+
+                  // Player order by occurrence in visible text.
+                  const nt=' '+norm(c.text)+' ';
+                  const ordered=c.players
+                    .map(p=>({p,i:nt.indexOf(' '+p+' ')}))
+                    .filter(x=>x.i>=0)
+                    .sort((a,b)=>a.i-b.i)
+                    .map(x=>x.p);
+
+                  return {
+                    text:c.text,
+                    players:ordered,
+                    scores:c.scores
+                  };
+                }
+                """,
+                ranking_norm,
+            )
+
+            await browser.close()
+            browser = None
+
+            if not state or len(state.get("players", [])) != 4:
+                return None
+
+            players = [str(x).title() for x in state["players"]]
+            text = str(state.get("text", ""))
+            scores = [int(x) for x in state.get("scores", []) if str(x).isdigit()]
+
+            pair1 = f"{players[0]} / {players[1]}"
+            pair2 = f"{players[2]} / {players[3]}"
+
+            # Display raw current score conservatively.
+            # We do not infer winner because the match is still live.
+            score_text = ""
+            if len(scores) >= 2:
+                if len(scores) % 2 == 0:
+                    score_text = "  ".join(
+                        f"{scores[i]}-{scores[i+1]}"
+                        for i in range(0, min(len(scores), 6), 2)
+                    )
+                else:
+                    score_text = " · ".join(str(x) for x in scores[:6])
+
+            low = text.lower()
+            if re.search(r"semi[- ]?final", low):
+                rnd = "Semifinales"
+            elif re.search(r"quarter[- ]?final", low):
+                rnd = "Cuartos de final"
+            elif re.search(r"round of 16|octav", low):
+                rnd = "Octavos de final"
+            elif re.search(r"\bfinal\b", low):
+                rnd = "Final"
             else:
-                start = start.astimezone(ZoneInfo("Europe/Madrid"))
+                rnd = _stage_from_event(event)
 
-            # Padel matches commonly last ~60-150 min. We use a conservative
-            # 3-hour window only to label "en directo"; never to infer a result.
-            if now_madrid < start - timedelta(minutes=10):
-                out["status"] = "scheduled"
-                out["status_label"] = "PRÓXIMO PARTIDO"
-                out["status_detail"] = "Programado"
-            elif start - timedelta(minutes=10) <= now_madrid <= start + timedelta(hours=3):
-                out["status"] = "live"
-                out["status_label"] = "EN DIRECTO"
-                out["status_detail"] = "Partido en curso · al finalizar aparecerá automáticamente en resultados"
-            else:
-                out["status"] = "awaiting"
-                out["status_label"] = "PARTIDO DE HOY"
-                out["status_detail"] = "Esperando actualización oficial de FIP"
-            return out
-        except Exception:
-            pass
+            return {
+                "status": "live",
+                "status_label": "EN DIRECTO",
+                "round": rnd,
+                "pair1": pair1,
+                "pair2": pair2,
+                "score": score_text,
+                "when": "Ahora · hora de España",
+                "iso_madrid": datetime.now(ZoneInfo("Europe/Madrid")).isoformat(),
+                "status_detail": "Cuando termine, el resultado pasará automáticamente al bloque de resultados.",
+                "source": "FIP Live Score",
+            }
 
-    if placeholder:
-        out["status"] = "awaiting"
-        out["status_label"] = "PARTIDO DE HOY"
-        out["status_detail"] = (
-            "FIP todavía no ha publicado o no ha expuesto las parejas y la hora exacta"
-        )
-    else:
-        out["status"] = "scheduled"
-        out["status_label"] = "PRÓXIMO PARTIDO"
-        out["status_detail"] = "Horario oficial pendiente de confirmar"
+    except Exception as exc:
+        print(f"  live-score probe error: {type(exc).__name__}: {exc}")
+        if browser is not None:
+            try:
+                await browser.close()
+            except Exception:
+                pass
 
-    return out
+    return None
 
 
 async def get_tournament_now(gender: str = "female") -> dict:
@@ -1961,10 +2162,11 @@ async def get_tournament_now(gender: str = "female") -> dict:
         _get_watch_official(),
         _extract_official_results(event, gender),
         _extract_next_womens_match(event) if gender in {"female", "women", "woman"} else asyncio.sleep(0, result=None),
+        _extract_current_womens_match(event) if gender in {"female", "women", "woman"} else asyncio.sleep(0, result=None),
         return_exceptions=True,
     )
 
-    watch, results, next_match = parts
+    watch, results, next_match, current_match = parts
 
     if isinstance(watch, Exception):
         print(f"  live watch error: {watch}")
@@ -1975,6 +2177,9 @@ async def get_tournament_now(gender: str = "female") -> dict:
     if isinstance(next_match, Exception):
         print(f"  live next-match error: {next_match}")
         next_match = None
+    if isinstance(current_match, Exception):
+        print(f"  current live-match error: {current_match}")
+        current_match = None
 
     # IMPORTANT: extractor v39 remains untouched.
     # Round labels and next-match fallback are applied only AFTER extraction.
@@ -1988,7 +2193,7 @@ async def get_tournament_now(gender: str = "female") -> dict:
             normalized_results.append(normalized)
 
     normalized_next = _normalize_next_match(next_match)
-    normalized_next = _decorate_next_match_status(normalized_next, event)
+    normalized_current = current_match if isinstance(current_match, dict) else None
 
     return {
         "active": True,
@@ -1998,6 +2203,7 @@ async def get_tournament_now(gender: str = "female") -> dict:
         "watch": watch or [],
         "results": normalized_results,
         "next_match": normalized_next,
+        "current_match": normalized_current,
         "updated": today_str,
         "gender": gender,
         "source": "FIP · Premier Padel",
