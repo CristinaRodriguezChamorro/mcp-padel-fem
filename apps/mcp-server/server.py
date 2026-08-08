@@ -5,10 +5,12 @@ import httpx
 import asyncio
 import re
 import unicodedata
+from urllib.parse import quote
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse, Response, JSONResponse
 from fastmcp import FastMCP
+from bs4 import BeautifulSoup
 from tools.news import get_latest_news
 from tools.live_data import get_ranking_live, get_calendar_live, get_tournament_now
 
@@ -190,21 +192,114 @@ def _photo_title_matches(alias: str, title: str) -> bool:
     return first_name in t and first_surname in t
 
 
+async def _fip_player_photo(name: str) -> str | None:
+    """
+    Fuente principal para fotos: perfil OFICIAL FIP.
+    Los slugs oficiales usan normalmente el nombre civil completo:
+      Gemma Triay Pons -> /player/gemma-triay-pons/
+      Delfina Brea Senesi -> /player/delfina-brea-senesi/
+    """
+    slug = "-".join(_photo_norm(name).split())
+    if not slug:
+        return None
+
+    urls = [
+        f"https://www.padelfip.com/player/{slug}/",
+        f"https://www.padelfip.com/es/player/{slug}/",
+    ]
+
+    headers = {"User-Agent": "Mozilla/5.0 PadelFemMCP/1.0"}
+    timeout = httpx.Timeout(12.0)
+
+    async with httpx.AsyncClient(follow_redirects=True, timeout=timeout, headers=headers) as client:
+        for profile_url in urls:
+            try:
+                resp = await client.get(profile_url)
+                if resp.status_code != 200:
+                    continue
+
+                soup = BeautifulSoup(resp.text, "html.parser")
+
+                # Prefer image elements actually associated with the player's name.
+                first, *rest = _photo_norm(name).split()
+                surname = rest[0] if rest else ""
+
+                candidates = []
+                for img in soup.find_all("img"):
+                    src = img.get("src") or img.get("data-src") or img.get("data-lazy-src")
+                    if not src:
+                        continue
+                    alt = _photo_norm(img.get("alt",""))
+                    classes = " ".join(img.get("class",[])).lower()
+                    parent_classes = " ".join(img.parent.get("class",[])).lower() if img.parent else ""
+
+                    score = 0
+                    if first and first in alt: score += 4
+                    if surname and surname in alt: score += 5
+                    if "player" in classes or "player" in parent_classes: score += 3
+                    if "profile" in classes or "profile" in parent_classes: score += 3
+                    if "avatar" in classes or "avatar" in parent_classes: score += 2
+
+                    # Ignore obvious flags/logos/icons.
+                    low_src = src.lower()
+                    if any(x in low_src for x in ("flag","logo","icon","premier-padel","cupra")):
+                        score -= 6
+
+                    if score > 0:
+                        if src.startswith("//"):
+                            src = "https:" + src
+                        elif src.startswith("/"):
+                            src = "https://www.padelfip.com" + src
+                        candidates.append((score, src, alt))
+
+                if candidates:
+                    candidates.sort(key=lambda x:x[0], reverse=True)
+                    src=candidates[0][1]
+                    print(f"  photo: {name} -> FIP profile ({profile_url})")
+                    return src
+
+                # Fallback: OpenGraph image only if it isn't an obvious generic/site image.
+                og=soup.find("meta", attrs={"property":"og:image"})
+                src=og.get("content") if og else None
+                if src:
+                    low=src.lower()
+                    if not any(x in low for x in ("logo","default","generic","placeholder")):
+                        print(f"  photo: {name} -> FIP og:image ({profile_url})")
+                        return src
+
+            except Exception:
+                pass
+
+    return None
+
+
 async def _wiki_player_photo(name: str, wiki_title: str = "") -> str | None:
     """
-    Resolve a public photo server-side using aliases, Wikipedia ES/EN and Commons.
+    Resolver en este orden:
+      1. Perfil oficial FIP (mejor fuente para jugadoras de pádel)
+      2. Wikipedia ES/EN
+      3. Wikimedia Commons
+
+    Google Images no se scrapea: es frágil y requiere API/credenciales para uso
+    estable en producción.
     """
-    cache_key = f"player-photo-v56:{_photo_norm(name)}:{_photo_norm(wiki_title)}"
+    cache_key = f"player-photo-v58:{_photo_norm(name)}:{_photo_norm(wiki_title)}"
     cached = cache_get(cache_key, 7 * 24 * 60 * 60)
     if cached is not None:
         return cached or None
+
+    # 1) Official FIP profile.
+    fip_src = await _fip_player_photo(name)
+    if fip_src:
+        cache_set(cache_key, fip_src)
+        return fip_src
 
     aliases = _photo_aliases(name, wiki_title)
     timeout = httpx.Timeout(12.0)
     headers = {"User-Agent": "PadelFemMCP/1.0 (player-photo resolver)"}
 
     async with httpx.AsyncClient(follow_redirects=True, timeout=timeout, headers=headers) as client:
-        # 1) Exact / redirected Wikipedia articles for every alias.
+        # 2) Exact / redirected Wikipedia articles.
         for base in ("https://es.wikipedia.org/w/api.php", "https://en.wikipedia.org/w/api.php"):
             for alias in aliases:
                 try:
@@ -227,7 +322,7 @@ async def _wiki_player_photo(name: str, wiki_title: str = "") -> str | None:
                 except Exception:
                     pass
 
-        # 2) Wikipedia searches. Do NOT quote the full civil name.
+        # 3) Wikipedia searches.
         for base in ("https://es.wikipedia.org/w/api.php", "https://en.wikipedia.org/w/api.php"):
             for alias in aliases[:4]:
                 try:
@@ -252,7 +347,7 @@ async def _wiki_player_photo(name: str, wiki_title: str = "") -> str | None:
                 except Exception:
                     pass
 
-        # 3) Wikimedia Commons searches using public sporting aliases.
+        # 4) Wikimedia Commons.
         for alias in aliases[:4]:
             try:
                 resp = await client.get("https://commons.wikimedia.org/w/api.php", params={
@@ -338,7 +433,7 @@ async def resumen_diario_padel_femenino():
 
 @app.get("/api/version")
 async def api_version():
-    return {"version": "v57-photo-first-surname-match-2026-08-08"}
+    return {"version": "v59-ranking-photos-padelspeak-first-2026-08-08"}
 
 @app.get("/")
 async def index():
@@ -348,7 +443,7 @@ async def index():
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
-            "X-App-Version": "v57-photo-first-surname-match-2026-08-08",
+            "X-App-Version": "v59-ranking-photos-padelspeak-first-2026-08-08",
         },
     )
 

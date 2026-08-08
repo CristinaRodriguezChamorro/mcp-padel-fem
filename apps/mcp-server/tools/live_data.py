@@ -126,13 +126,56 @@ async def get_ranking_live() -> list:
             name = re.sub(r"\s+", " ", name_text).strip()
             flag = COUNTRY_FLAGS.get(country_text, "🌍")
 
+            # Try to get the player's image from the SAME PadelSpeak ranking row.
+            # This avoids matching names against external image sources.
+            photo = ""
+            try:
+                img = row.find("img")
+                if img:
+                    candidates = [
+                        img.get("data-src"),
+                        img.get("data-lazy-src"),
+                        img.get("data-original"),
+                        img.get("src"),
+                    ]
+                    # srcset often contains the highest quality image at the end.
+                    srcset = img.get("srcset") or img.get("data-srcset")
+                    if srcset:
+                        parts = [x.strip().split(" ")[0] for x in srcset.split(",") if x.strip()]
+                        if parts:
+                            candidates.insert(0, parts[-1])
+
+                    photo = next(
+                        (
+                            x for x in candidates
+                            if x and not str(x).startswith("data:")
+                            and "placeholder" not in str(x).lower()
+                            and "logo" not in str(x).lower()
+                        ),
+                        ""
+                    )
+
+                    if photo.startswith("//"):
+                        photo = "https:" + photo
+                    elif photo.startswith("/"):
+                        photo = "https://padelspeak.com" + photo
+            except Exception:
+                photo = ""
+
             try:
                 pts_num = int(re.sub(r'[^\d]', '', pts_text))
                 pts = f"{pts_num:,}".replace(",", ".")
             except Exception:
                 pts = pts_text
 
-            ranking.append({"pos": pos, "name": name, "pair": "", "flag": flag, "pts": pts})
+            ranking.append({
+                "pos": pos,
+                "name": name,
+                "pair": "",
+                "flag": flag,
+                "pts": pts,
+                "photo": photo,
+            })
 
             if len(ranking) >= 20:
                 break
@@ -146,7 +189,8 @@ async def get_ranking_live() -> list:
         return _fallback_ranking()
 
     _add_pairs(ranking)
-    print(f"  ranking: {len(ranking)} jugadoras obtenidas de padelspeak.com")
+    photos = sum(1 for p in ranking if p.get("photo"))
+    print(f"  ranking: {len(ranking)} jugadoras obtenidas de padelspeak.com · fotos={photos}")
     return ranking
 
 

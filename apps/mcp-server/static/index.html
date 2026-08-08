@@ -701,36 +701,61 @@ async function loadNews(){
 
 async function loadRanking(){
   const list=document.getElementById('ranking-list');
-  const initials=name=>(name||'').split(/\s+/).filter(Boolean).slice(0,2).map(x=>x[0]?.toUpperCase()||'').join('');
+  const initials=name=>(name||'').split(/\s+/).filter(Boolean).slice(0,2)
+    .map(x=>x[0]?.toUpperCase()||'').join('');
   const fallback=name=>`<div class="rank-photo-fallback"><span>${initials(name)}</span><span class="rank-photo-ball">🎾</span></div>`;
 
-  const setPhoto=async(p,i)=>{
+  const applyPhoto=(box,name,src)=>{
+    if(!box||!src)return;
+    const img=new Image();
+    img.alt=name;
+    img.loading='lazy';
+    img.onload=()=>{
+      box.replaceChildren(img);
+      box.classList.add('has-photo');
+    };
+    img.onerror=()=>{
+      box.classList.remove('has-photo');
+      box.innerHTML=fallback(name);
+    };
+    // Always proxy external images through our backend.
+    img.src=`/api/photo?url=${encodeURIComponent(src)}`;
+  };
+
+  const fallbackPhoto=async(p,i)=>{
     const box=document.getElementById(`rank-photo-${i}`);
     if(!box)return;
     try{
       const d=await fetch(`/api/player-photo?name=${encodeURIComponent(p.name)}`).then(r=>r.json());
-      if(!d.photo)return;
-      const img=new Image();
-      img.alt=p.name;
-      img.loading='lazy';
-      img.onload=()=>{box.replaceChildren(img);box.classList.add('has-photo')};
-      img.onerror=()=>{box.classList.remove('has-photo');box.innerHTML=fallback(p.name)};
-      img.src=`/api/photo?url=${encodeURIComponent(d.photo)}`;
+      if(d.photo)applyPhoto(box,p.name,d.photo);
     }catch(e){}
   };
 
   try{
     const data=await fetch('/api/ranking').then(r=>r.json());
-    document.getElementById('ranking-sub').textContent=`Top 20 mundial · ${new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}`;
+    document.getElementById('ranking-sub').textContent=
+      `Top 20 mundial · ${new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}`;
+
     list.innerHTML=data.map((p,i)=>`
       <div class="rank-row" style="animation-delay:${i*.035}s">
         <div class="rank-pos ${i===0?'gold':i===1?'silver':i===2?'bronze':'other'}">${p.pos}</div>
         <div class="rank-photo" id="rank-photo-${i}">${fallback(p.name)}</div>
-        <div class="rank-info"><div class="rank-name">${p.name}</div><div class="rank-pair">${p.pair||''}</div></div>
+        <div class="rank-info">
+          <div class="rank-name">${p.name}</div>
+          <div class="rank-pair">${p.pair||''}</div>
+        </div>
         <div class="rank-flag">${p.flag||'🌍'}</div>
         <div class="rank-pts">${p.pts} pts</div>
       </div>`).join('');
-    data.forEach((p,i)=>setPhoto(p,i));
+
+    data.forEach((p,i)=>{
+      const box=document.getElementById(`rank-photo-${i}`);
+      if(p.photo){
+        applyPhoto(box,p.name,p.photo);
+      }else{
+        fallbackPhoto(p,i);
+      }
+    });
   }catch(e){
     list.innerHTML='<div class="empty-msg">No se pudo cargar el ranking</div>';
   }
