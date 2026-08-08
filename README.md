@@ -192,3 +192,7 @@ El fallback determinista de Noticias vuelve a incluir `_sentencias_completas`, q
 
 ### Corrección v27 de En juego
 El parser ya no depende de encontrar un marcador `6-3` ni de localizar el símbolo `✓` como nodo HTML. Recorre el texto realmente renderizado por FIP, identifica las jugadoras mediante el ranking femenino y reconstruye cada set a partir de las celdas numéricas situadas entre parejas.
+
+
+### Corrección v28 de Female en FIP
+Los logs mostraron `female=False` y `female_hits=0`: el navegador funcionaba, pero el control visual `Female` no se estaba activando. La extracción ahora prueba el control por texto, labels, inputs vecinos y radios/inputs reales. Cada intento se valida contra nombres del ranking femenino; si no aparecen al menos dos jugadoras, la vista no se considera femenina y no se parsean datos masculinos por error.
