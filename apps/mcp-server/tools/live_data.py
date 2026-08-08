@@ -1875,6 +1875,73 @@ def _fallback_next_match(results: list, next_match: dict | None, event: dict) ->
     }
 
 
+def _decorate_next_match_status(next_match: dict | None, event: dict) -> dict | None:
+    """
+    Añade estado visual al bloque superior SIN cambiar cómo se obtiene el partido.
+
+    status:
+      scheduled -> todavía no ha empezado
+      live      -> por hora debería estar disputándose
+      awaiting  -> FIP no dio parejas/hora exactas todavía
+
+    No inventa marcador ni resultado.
+    """
+    if not isinstance(next_match, dict):
+        return next_match
+
+    out = dict(next_match)
+    now_madrid = datetime.now(ZoneInfo("Europe/Madrid"))
+
+    iso = str(out.get("iso_madrid", "") or "").strip()
+    pair1 = str(out.get("pair1", "") or "").strip()
+    pair2 = str(out.get("pair2", "") or "").strip()
+
+    placeholder = (
+        not pair1 or not pair2 or
+        "por confirmar" in pair1.casefold() or
+        "por confirmar" in pair2.casefold()
+    )
+
+    if iso:
+        try:
+            start = datetime.fromisoformat(iso)
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=ZoneInfo("Europe/Madrid"))
+            else:
+                start = start.astimezone(ZoneInfo("Europe/Madrid"))
+
+            # Padel matches commonly last ~60-150 min. We use a conservative
+            # 3-hour window only to label "en directo"; never to infer a result.
+            if now_madrid < start - timedelta(minutes=10):
+                out["status"] = "scheduled"
+                out["status_label"] = "PRÓXIMO PARTIDO"
+                out["status_detail"] = "Programado"
+            elif start - timedelta(minutes=10) <= now_madrid <= start + timedelta(hours=3):
+                out["status"] = "live"
+                out["status_label"] = "EN DIRECTO"
+                out["status_detail"] = "Partido en curso · al finalizar aparecerá automáticamente en resultados"
+            else:
+                out["status"] = "awaiting"
+                out["status_label"] = "PARTIDO DE HOY"
+                out["status_detail"] = "Esperando actualización oficial de FIP"
+            return out
+        except Exception:
+            pass
+
+    if placeholder:
+        out["status"] = "awaiting"
+        out["status_label"] = "PARTIDO DE HOY"
+        out["status_detail"] = (
+            "FIP todavía no ha publicado o no ha expuesto las parejas y la hora exacta"
+        )
+    else:
+        out["status"] = "scheduled"
+        out["status_label"] = "PRÓXIMO PARTIDO"
+        out["status_detail"] = "Horario oficial pendiente de confirmar"
+
+    return out
+
+
 async def get_tournament_now(gender: str = "female") -> dict:
     """
     Torneo actual + resultados femeninos acumulados mientras el torneo está en curso.
@@ -1921,6 +1988,7 @@ async def get_tournament_now(gender: str = "female") -> dict:
             normalized_results.append(normalized)
 
     normalized_next = _normalize_next_match(next_match)
+    normalized_next = _decorate_next_match_status(normalized_next, event)
 
     return {
         "active": True,

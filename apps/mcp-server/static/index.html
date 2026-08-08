@@ -363,6 +363,51 @@ nav {
   margin-top:10px;
 }
 
+.next-status-row{
+  display:flex;
+  align-items:center;
+  gap:9px;
+  margin-bottom:8px;
+}
+.next-status-pill{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  padding:4px 8px;
+  border-radius:999px;
+  font-size:.62em;
+  font-weight:1000;
+  letter-spacing:.7px;
+  text-transform:uppercase;
+}
+.next-status-pill.live{
+  color:#fff;
+  background:rgba(225,42,73,.18);
+  border:1px solid rgba(255,72,103,.46);
+}
+.next-status-pill.live:before{
+  content:"";
+  width:7px;height:7px;border-radius:50%;
+  background:#ff405d;
+  box-shadow:0 0 10px rgba(255,64,93,.72);
+}
+.next-status-pill.scheduled{
+  color:#e8d8f4;
+  background:rgba(150,84,198,.14);
+  border:1px solid rgba(171,105,219,.34);
+}
+.next-status-pill.awaiting{
+  color:#c9c3cf;
+  background:rgba(255,255,255,.045);
+  border:1px solid #3d3945;
+}
+.next-status-detail{
+  color:#817c89;
+  font-size:.69em;
+  font-weight:600;
+  margin-top:8px;
+}
+
 /* Cabecera resultados */
 .results-title{
   display:flex;
@@ -671,8 +716,13 @@ async function loadEnJuego(){
     let nextHtml='';
     if(d.next_match){
       const n=d.next_match;
+      const status=n.status||'scheduled';
+      const statusLabel=n.status_label||'PRÓXIMO PARTIDO';
       nextHtml=`<div class="next-match">
-        <div class="next-label">Próximo partido</div>
+        <div class="next-status-row">
+          <span class="next-status-pill ${status}">${statusLabel}</span>
+        </div>
+        <div class="next-label">${status==='live'?'Partido en curso':'Próximo partido'}</div>
         <div class="next-round">${n.round||'Próximo partido'}</div>
         <div class="next-versus">
           <div class="next-team">${n.pair1||''}</div>
@@ -680,6 +730,7 @@ async function loadEnJuego(){
           <div class="next-team right">${n.pair2||''}</div>
         </div>
         <div class="next-when">🕒 ${n.when||'Horario por confirmar'}</div>
+        ${n.status_detail?`<div class="next-status-detail">${n.status_detail}</div>`:''}
       </div>`;
     }
 
