@@ -1656,6 +1656,225 @@ def _normalize_next_match(item: dict | None) -> dict | None:
     }
 
 
+def _event_end_date_from_dates(event: dict) -> date | None:
+    """Parsea la fecha final del torneo sin tocar la extracción FIP."""
+    raw = str(event.get("dates", "") or "")
+    month_map = {
+        "jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,
+        "jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12,
+        "ene":1,"abr":4,"ago":8,"dic":12,
+    }
+
+    # 02/08/2026 - 09/08/2026
+    nums = re.findall(r"\b(\d{1,2})[/-](\d{1,2})[/-](20\d{2})\b", raw)
+    if nums:
+        d, mo, y = nums[-1]
+        try:
+            return date(int(y), int(mo), int(d))
+        except Exception:
+            pass
+
+    # 2-9 August 2026 / 2–9 Aug 2026
+    m = re.search(
+        r"(\d{1,2})\s*[-–]\s*(\d{1,2})\s+([A-Za-zÁÉÍÓÚáéíóú]{3,14})(?:\s+(20\d{2}))?",
+        raw, re.I
+    )
+    if m:
+        end_day = int(m.group(2))
+        mon = _norm_person_name(m.group(3)).split()[0][:3]
+        mo = month_map.get(mon)
+        y = int(m.group(4) or date.today().year)
+        if mo:
+            try:
+                return date(y, mo, end_day)
+            except Exception:
+                pass
+
+    return None
+
+
+def _stage_from_event(event: dict) -> str:
+    """
+    Fase del torneo según fecha.
+    Premier Padel termina normalmente en domingo:
+      domingo Final
+      sábado Semifinales
+      viernes Cuartos
+      jueves Octavos
+    """
+    end_dt = _event_end_date_from_dates(event)
+    if not end_dt:
+        return "Partidos"
+
+    delta = (end_dt - date.today()).days
+    if delta <= 0:
+        return "Final"
+    if delta == 1:
+        return "Semifinales"
+    if delta == 2:
+        return "Cuartos de final"
+    if delta == 3:
+        return "Octavos de final"
+    return "Primera ronda"
+
+
+def _round_capacity(round_name: str) -> int:
+    return {
+        "Final": 1,
+        "Semifinales": 2,
+        "Cuartos de final": 4,
+        "Octavos de final": 8,
+    }.get(round_name, 0)
+
+
+def _annotate_result_rounds(results: list, next_match: dict | None, event: dict) -> list:
+    """
+    NO toca la captura. Solo etiqueta los resultados ya extraídos.
+
+    Regla:
+    - si FIP ya dio ronda, se respeta;
+    - los que llegan como "Partidos" se reparten desde el final del cuadro;
+    - si el próximo partido es de la ronda actual, asumimos que aún queda al menos
+      un partido de esa ronda y no marcamos todos como completados.
+    """
+    if not results:
+        return results
+
+    unresolved = [r for r in results if (r.get("round") or "Partidos") == "Partidos"]
+    if not unresolved:
+        return results
+
+    stage = _stage_from_event(event)
+    next_round = (next_match or {}).get("round") or ""
+
+    # Complete previous rounds in every case.
+    round_chain = ["Octavos de final", "Cuartos de final", "Semifinales", "Final"]
+    stage_idx = round_chain.index(stage) if stage in round_chain else -1
+
+    completed_before = []
+    if stage_idx >= 0:
+        completed_before = round_chain[:stage_idx]
+
+    # Current-round completed matches:
+    # - if next_match is still same round, at most capacity-1 are complete;
+    # - if next_match already points to next round, current round is complete;
+    # - otherwise infer conservatively from available tail.
+    current_capacity = _round_capacity(stage)
+    if current_capacity:
+        if next_round == stage:
+            current_done_max = max(0, current_capacity - 1)
+        elif next_round and next_round != stage:
+            current_done_max = current_capacity
+        else:
+            # No reliable OOP: do not force a full current round.
+            current_done_max = max(0, current_capacity - 1)
+    else:
+        current_done_max = 0
+
+    # Number of slots occupied by fully-completed later rounds before current stage.
+    previous_sizes = sum(_round_capacity(r) for r in completed_before)
+
+    n = len(unresolved)
+
+    # The earliest leftover block is Primera ronda.
+    # Allocate from the END backwards, because v39 returns cumulative draw order.
+    allocations = []
+    if current_capacity:
+        # At least zero, at most current_done_max.
+        current_done = min(current_done_max, max(0, n - previous_sizes))
+    else:
+        current_done = 0
+
+    # Reserve full completed rounds immediately before current stage.
+    tail_needed = previous_sizes + current_done
+    first_count = max(0, n - tail_needed)
+
+    pos = 0
+    if first_count:
+        allocations.append(("Primera ronda", first_count))
+        pos += first_count
+
+    for rnd in completed_before:
+        size = _round_capacity(rnd)
+        if size:
+            allocations.append((rnd, size))
+            pos += size
+
+    if current_done:
+        allocations.append((stage, current_done))
+        pos += current_done
+
+    # Anything remaining belongs to the current stage, but only if we have evidence
+    # that the current round is already complete / next round has started.
+    if pos < n and next_round and next_round != stage:
+        allocations.append((stage, n - pos))
+        pos = n
+
+    # Apply in source order.
+    cursor = 0
+    for rnd, count in allocations:
+        end = min(n, cursor + count)
+        for item in unresolved[cursor:end]:
+            item["round"] = rnd
+        cursor = end
+
+    # If some remain unresolved, label them with the current stage instead of the
+    # meaningless "Partidos" ONLY when today's stage is known.
+    if stage != "Partidos":
+        for item in unresolved[cursor:]:
+            item["round"] = stage
+
+    _LIVE_DEBUG_STATE["round_annotation"] = {
+        "stage_today": stage,
+        "next_round": next_round,
+        "unresolved_before": n,
+        "allocations": allocations,
+    }
+
+    return results
+
+
+def _fallback_next_match(results: list, next_match: dict | None, event: dict) -> dict | None:
+    """
+    Si Order of Play no devuelve nada, la web sigue diciendo al menos:
+    - qué ronda toca;
+    - si es hoy/mañana;
+    - que el horario exacto está por confirmar.
+
+    No inventa parejas.
+    """
+    if next_match:
+        return next_match
+
+    stage = _stage_from_event(event)
+    if stage == "Partidos":
+        return None
+
+    end_dt = _event_end_date_from_dates(event)
+    today = date.today()
+
+    if end_dt:
+        delta = (end_dt - today).days
+        if stage == "Final":
+            day_label = "Hoy" if delta == 0 else "Próximamente"
+        else:
+            day_label = "Hoy"
+    else:
+        day_label = "Hoy"
+
+    return {
+        "round": stage,
+        "pair1": "Pareja por confirmar",
+        "pair2": "Pareja por confirmar",
+        "date": today.isoformat(),
+        "time": "",
+        "time_type": "unknown",
+        "when": f"{day_label} · horario por confirmar (hora de España)",
+        "iso_madrid": "",
+        "source": "fase del torneo",
+    }
+
+
 async def get_tournament_now(gender: str = "female") -> dict:
     """
     Torneo actual + resultados femeninos acumulados mientras el torneo está en curso.
@@ -1689,6 +1908,11 @@ async def get_tournament_now(gender: str = "female") -> dict:
     if isinstance(next_match, Exception):
         print(f"  live next-match error: {next_match}")
         next_match = None
+
+    # IMPORTANT: extractor v39 remains untouched.
+    # Round labels and next-match fallback are applied only AFTER extraction.
+    results = _annotate_result_rounds(results or [], next_match, event)
+    next_match = _fallback_next_match(results, next_match, event)
 
     normalized_results = []
     for result in (results or []):
