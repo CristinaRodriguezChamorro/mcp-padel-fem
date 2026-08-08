@@ -222,3 +222,27 @@ Visualmente:
 
 ### Estrategia v32 de En juego
 Se elimina la dependencia del selector Female. Playwright captura todos los bloques de resultados visibles para cada día; después el backend filtra cada partido contra el ranking femenino dinámico. Solo se conserva un bloque si contiene exactamente cuatro jugadoras del ranking. A partir de ese bloque se determina la pareja ganadora, la perdedora y el marcador.
+
+
+### v34 — En juego únicamente
+Se restauran los dos normalizadores requeridos por `/api/live` y se añade validación de despliegue para evitar otro `NameError`. La captura recorre todos los estados de controles de género, organiza todos los bloques y filtra mujeres solo después.
+
+
+### v35 — En juego únicamente
+Corrección importante de refactorización: el parser de resultados se sustituye sin borrar los normalizadores usados por `/api/live`. Los partidos finalizados se localizan desde `✓`, se prueban todos los elementos clicables alrededor de `Female`, y el filtro femenino se aplica después usando el ranking.
+
+
+### v36 — En juego únicamente
+La pestaña recorre todos los días disponibles del torneo y acumula todos los partidos femeninos finalizados desde el inicio hasta hoy. Cada resultado conserva fecha, ronda, ganadoras, perdedoras y marcador; los partidos se deduplican antes de enviarse al frontend.
+
+
+### v37 — rediseño visual de En juego
+Solo se modifica la presentación de `En juego`: tarjeta principal con acento rosa/morado, bloque de próximo partido, rondas diferenciadas y marcadores resaltados en violeta. El backend v36 y las demás pestañas permanecen intactos.
+
+
+### v38 — diseño exacto de En juego
+Solo se modifica la presentación de `En juego` para acercarla literalmente al mockup compartido: misma jerarquía, misma paleta oscura con acentos violeta/rosa, tarjeta principal, bloque de próximo partido y tarjetas de resultados compactas.
+
+
+### v39 — En juego: cuadro completo
+Solo afecta a `En juego`. El extractor deja de depender de un único `✓`: activa el control Female de forma precisa, recorre el cuadro completo y todos los días disponibles, localiza contenedores mínimos con cuatro jugadoras y marcador, y acumula todos los partidos finalizados del torneo hasta la fecha actual.

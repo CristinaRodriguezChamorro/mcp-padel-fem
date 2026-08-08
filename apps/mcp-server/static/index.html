@@ -198,212 +198,325 @@ nav {
 }
 
 /* ── EN JUEGO ── */
+
 .live-tournament{
-  max-width:1040px;margin:0 auto;display:flex;flex-direction:column;gap:18px
+  width:min(100%,980px);
+  margin:0 auto;
+  display:flex;
+  flex-direction:column;
+  gap:16px;
 }
 
-/* --- Tournament hero card --- */
+/* ---------- Tournament header card ---------- */
 .live-summary{
-  position:relative;overflow:hidden;
-  display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:24px;
-  padding:26px 28px;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:24px;
+  align-items:center;
+  padding:24px 26px;
+  border-radius:18px;
+  border:1px solid #3a3547;
   background:
-    radial-gradient(circle at 88% 20%,rgba(188,95,255,.16),transparent 26%),
-    linear-gradient(145deg,#171522 0%,#11131c 72%);
-  border:1px solid #39364a;border-radius:20px;
-  box-shadow:0 20px 48px rgba(0,0,0,.28)
-}
-.live-summary:before{
-  content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
-  background:linear-gradient(180deg,#ff4f9a 0%,#b56cff 100%)
+    linear-gradient(145deg,#1b1726 0%,#17141f 55%,#12131a 100%);
+  box-shadow:0 16px 36px rgba(0,0,0,.24);
 }
 .live-kicker{
-  display:flex;align-items:center;gap:9px;
-  color:#ff5aa6;font-size:.69em;font-weight:1000;
-  letter-spacing:1.5px;text-transform:uppercase;margin-bottom:10px
+  display:flex;
+  align-items:center;
+  gap:9px;
+  color:#ff62ad;
+  font-size:.68em;
+  font-weight:1000;
+  letter-spacing:1.35px;
+  text-transform:uppercase;
+  margin-bottom:10px;
 }
 .live-kicker .live-dot{
-  width:8px;height:8px;border-radius:50%;
-  background:#ff4d97;box-shadow:0 0 0 5px rgba(255,77,151,.09),0 0 16px rgba(255,77,151,.6)
+  width:7px;
+  height:7px;
+  border-radius:50%;
+  background:#ff5a9d;
+  box-shadow:0 0 10px rgba(255,90,157,.65);
 }
 .live-name{
-  color:#fff;font-size:1.75em;font-weight:1000;letter-spacing:-.035em;
-  text-transform:uppercase;line-height:1.05
+  color:#fff;
+  font-size:1.52em;
+  line-height:1.05;
+  font-weight:1000;
+  letter-spacing:-.03em;
+  text-transform:uppercase;
 }
 .live-place{
-  color:#a9a6b5;font-size:.88em;margin-top:9px;font-weight:650
+  margin-top:8px;
+  color:#9c98a7;
+  font-size:.84em;
+  font-weight:650;
 }
 .live-dates{
-  justify-self:end;
-  color:#f3effa;background:rgba(31,29,44,.88);
-  border:1px solid #48435b;border-radius:999px;
-  padding:10px 15px;font-size:.79em;font-weight:900;white-space:nowrap;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.03)
+  align-self:center;
+  color:#efeaf5;
+  font-size:.78em;
+  font-weight:900;
+  white-space:nowrap;
+  background:#221e2d;
+  border:1px solid #494257;
+  border-radius:999px;
+  padding:9px 14px;
 }
 
-/* --- Watch section --- */
+/* ---------- Watch pills ---------- */
 .live-watch{
-  display:flex;align-items:center;gap:9px;flex-wrap:wrap;
-  padding:0 2px
+  display:flex;
+  align-items:center;
+  gap:8px;
+  flex-wrap:wrap;
+  padding:0 2px;
 }
 .live-watch-label{
-  color:#8c899a;font-size:.65em;font-weight:1000;
-  letter-spacing:1.3px;text-transform:uppercase;margin-right:4px
+  color:#8b8795;
+  font-size:.65em;
+  font-weight:1000;
+  letter-spacing:1.15px;
+  text-transform:uppercase;
+  margin-right:4px;
 }
 .live-watch-chip{
-  display:inline-flex;align-items:center;gap:6px;
-  color:#f5f2fa;background:#171722;border:1px solid #373544;
-  padding:8px 12px;border-radius:999px;font-size:.74em;font-weight:850;
-  box-shadow:inset 0 1px 0 rgba(255,255,255,.025)
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  color:#f4f0f7;
+  background:#171821;
+  border:1px solid #35323f;
+  border-radius:999px;
+  padding:7px 11px;
+  font-size:.73em;
+  font-weight:850;
 }
 
-/* --- Next match: hero purple card --- */
+/* ---------- Next match ---------- */
 .next-match{
-  position:relative;overflow:hidden;
-  border:1px solid #8851c9;border-radius:18px;padding:20px 22px;
-  background:
-    radial-gradient(circle at 100% 0%,rgba(205,119,255,.18),transparent 34%),
-    linear-gradient(135deg,#23172f 0%,#181522 64%,#15131c 100%);
-  box-shadow:0 18px 40px rgba(74,33,111,.18)
-}
-.next-match:before{
-  content:"";position:absolute;left:0;top:0;bottom:0;width:4px;
-  background:linear-gradient(180deg,#d98cff,#8d53d6)
+  border-radius:16px;
+  border:1px solid #6e3fa1;
+  background:linear-gradient(135deg,#24182f 0%,#19141f 70%);
+  padding:18px 20px;
+  box-shadow:0 14px 30px rgba(79,41,113,.18);
 }
 .next-label{
-  color:#cf8cff;font-size:.65em;font-weight:1000;letter-spacing:1.45px;
-  text-transform:uppercase;margin-bottom:10px
+  color:#c97cf1;
+  font-size:.64em;
+  font-weight:1000;
+  text-transform:uppercase;
+  letter-spacing:1.25px;
+  margin-bottom:8px;
 }
 .next-round{
-  display:inline-flex;align-items:center;
-  color:#f3dfff;background:rgba(168,92,224,.12);
-  border:1px solid rgba(192,111,247,.22);
-  padding:5px 9px;border-radius:999px;
-  font-size:.68em;font-weight:950;margin-bottom:13px
+  display:inline-flex;
+  color:#efd6ff;
+  background:#2e1f3b;
+  border:1px solid #5d3d75;
+  border-radius:999px;
+  padding:4px 8px;
+  font-size:.66em;
+  font-weight:900;
+  margin-bottom:12px;
 }
 .next-versus{
-  display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
-  align-items:center;gap:16px
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);
+  align-items:center;
+  gap:14px;
 }
 .next-team{
-  color:#fff;font-size:1.03em;font-weight:950;line-height:1.32
+  color:#fff;
+  font-size:.97em;
+  font-weight:950;
+  line-height:1.3;
 }
-.next-team.right{text-align:right}
+.next-team.right{
+  text-align:right;
+}
 .next-vs{
-  color:#8f8a99;font-size:.63em;font-weight:1000;text-transform:uppercase;
-  border:1px solid #3b3745;background:#15131c;border-radius:999px;
-  padding:5px 8px
+  color:#8d8795;
+  font-size:.61em;
+  font-weight:1000;
+  border:1px solid #403949;
+  border-radius:999px;
+  background:#15131a;
+  padding:4px 7px;
+  text-transform:uppercase;
 }
 .next-when{
-  color:#aaa5b4;font-size:.76em;font-weight:750;margin-top:12px
+  margin-top:10px;
+  color:#9b96a4;
+  font-size:.74em;
+  font-weight:700;
 }
 
-/* --- Results title --- */
+/* ---------- Results header ---------- */
 .results-title{
-  display:flex;align-items:flex-end;justify-content:space-between;gap:16px;
-  color:#a29dac;font-size:.69em;font-weight:1000;
-  text-transform:uppercase;letter-spacing:1.2px;margin-top:2px
-}
-.results-title>span:first-child{
-  color:#d8d3df;font-size:1.05em
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-top:3px;
+  color:#d6d2dc;
+  font-size:.69em;
+  font-weight:1000;
+  text-transform:uppercase;
+  letter-spacing:1.05px;
 }
 .results-source{
-  color:#716d7b;font-size:.85em;font-weight:750;text-transform:none;letter-spacing:0
+  color:#6f6b78;
+  font-size:.88em;
+  font-weight:750;
+  text-transform:none;
+  letter-spacing:0;
 }
 
-/* --- Round block --- */
+/* ---------- Round containers ---------- */
 .round-group{
-  overflow:hidden;background:#12131b;
-  border:1px solid #34313f;border-radius:18px;
-  box-shadow:0 14px 34px rgba(0,0,0,.18)
+  overflow:hidden;
+  border-radius:16px;
+  border:1px solid #3a3544;
+  background:#13141b;
+  box-shadow:0 12px 26px rgba(0,0,0,.16);
 }
 .round-heading{
-  display:flex;align-items:center;
-  color:#cf8cff;background:linear-gradient(90deg,rgba(155,87,213,.13),rgba(155,87,213,.04));
-  border-bottom:1px solid #332f3d;
-  padding:13px 18px;font-size:.69em;font-weight:1000;
-  letter-spacing:1.2px;text-transform:uppercase
-}
-.round-heading:before{
-  content:"";width:6px;height:6px;border-radius:50%;
-  background:#bd72ef;box-shadow:0 0 10px rgba(189,114,239,.55);
-  margin-right:9px
+  padding:12px 16px;
+  color:#ce8af3;
+  background:#21182a;
+  border-bottom:1px solid #392f43;
+  font-size:.68em;
+  font-weight:1000;
+  letter-spacing:1.1px;
+  text-transform:uppercase;
 }
 
-.result-row{padding:0;border-top:1px solid #2a2732}
-.round-group .result-row:first-of-type{border-top:0}
+/* ---------- Match rows ---------- */
+.result-row{
+  border-top:1px solid #292631;
+}
+.round-group .result-row:first-of-type{
+  border-top:0;
+}
 .result-card{
-  position:relative;
-  display:grid;grid-template-columns:minmax(0,1fr) auto;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
   grid-template-areas:
     "winner score"
     "loser score"
     "meta score";
-  column-gap:28px;row-gap:4px;padding:18px 20px 17px
-}
-.result-card:after{
-  content:"";position:absolute;left:0;top:12px;bottom:12px;width:3px;
-  border-radius:3px;background:linear-gradient(180deg,#d47ff8,#8955c4);
-  opacity:.72
+  gap:4px 24px;
+  align-items:center;
+  padding:16px 18px;
+  background:linear-gradient(180deg,#15161e 0%,#12131a 100%);
 }
 .result-winner{
-  grid-area:winner;color:#fff;font-size:.98em;font-weight:1000;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+  grid-area:winner;
+  color:#fff;
+  font-size:.96em;
+  font-weight:1000;
+  line-height:1.25;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 .result-winner .trophy{
-  margin-left:7px;font-size:.92em
+  margin-left:7px;
 }
 .result-loser{
-  grid-area:loser;color:#8b8795;font-size:.82em;font-weight:650;
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+  grid-area:loser;
+  color:#8b8794;
+  font-size:.81em;
+  font-weight:650;
+  line-height:1.25;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
 }
 .result-score{
-  grid-area:score;align-self:center;
-  color:#db8cff;font-size:1.12em;font-weight:1000;
-  letter-spacing:.4px;white-space:nowrap;
-  background:rgba(171,94,226,.08);border:1px solid rgba(191,112,242,.14);
-  border-radius:12px;padding:8px 11px
+  grid-area:score;
+  align-self:center;
+  color:#d889ff;
+  font-size:1.14em;
+  font-weight:1000;
+  letter-spacing:.2px;
+  white-space:nowrap;
 }
 .result-meta{
-  grid-area:meta;display:flex;align-items:center;gap:8px;margin-top:4px
+  grid-area:meta;
+  display:flex;
+  align-items:center;
+  gap:6px;
+  margin-top:3px;
 }
 .result-status{
-  display:inline-flex;align-items:center;gap:5px;
-  color:#777381;font-size:.62em;font-weight:900;text-transform:uppercase;letter-spacing:.75px
-}
-.result-status:before{
-  content:"";width:5px;height:5px;border-radius:50%;background:#686471
+  color:#706b77;
+  font-size:.61em;
+  font-weight:900;
+  letter-spacing:.65px;
+  text-transform:uppercase;
 }
 .result-date{
-  color:#6f6b77;font-size:.66em;font-weight:700
+  color:#696572;
+  font-size:.64em;
+  font-weight:700;
 }
 
-/* --- Empty/footer --- */
+/* ---------- Empty/footer ---------- */
 .live-empty{
-  padding:38px 28px;text-align:center;color:#8d8996;background:#13141c;
-  border:1px solid #312e3a;border-radius:16px
+  padding:34px 24px;
+  color:#8d8995;
+  text-align:center;
+  border:1px solid #322e3a;
+  border-radius:15px;
+  background:#14151d;
 }
 .live-footer{
-  color:#615d69;font-size:.65em;text-align:right;padding:2px 3px 0
+  padding-top:2px;
+  color:#5f5b67;
+  font-size:.64em;
+  text-align:right;
 }
 @media(max-width:650px){
 .tabs{overflow-x:auto;max-width:68vw}
 .tab{white-space:nowrap;padding:7px 12px}
-.live-tournament{gap:14px}
-.live-summary{grid-template-columns:1fr;padding:21px 20px}
-.live-name{font-size:1.42em}
-.live-dates{justify-self:start;margin-top:3px}
-.next-match{padding:18px 18px}
-.next-versus{grid-template-columns:1fr;gap:8px}
+.live-tournament{gap:13px}
+.live-summary{
+  grid-template-columns:1fr;
+  padding:19px 18px;
+}
+.live-name{font-size:1.33em}
+.live-dates{
+  justify-self:start;
+  margin-top:2px;
+}
+.next-match{padding:17px 17px}
+.next-versus{
+  grid-template-columns:1fr;
+  gap:7px;
+}
 .next-team.right{text-align:left}
 .next-vs{justify-self:start}
-.results-title{align-items:flex-start;flex-direction:column;gap:4px}
+.results-title{
+  align-items:flex-start;
+  flex-direction:column;
+  gap:4px;
+}
 .result-card{
   grid-template-columns:1fr;
-  grid-template-areas:"winner" "loser" "score" "meta";
-  gap:5px;padding:16px 17px 15px
+  grid-template-areas:
+    "winner"
+    "loser"
+    "score"
+    "meta";
+  gap:5px;
+  padding:15px 16px;
 }
-.result-score{justify-self:start;margin-top:7px}
+.result-score{
+  justify-self:start;
+  margin-top:6px;
+}
 }
 </style>
 </head>
