@@ -607,6 +607,191 @@ nav {
 
 .result-meta{justify-content:flex-start}
 }
+/* ── MOBILE RESPONSIVE SAFETY LAYER ─────────────────────────────────────────
+   Keeps all text/cards inside the viewport on phones.
+   Desktop styles remain unchanged.
+---------------------------------------------------------------------------- */
+@media(max-width:700px){
+  html,body{max-width:100%;overflow-x:hidden}
+  body{font-size:15px}
+
+  .container,
+  .page,
+  section,
+  .live-tournament,
+  .news-list,
+  .ranking-list,
+  .sponsors-list,
+  .torneos-list{
+    width:100%;
+    max-width:100%;
+    min-width:0;
+  }
+
+  h1,h2,h3,
+  .live-name,
+  .next-team,
+  .rank-name,
+  .sponsor-name,
+  .news-card .titular,
+  .news-featured-body .titular{
+    overflow-wrap:anywhere;
+    word-break:normal;
+  }
+
+  .subtitle,
+  .live-place,
+  .live-dates,
+  .next-when,
+  .next-status-detail,
+  .result-winner,
+  .result-loser,
+  .result-score,
+  .result-date,
+  .rank-pair,
+  .sponsor-note,
+  .torneo-place,
+  .torneo-tv{
+    max-width:100%;
+    overflow-wrap:anywhere;
+    white-space:normal;
+  }
+
+  /* En juego */
+  .live-summary{
+    grid-template-columns:1fr;
+    padding:18px 16px;
+    min-height:auto;
+    gap:12px;
+  }
+  .live-summary:before{
+    position:static;
+    width:100%;
+    height:64px;
+    margin-bottom:2px;
+    grid-column:1;
+    font-size:.9em;
+  }
+  .live-name{font-size:1.45em}
+  .live-dates{justify-self:start;font-size:.92em}
+  .live-watch{gap:9px;padding:0}
+  .live-watch-chip{font-size:.9em}
+
+  .next-match{padding:16px}
+  .next-versus{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:6px;
+    align-items:start;
+  }
+  .next-team,
+  .next-team.right{
+    text-align:left;
+    width:100%;
+    font-size:1.05em;
+  }
+  .next-vs{font-size:.72em}
+  .next-live-score{font-size:1.05em}
+
+  .result-card{
+    grid-template-columns:28px minmax(0,1fr);
+    grid-template-areas:
+      "trophy winner"
+      "trophy loser"
+      ". score"
+      ". date";
+    row-gap:4px;
+    column-gap:8px;
+    padding:13px 14px;
+  }
+  .result-winner,
+  .result-loser{white-space:normal}
+  .result-score{justify-self:start;font-size:1em}
+  .result-meta{justify-content:flex-start}
+  .round-heading{padding:12px 14px 7px}
+
+  /* Ranking */
+  .rank-row{
+    grid-template-columns:34px 62px minmax(0,1fr);
+    gap:10px;
+    padding:12px;
+    min-height:auto;
+  }
+  .rank-photo{width:62px;height:62px}
+  .rank-info{min-width:0}
+  .rank-name{font-size:.98em}
+  .rank-pts{
+    grid-column:3;
+    justify-self:start;
+    font-size:.78em;
+    white-space:normal;
+  }
+
+  /* Sponsors */
+  .sponsor-card{border-radius:14px}
+  .sponsor-profile{grid-template-columns:1fr;padding:12px;gap:10px}
+  .sponsor-avatar{
+    width:100%;
+    max-width:220px;
+    height:155px;
+    justify-self:center;
+  }
+  .sponsor-name{font-size:1.25em}
+  .sponsor-rank-line{width:100%;max-width:none}
+  .sponsor-products{grid-template-columns:1fr;padding:6px 10px}
+  .sponsor-category{
+    min-height:auto;
+    padding:10px 4px;
+    border-right:0;
+    border-bottom:1px solid var(--border);
+  }
+  .sponsor-category:last-child{border-bottom:0}
+  .brand-chips{flex-direction:row;flex-wrap:wrap}
+
+  /* Torneos */
+  .torneo-card,
+  .torneo-top,
+  .torneo-tv-bar{
+    width:100%;
+    max-width:100%;
+    min-width:0;
+  }
+  .torneo-top{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:8px;
+  }
+
+  /* Navbar: horizontal scroll instead of clipping */
+  nav{
+    overflow-x:auto;
+    overflow-y:hidden;
+    white-space:nowrap;
+    -webkit-overflow-scrolling:touch;
+    scrollbar-width:none;
+  }
+  nav::-webkit-scrollbar{display:none}
+  .tab{flex:0 0 auto}
+}
+
+@media(max-width:430px){
+  body{font-size:14px}
+  .container{padding-left:12px;padding-right:12px}
+  .live-name{font-size:1.3em}
+  .next-team{font-size:1em}
+  .results-title{
+    align-items:flex-start;
+    flex-direction:column;
+    gap:4px;
+  }
+  .results-source{font-size:.68em}
+  .round-heading{font-size:.9em}
+  .result-card{padding:12px}
+  .sponsor-avatar{max-width:190px;height:140px}
+  .rank-row{grid-template-columns:30px 56px minmax(0,1fr)}
+  .rank-photo{width:56px;height:56px}
+}
+
 </style>
 </head>
 <body>

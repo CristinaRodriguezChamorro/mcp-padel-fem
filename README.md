@@ -246,3 +246,111 @@ Solo se modifica la presentación de `En juego` para acercarla literalmente al m
 
 ### v39 — En juego: cuadro completo
 Solo afecta a `En juego`. El extractor deja de depender de un único `✓`: activa el control Female de forma precisa, recorre el cuadro completo y todos los días disponibles, localiza contenedores mínimos con cuatro jugadoras y marcador, y acumula todos los partidos finalizados del torneo hasta la fecha actual.
+
+
+### v43 — v39 exacta + diseño
+El backend y el JavaScript de `En juego` son exactamente los de v39, la versión que mostró 21 resultados en Railway. Solo se ha modificado CSS para acercar la presentación al mockup de referencia.
+
+
+### v44 — rondas y próximo partido sin tocar el extractor
+`En juego` mantiene el extractor v39 exacto. La ronda se etiqueta después de obtener los resultados. El próximo partido usa Order of Play cuando está disponible y, si no, muestra como mínimo la fase actual y `horario por confirmar (hora de España)` sin inventar parejas.
+
+
+### v46 — Live Score real de FIP
+No se modifica el extractor v39 de resultados ni las rondas existentes. Se añade una consulta separada a la pestaña `Live Score` de FIP. Si detecta un partido femenino activo, el bloque superior muestra `🔴 EN DIRECTO`, las parejas y el marcador visible; cuando deja de estar en directo, vuelve a mostrarse el próximo partido del Order of Play.
+
+
+### v47 — sin falsos indicadores de navegación
+Solo cambia el diseño de `En juego`: se eliminan los símbolos `›` de las filas de resultados y del bloque superior porque no son enlaces ni abren ningún detalle. La extracción, rondas, Live Score y resto de la web permanecen intactos.
+
+
+### v48 — Sponsors
+Solo se modifica la pestaña Sponsors. Las tarjetas son más grandes y la foto de cada jugadora pasa a ser una imagen vertical destacada. La carga de foto prueba Wikipedia ES/EN por página exacta y por búsqueda; si no existe una foto pública disponible, se muestra un placeholder visual consistente en lugar de dejar el hueco vacío.
+
+
+### v49 — Ranking y Torneos
+El ranking pasa de Top 10 a Top 20, con tarjetas más grandes e imagen de cada jugadora (búsqueda automática en Wikipedia ES/EN y fallback visual). La pestaña Torneos pasa de mostrar 6 a mostrar hasta 10 torneos, manteniendo el torneo activo primero.
+
+
+### v50 — Torneos actuales y futuros
+La pestaña Torneos deja de mostrar eventos ya finalizados. Compara la fecha final de cada torneo con la fecha actual, mantiene el torneo activo primero y ordena los siguientes cronológicamente. Si la fuente externa falla o devuelve un calendario obsoleto, usa un fallback actualizado del calendario oficial Premier Padel 2026 desde agosto en adelante.
+
+### v51 — corrección de fotos en Sponsors
+Se corrige el render de imágenes para evitar composiciones partidas entre foto y fallback. La tarjeta usa una única imagen cuando carga correctamente y muestra el fallback completo solo cuando la foto falla. También se prioriza la página exacta de Wikipedia antes de hacer búsquedas genéricas.
+
+
+### v52 — corrección de fotos en Ranking
+Solo cambia la carga de imágenes del Ranking. Se evita mezclar foto y fallback, se priorizan páginas exactas de Wikipedia y se usa una única imagen completa por jugadora; si falla, se muestra el fallback completo.
+
+### v53 — Sponsors rediseñados + fotos de Ranking
+Sponsors y Ranking siguen siendo pestañas independientes. Sponsors adopta el diseño compacto aprobado: foto grande, ficha de jugadora y cuatro columnas de patrocinio sin espacio muerto. Ranking conserva Top 20 pero mejora el tamaño/crop de retratos y endurece la validación de Wikipedia para evitar asignar imágenes de personas incorrectas.
+
+
+### v54 — fotos + fallback de En juego
+Las imágenes de Ranking y Sponsors se sirven mediante el proxy `/api/photo` para evitar bloqueos de hotlink de Wikimedia. Se versiona la caché del navegador para descartar fallos antiguos. En `En juego`, el extractor v39 permanece como primera opción; únicamente si devuelve cero resultados se activa un segundo parser por proximidad DOM alrededor de `✓`.
+
+
+### v55 — fotos resueltas en servidor
+Ranking y Sponsors dejan de consultar Wikipedia desde JavaScript. El backend resuelve cada jugadora mediante Wikipedia ES/EN y Wikimedia Commons, valida nombre/apellido, cachea el resultado y sirve la imagen mediante `/api/photo`. Los logs muestran `photo: <jugadora> -> ...`, lo que permite diagnosticar cada imagen.
+
+
+### v56 — alias de jugadoras para fotos
+Se corrige la causa observada en logs: el ranking entrega nombres civiles completos mientras Wikipedia suele usar el nombre deportivo corto. El resolver genera alias como `Gemma Triay Pons → Gemma Triay`, `Marta Ortega Gallego → Marta Ortega`, etc., y prueba Wikipedia ES/EN y Commons. Además, el ranking deja de truncar nombres a tres palabras, evitando valores rotos como `Alejandra Alonso De`.
+
+### v57 — fotos por nombre + primer apellido
+La búsqueda de imágenes prioriza `nombre + primer apellido` y considera suficiente esa coincidencia. Ejemplo: `Gemma Triay Pons` se resuelve como `Gemma Triay`. El resto de la aplicación queda intacto.
+
+### v58 — fotos desde perfiles oficiales FIP
+Las fotos de jugadoras se buscan primero en el perfil oficial de FIP usando el nombre completo del ranking para construir el slug (`Delfina Brea Senesi → /player/delfina-brea-senesi/`). Wikipedia/Commons quedan como fallback. Esto evita depender de Google Images y reduce falsos positivos como una artista con el mismo nombre.
+
+
+### v59 — fotos del Ranking desde PadelSpeak
+El ranking intenta obtener la imagen directamente de la misma fila HTML de PadelSpeak que contiene posición, nombre, país y puntos. Si la fila incluye `img`, `data-src`, `data-lazy-src`, `srcset`, etc., esa imagen se usa primero. Solo si PadelSpeak no expone una foto se mantiene el resolver externo como fallback. El log de ranking ahora indica cuántas fotos se han encontrado (`fotos=N`).
+
+### v60 — corrección del proxy de fotos FIP
+Los perfiles FIP ya se estaban resolviendo correctamente, pero `/api/photo` enviaba siempre `Referer: commons.wikimedia.org`, incluso para imágenes de `padelfip.com`. Ahora el proxy detecta el dominio, usa el `Referer` correcto, valida que la respuesta sea realmente una imagen y añade logs `photo proxy ok/failed` para verificar el último paso.
+
+
+### v61 — imagen directa por jugadora
+Los logs demostraban que FIP resolvía correctamente los perfiles, pero no aparecía ninguna petición posterior a `/api/photo`. Para eliminar ese punto de fallo, Ranking y Sponsors ahora usan directamente `<img src="/api/player-photo-image?...">`. El nuevo endpoint resuelve la fuente y devuelve los bytes de imagen en una sola petición. Los logs indican `player-photo-image OK/FAILED`.
+
+### v62 — En juego más grande
+Solo cambia la escala visual de `En juego`: contenedor más ancho, cabecera de torneo más alta, textos más grandes, tarjeta de próximo partido más espaciosa y filas de resultados con mayor altura, tipografía y marcador. No se modifica ninguna lógica de resultados, Live Score, Ranking, Sponsors, Noticias o Torneos.
+
+
+### v63 — combinación explícita v61 + v62
+Incluye el sistema de fotos directas de v61 (`/api/player-photo-image`) y el rediseño ampliado de `En juego` de v62. No se cambia ninguna otra lógica.
+
+### v64 — corrección real de petición de fotos
+El backend ya resolvía los perfiles FIP, pero el frontend creaba cada `Image()` fuera del DOM y además marcaba `loading=lazy`. Eso podía impedir que el navegador llegara a solicitar `/api/player-photo-image`. Ahora la imagen se inserta primero en la tarjeta y después se asigna `src`, sin lazy loading. Ranking y Sponsors deben generar peticiones visibles en logs `GET /api/player-photo-image...`.
+
+### v65 — Sponsors + En juego
+Solo se cambia Sponsors y la escala visual de En juego. Sponsors usa el nombre completo del ranking para pedir la foto (por ejemplo `Gemma Triay → Gemma Triay Pons`), tiene un endpoint de imagen independiente y reduce el tamaño visual de la foto para evitar pixelación. En juego se amplía ligeramente una vez más sin tocar su lógica.
+
+
+### v66 — parejas actuales en Sponsors + foto de Ari
+Solo se modifica Sponsors. La pareja ya no sale del texto hardcodeado de `SPONSORS_DATA`: se deriva del ranking actual y se muestra únicamente el apellido de la compañera. Además, Ari Sánchez se empareja con `Ariana Sánchez...` del ranking por apellido + prefijo de nombre, por lo que su foto usa el mismo perfil FIP/estilo que las demás.
+
+
+### v67 — Sponsors sin pareja
+Se elimina únicamente la línea de pareja de las tarjetas de Sponsors. El resto permanece intacto.
+
+
+### v68 — Sponsors más compactos y responsive
+Se reduce el tamaño general de las tarjetas de Sponsors, incluida la foto. En móvil, la ficha pasa a una sola columna, la imagen baja de altura, el texto y ranking se reajustan y las marcas se apilan para evitar desbordamientos.
+
+
+### v69 — En juego resistente a fallos intermitentes de FIP
+Sponsors permanece exactamente como en v68. En `En juego`, si el extractor v39 devuelve cero bloques, se reintenta dos veces antes de usar el fallback alternativo. El último conjunto válido de resultados queda guardado en memoria durante 6 horas para que un fallo transitorio de FIP no vacíe la pestaña.
+
+
+### v70 — partido actual / próximo partido dinámico
+`En juego` solo muestra `EN DIRECTO` si FIP Live Score confirma explícitamente que el partido femenino está en curso. Cuando termina, el extractor de resultados lo recoge y pasa al bloque de resultados; entonces el bloque superior vuelve al próximo partido. Si Order of Play aún no publica parejas/hora, se mantiene el estado actual de `por confirmar`; en cuanto FIP publique esos datos, el valor se actualiza automáticamente. La caché de `/api/live` baja a 60 segundos para reflejar antes esos cambios.
+
+
+### v71 — tarjetas oficiales del día FIP
+`En juego` incorpora un parser nuevo para las tarjetas que FIP muestra en el Order of Play del día. Lee directamente `WOMEN`, la ronda (`SEMIFINALS`, etc.), las jugadoras, los marcadores y el estado (`COMPLETED`, partido con score en curso o próximo). Un `COMPLETED` se añade inmediatamente a Resultados; un partido en curso ocupa la tarjeta superior como `EN DIRECTO`; si no hay directo se usa la siguiente tarjeta pendiente como `Próximo partido`. Los parsers v39 y Live Score anteriores permanecen como respaldo.
+
+
+### v72 — responsive móvil global
+Se añade una capa responsive para pantallas pequeñas sin alterar el diseño desktop. En móvil, textos largos hacen wrap, las tarjetas nunca exceden el ancho de pantalla, `En juego` reorganiza próximo partido y resultados a una sola columna, Ranking/Sponsors/Torneos se compactan y el menú superior pasa a scroll horizontal en vez de cortarse.

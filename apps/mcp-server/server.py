@@ -591,7 +591,7 @@ async def resumen_diario_padel_femenino():
 
 @app.get("/api/version")
 async def api_version():
-    return {"version": "v70-real-live-next-auto-refresh-2026-08-08"}
+    return {"version": "v72-mobile-responsive-text-fit-2026-08-08"}
 
 @app.get("/")
 async def index():
@@ -601,7 +601,7 @@ async def index():
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
-            "X-App-Version": "v70-real-live-next-auto-refresh-2026-08-08",
+            "X-App-Version": "v72-mobile-responsive-text-fit-2026-08-08",
         },
     )
 

@@ -2203,6 +2203,417 @@ def _fallback_next_match(results: list, next_match: dict | None, event: dict) ->
     }
 
 
+def _player_schedule_profiles(names: list[str]) -> list[dict]:
+    """
+    Build aliases that also match abbreviated FIP names:
+      Claudia Fernandez Sanchez -> "c fernandez sanchez"
+      Paula Josemaria Martin     -> "p josemaria martin"
+    """
+    out = []
+    seen = set()
+    for raw in names or []:
+        canon = _norm_person_name(raw)
+        parts = canon.split()
+        if len(parts) < 2 or canon in seen:
+            continue
+        seen.add(canon)
+
+        aliases = {canon}
+        first_initial = parts[0][:1]
+        if first_initial:
+            aliases.add(" ".join([first_initial] + parts[1:]))
+            aliases.add(f"{first_initial} {parts[1]}")
+
+        # Public/sporting name.
+        aliases.add(" ".join(parts[:2]))
+
+        out.append({
+            "canonical": canon,
+            "display": re.sub(r"\s+", " ", raw).strip(),
+            "aliases": sorted(aliases, key=len, reverse=True),
+        })
+    return out
+
+
+async def _extract_fip_today_womens_cards(event: dict) -> list[dict]:
+    """
+    Read today's WOMEN match cards directly from FIP.
+
+    FIP exposes cards such as:
+      WOMEN / SEMIFINALS
+      C. Fernandez Sanchez / M. Calvo
+      6 6
+      P. Josemaria Martin / B. Gonzalez Fernandez
+      2 4
+      COMPLETED
+
+    We use that card itself as source of truth for:
+      - round
+      - COMPLETED / LIVE / UPCOMING
+      - pairs
+      - current score / final score
+
+    No LLM and no score inference from unrelated page text.
+    """
+    if async_playwright is None:
+        return []
+
+    url = event.get("url", "")
+    if not url:
+        return []
+
+    try:
+        ranking_names = await get_womens_ranking_names(limit=250)
+    except Exception:
+        ranking_names = []
+
+    profiles = _player_schedule_profiles(ranking_names)
+    if not profiles:
+        return []
+
+    madrid_now = datetime.now(ZoneInfo("Europe/Madrid"))
+    event_tz = ZoneInfo(_event_timezone(event.get("place", "")))
+    local_now = madrid_now.astimezone(event_tz)
+
+    browser = None
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            )
+            page = await browser.new_page(
+                viewport={"width": 1600, "height": 2400},
+                locale="en-US",
+            )
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            await page.wait_for_timeout(1400)
+
+            # Open Order of Play / Matches when the event page has tabs.
+            for label in (
+                "Order of Play", "Order Of Play", "Matches",
+                "Schedule", "Orden de juego", "Partidos"
+            ):
+                try:
+                    loc = page.get_by_text(label, exact=True).first
+                    if await loc.count() and await loc.is_visible():
+                        await loc.click(force=True, timeout=2200)
+                        await page.wait_for_timeout(800)
+                        break
+                except Exception:
+                    pass
+
+            # Select today's date if date buttons are exposed.
+            today_tokens = [
+                local_now.strftime("%b").upper() + " " + str(local_now.day),
+                local_now.strftime("%b").upper() + " " + f"{local_now.day:02d}",
+                str(local_now.day) + " " + local_now.strftime("%b").upper(),
+            ]
+            try:
+                clicked_today = await page.evaluate(
+                    r"""
+                    (tokens) => {
+                      const clean=s=>(s||'').replace(/\s+/g,' ').trim().toUpperCase();
+                      const nodes=Array.from(document.querySelectorAll(
+                        'button,a,[role=button],[role=tab],label'
+                      ));
+                      const el=nodes.find(x=>{
+                        const t=clean(x.innerText||x.textContent);
+                        return tokens.some(tok=>t.includes(tok));
+                      });
+                      if(!el)return false;
+                      el.click();
+                      el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                      return true;
+                    }
+                    """,
+                    today_tokens,
+                )
+                if clicked_today:
+                    await page.wait_for_timeout(900)
+            except Exception:
+                pass
+
+            cards = await page.evaluate(
+                r"""
+                (profiles) => {
+                  const norm=s=>(s||'')
+                    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+                    .toLowerCase().replace(/[^a-z0-9]+/g,' ')
+                    .replace(/\s+/g,' ').trim();
+                  const clean=s=>(s||'').replace(/\s+/g,' ').trim();
+
+                  const matchPlayer = text => {
+                    const n=norm(text);
+                    if(!n || n.length<3)return null;
+                    for(const p of profiles){
+                      for(const a of p.aliases){
+                        if(n===a || n.includes(a) || a.includes(n)){
+                          // Avoid matching a single initial / tiny fragment.
+                          if(Math.min(n.length,a.length) >= 4)return p;
+                        }
+                      }
+                    }
+                    return null;
+                  };
+
+                  const visible=el=>{
+                    const st=getComputedStyle(el);
+                    const r=el.getBoundingClientRect();
+                    return st.display!=='none' && st.visibility!=='hidden' &&
+                           r.width>0 && r.height>0;
+                  };
+
+                  const all=Array.from(document.querySelectorAll('body *'))
+                    .filter(visible);
+
+                  const candidates=[];
+
+                  for(const el of all){
+                    const text=clean(el.innerText);
+                    if(!text || text.length<35 || text.length>1800)continue;
+
+                    // We only want women's match cards.
+                    if(!/\b(women|female|femenin)\b/i.test(text))continue;
+
+                    const leaves=Array.from(el.querySelectorAll('*'))
+                      .filter(x=>x.children.length===0 && visible(x))
+                      .map(x=>{
+                        const r=x.getBoundingClientRect();
+                        return {
+                          text:clean(x.textContent),
+                          n:norm(x.textContent),
+                          y:r.top+r.height/2,
+                          x:r.left+r.width/2
+                        };
+                      })
+                      .filter(x=>x.text);
+
+                    const hits=[];
+                    for(const leaf of leaves){
+                      const p=matchPlayer(leaf.text);
+                      if(p && !hits.some(h=>h.canonical===p.canonical)){
+                        hits.push({...p,y:leaf.y,x:leaf.x,leafText:leaf.text});
+                      }
+                    }
+
+                    // Completed/live cards normally have 4 players.
+                    // Upcoming cards can temporarily expose only one known pair.
+                    if(hits.length < 2 || hits.length > 4)continue;
+
+                    const scoreLeaves=leaves
+                      .filter(x=>/^\d{1,2}$/.test(x.text))
+                      .map(x=>({...x,value:Number(x.text)}))
+                      .filter(x=>x.value>=0 && x.value<=20);
+
+                    const completed=/\b(completed|finished|finalizado|finalizada)\b/i.test(text);
+                    const explicitLive=/\b(live|in progress|playing|on court|directo|en juego|en curso)\b/i.test(text);
+
+                    // A non-completed card with score cells is also in progress.
+                    const status = completed
+                      ? 'completed'
+                      : ((explicitLive || scoreLeaves.length>=2) ? 'live' : 'upcoming');
+
+                    let round='Partido';
+                    if(/\bsemi[- ]?finals?\b/i.test(text))round='Semifinales';
+                    else if(/\bquarter[- ]?finals?\b/i.test(text))round='Cuartos de final';
+                    else if(/\bround of 16\b|\boctav/i.test(text))round='Octavos de final';
+                    else if(/\bfinal\b/i.test(text))round='Final';
+                    else if(/\bsecond round\b|\b2nd round\b/i.test(text))round='Segunda ronda';
+                    else if(/\bfirst round\b|\b1st round\b/i.test(text))round='Primera ronda';
+                    else if(/\bqual/i.test(text))round='Clasificación';
+
+                    // Smallest player-containing card wins later.
+                    candidates.push({
+                      el,text,hits,scoreLeaves,status,round,
+                      area:el.getBoundingClientRect().width*el.getBoundingClientRect().height
+                    });
+                  }
+
+                  // Keep minimal DOM cards, not page-level wrappers.
+                  const minimal=candidates.filter(c=>
+                    !candidates.some(o=>o!==c && c.el.contains(o.el))
+                  );
+
+                  const out=[];
+                  const seen=new Set();
+
+                  for(const c of minimal){
+                    const ordered=[...c.hits].sort((a,b)=>a.y-b.y || a.x-b.x);
+
+                    // Split the players into two teams by vertical position.
+                    // With 4 players: first 2 vs last 2.
+                    // With 2 players: known pair vs TBD.
+                    let teamA=[], teamB=[];
+                    if(ordered.length>=4){
+                      teamA=ordered.slice(0,2);
+                      teamB=ordered.slice(2,4);
+                    }else{
+                      teamA=ordered.slice(0,2);
+                    }
+
+                    const pair1=teamA.map(x=>x.display).join(' / ');
+                    const pair2=teamB.length
+                      ? teamB.map(x=>x.display).join(' / ')
+                      : 'Pareja por confirmar';
+
+                    // Associate scores to the closest team vertically.
+                    let aScores=[], bScores=[];
+                    if(teamA.length && teamB.length && c.scoreLeaves.length){
+                      const ay=teamA.reduce((a,x)=>a+x.y,0)/teamA.length;
+                      const by=teamB.reduce((a,x)=>a+x.y,0)/teamB.length;
+                      for(const sc of c.scoreLeaves){
+                        if(Math.abs(sc.y-ay)<=Math.abs(sc.y-by))aScores.push(sc.value);
+                        else bScores.push(sc.value);
+                      }
+                      // DOM x-position gives set order.
+                      const sortByX=(vals,teamY)=>c.scoreLeaves
+                        .filter(sc=>{
+                          const otherY=teamY===ay?by:ay;
+                          return Math.abs(sc.y-teamY)<=Math.abs(sc.y-otherY);
+                        })
+                        .sort((a,b)=>a.x-b.x)
+                        .map(sc=>sc.value);
+                      aScores=sortByX(aScores,ay);
+                      bScores=sortByX(bScores,by);
+                    }
+
+                    const key=[c.round,pair1,pair2,c.status,aScores.join(','),bScores.join(',')].join('|');
+                    if(seen.has(key))continue;
+                    seen.add(key);
+
+                    out.push({
+                      round:c.round,
+                      pair1,pair2,
+                      status:c.status,
+                      team_a_scores:aScores,
+                      team_b_scores:bScores,
+                      raw:c.text.slice(0,1200)
+                    });
+                  }
+
+                  return out;
+                }
+                """,
+                profiles,
+            )
+
+            await browser.close()
+            browser = None
+
+            # Normalize and make score strings.
+            normalized = []
+            for card in cards or []:
+                a = [int(x) for x in card.get("team_a_scores", [])]
+                b = [int(x) for x in card.get("team_b_scores", [])]
+                score = ""
+                if a and b:
+                    n = min(len(a), len(b))
+                    score = "  ".join(f"{a[i]}-{b[i]}" for i in range(n))
+
+                normalized.append({
+                    "round": card.get("round") or "Partido",
+                    "pair1": card.get("pair1") or "",
+                    "pair2": card.get("pair2") or "Pareja por confirmar",
+                    "status": card.get("status") or "upcoming",
+                    "score": score,
+                    "team_a_scores": a,
+                    "team_b_scores": b,
+                    "raw": card.get("raw",""),
+                })
+
+            status_counts = {
+                st: len([x for x in normalized if x.get("status")==st])
+                for st in ("completed","live","upcoming")
+            }
+            print(
+                "  FIP today cards:",
+                f"total={len(normalized)}",
+                f"completed={status_counts['completed']}",
+                f"live={status_counts['live']}",
+                f"upcoming={status_counts['upcoming']}",
+            )
+            return normalized
+
+    except Exception as exc:
+        print(f"  FIP today cards error: {type(exc).__name__}: {exc}")
+        if browser is not None:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+        return []
+
+
+def _completed_card_to_result(card: dict) -> dict | None:
+    """Convert a FIP completed card into the existing results schema."""
+    if not card or card.get("status") != "completed":
+        return None
+
+    pair_a = card.get("pair1","")
+    pair_b = card.get("pair2","")
+    a = card.get("team_a_scores") or []
+    b = card.get("team_b_scores") or []
+    if not pair_a or not pair_b or not a or not b:
+        return None
+
+    n=min(len(a),len(b))
+    if not n:
+        return None
+
+    a_sets=sum(1 for i in range(n) if a[i]>b[i])
+    b_sets=sum(1 for i in range(n) if b[i]>a[i])
+    if a_sets==b_sets:
+        return None
+
+    if a_sets>b_sets:
+        winner,loser=pair_a,pair_b
+        display=[(a[i],b[i]) for i in range(n)]
+    else:
+        winner,loser=pair_b,pair_a
+        display=[(b[i],a[i]) for i in range(n)]
+
+    return {
+        "round": card.get("round") or "Partido",
+        "winner": winner,
+        "loser": loser,
+        "score": "  ".join(f"{x}-{y}" for x,y in display),
+        "date": date.today().isoformat(),
+    }
+
+
+def _card_to_top_match(card: dict) -> dict | None:
+    if not card:
+        return None
+
+    status=card.get("status")
+    if status=="live":
+        return {
+            "status":"live",
+            "status_label":"EN DIRECTO",
+            "round":card.get("round") or "Partido",
+            "pair1":card.get("pair1") or "Pareja por confirmar",
+            "pair2":card.get("pair2") or "Pareja por confirmar",
+            "score":card.get("score") or "",
+            "when":"Ahora · hora de España",
+            "iso_madrid":datetime.now(ZoneInfo("Europe/Madrid")).isoformat(),
+            "status_detail":"Partido en curso · al finalizar pasará automáticamente a resultados.",
+            "source":"FIP Order of Play",
+        }
+
+    if status=="upcoming":
+        return {
+            "round":card.get("round") or "Próximo partido",
+            "pair1":card.get("pair1") or "Pareja por confirmar",
+            "pair2":card.get("pair2") or "Pareja por confirmar",
+            "when":"Horario por confirmar",
+            "iso_madrid":"",
+            "source":"FIP Order of Play",
+        }
+
+    return None
+
+
 async def _extract_current_womens_match(event: dict) -> dict | None:
     """
     Consulta exclusivamente Live Score de FIP.
@@ -2425,11 +2836,12 @@ async def get_tournament_now(gender: str = "female") -> dict:
         _get_watch_official(),
         _extract_official_results(event, gender),
         _extract_next_womens_match(event) if gender in {"female", "women", "woman"} else asyncio.sleep(0, result=None),
-        _extract_current_womens_match(event) if gender in {"female", "women", "woman"} else asyncio.sleep(0, result=None),
+        _extract_fip_today_womens_cards(event) if gender in {"female", "women", "woman"} else asyncio.sleep(0, result=[]),
         return_exceptions=True,
     )
 
-    watch, results, next_match, current_match = parts
+    watch, results, next_match, today_cards = parts
+    current_match = None
 
     if isinstance(watch, Exception):
         print(f"  live watch error: {watch}")
@@ -2440,9 +2852,58 @@ async def get_tournament_now(gender: str = "female") -> dict:
     if isinstance(next_match, Exception):
         print(f"  live next-match error: {next_match}")
         next_match = None
-    if isinstance(current_match, Exception):
-        print(f"  current live-match error: {current_match}")
-        current_match = None
+    if isinstance(today_cards, Exception):
+        print(f"  FIP today-cards error: {today_cards}")
+        today_cards = []
+
+    today_cards = today_cards or []
+
+    # 1) Merge today's completed FIP cards into historical results immediately.
+    for card in today_cards:
+        completed = _completed_card_to_result(card)
+        if completed:
+            results = list(results or [])
+            key = (
+                completed["winner"].casefold(),
+                completed["loser"].casefold(),
+                completed["score"],
+            )
+            existing = {
+                (
+                    str(x.get("winner","")).casefold(),
+                    str(x.get("loser","")).casefold(),
+                    str(x.get("score","")),
+                )
+                for x in results
+            }
+            if key not in existing:
+                results.append(completed)
+                print(
+                    "  FIP completed card merged:",
+                    completed["round"],
+                    completed["winner"],
+                    completed["score"],
+                )
+
+    # 2) Prefer an actual FIP live card.
+    live_cards = [x for x in today_cards if x.get("status")=="live"]
+    if live_cards:
+        current_match = _card_to_top_match(live_cards[0])
+    else:
+        # Keep the older Live Score probe only as fallback.
+        current_match = await _extract_current_womens_match(event)
+
+    # 3) If no live match, prefer today's next known FIP card.
+    if not current_match:
+        upcoming_cards = [x for x in today_cards if x.get("status")=="upcoming"]
+        if upcoming_cards:
+            fip_next = _card_to_top_match(upcoming_cards[0])
+            if fip_next:
+                # Preserve a known OOP time if the older parser had one.
+                if next_match and next_match.get("when") and next_match.get("when")!="Horario por confirmar":
+                    fip_next["when"] = next_match.get("when")
+                    fip_next["iso_madrid"] = next_match.get("iso_madrid","")
+                next_match = fip_next
 
     # IMPORTANT: extractor v39 remains untouched.
     # Round labels and next-match fallback are applied only AFTER extraction.
@@ -2457,6 +2918,13 @@ async def get_tournament_now(gender: str = "female") -> dict:
 
     normalized_next = _normalize_next_match(next_match)
     normalized_current = current_match if isinstance(current_match, dict) else None
+
+    _LIVE_DEBUG_STATE["today_cards"] = {
+        "total": len(today_cards),
+        "completed": len([x for x in today_cards if x.get("status")=="completed"]),
+        "live": len([x for x in today_cards if x.get("status")=="live"]),
+        "upcoming": len([x for x in today_cards if x.get("status")=="upcoming"]),
+    }
 
     _LIVE_DEBUG_STATE["top_card"] = {
         "mode": "live" if normalized_current else ("next" if normalized_next else "none"),
