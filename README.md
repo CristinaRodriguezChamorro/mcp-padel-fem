@@ -175,3 +175,7 @@ Groq se usa únicamente como mejora editorial de Noticias. Si devuelve `429`:
 - resúmenes ya generados se reutilizan desde caché durante 24 horas.
 
 `En juego`, Ranking y Calendario no dependen de Groq.
+
+
+### Número de noticias
+No existe un límite fijo de 4 noticias. Se muestran todas las noticias que superan el filtro de pádel femenino, ordenadas de más reciente a más antigua.

@@ -734,7 +734,7 @@ async def get_latest_news() -> dict:
 
     # Si faltan resúmenes, hacemos un segundo intento artículo a artículo.
     # Nunca mostramos un fragmento RSS truncado como si fuera un resumen.
-    if len(noticias) < min(4, len(femeninos)):
+    if len(noticias) < len(femeninos):
         usados_urls = {
             f.get("url", "")
             for noticia in noticias
@@ -749,13 +749,13 @@ async def get_latest_news() -> dict:
             print(f"  noticias: reintento individual máximo 1")
             # At most one extra LLM call. If it 429s, breaker opens immediately.
             item = await generar_noticia_individual(client, sem, candidatos[0])
-            if item and len(noticias) < 4:
+            if item:
                 noticias.append(item)
 
     # Si Groq está sin cuota (429) o no genera suficiente contenido,
     # rellenamos con resúmenes deterministas de artículos claramente femeninos.
     # De esta forma Noticias NO desaparece por una dependencia externa.
-    if len(noticias) < min(4, len(femeninos)):
+    if len(noticias) < len(femeninos):
         usados_urls = {
             f.get("url", "")
             for noticia in noticias
@@ -763,7 +763,7 @@ async def get_latest_news() -> dict:
         }
 
         for art in femeninos:
-            if len(noticias) >= 4:
+            if False:  # sin límite fijo de noticias
                 break
             if art.get("url", "") in usados_urls:
                 continue
@@ -774,6 +774,8 @@ async def get_latest_news() -> dict:
                 usados_urls.add(art.get("url", ""))
 
         print(f"Noticias tras fallback determinista: {len(noticias)}")
+
+    noticias.sort(key=lambda x: x.get("fecha", ""), reverse=True)
 
     return {
         "date": datetime.date.today().isoformat(),
