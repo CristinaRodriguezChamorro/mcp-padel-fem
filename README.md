@@ -28,8 +28,46 @@ Frontend      MCP Server
 HTML/CSS/JS   FastMCP
 ```
 
-La arquitectura separa la **obtención de datos**, su **procesamiento** y la **forma de consumirlos**. El LLM se utiliza para resumir o normalizar contenido no estructurado; las decisiones deterministas, como identificar jugadoras mediante el ranking femenino, se resuelven con datos y código.
+La arquitectura separa la **obtención de datos**, su **procesamiento** y la **forma de consumirlos**. El LLM se utiliza únicamente donde aporta valor editorial, como el resumen de noticias. **En juego no depende de un LLM**: FIP se procesa con Playwright/HTTP y parsers Python deterministas.
 
+## 🔴 En juego
+
+El backend detecta el torneo Premier Padel activo y consulta información oficial de **FIP**.
+
+Procesa **Results, Draws y Order of Play**, filtra el cuadro femenino (`female / women`), extrae resultados y los agrupa por ronda:
+
+```text
+SEMIFINALES
+
+Triay / Brea 🏆
+Josemaría / Sánchez
+6–3  6–4
+```
+
+También obtiene el **siguiente partido femenino** y convierte su hora local a **hora de España (`Europe/Madrid`)**.
+
+Los resultados se incorporan a medida que terminan los partidos, sin esperar a que finalice el torneo.
+
+## 📰 Noticias
+
+El filtro de noticias **no depende de una lista de jugadoras hardcodeada**.
+
+Primero se obtiene el **ranking femenino actualizado** y se construye una lista dinámica con los nombres completos de las jugadoras. Una noticia pasa el filtro si aparece al menos una jugadora del ranking **o** si contiene una señal explícita de contenido femenino como `women`, `female`, `woman`, `femenino`, `femenina` o `mujeres`. Después, Groq/Llama resume únicamente el contenido que ya ha superado ese filtro.
+
+```text
+Ranking femenino → nombres de jugadoras
+                         │
+RSS → filtro femenino ───┘
+          │
+          ▼
+      Groq + Llama
+  resumen / normalización
+          │
+          ▼
+       /api/news
+```
+
+**Groq no decide si una noticia es femenina.** Se utiliza como API de inferencia para ejecutar Llama y generar un **titular-resumen** y una **síntesis redactada** de cada noticia que ya ha pasado el filtro. No se publican fragmentos RSS recortados como si fueran resúmenes.
 
 ## 🔌 MCP
 
@@ -49,6 +87,7 @@ Cliente IA → MCP → Tools → datos de pádel femenino
 | **FastMCP / MCP** | Tools para clientes de IA |
 | **aiohttp + asyncio** | Peticiones asíncronas |
 | **BeautifulSoup + feedparser** | HTML y RSS |
+| **Playwright + Chromium** | Interacción con resultados FIP renderizados por JavaScript |
 | **pypdf** | Documentos oficiales FIP |
 | **Groq API + Llama** | Inferencia LLM para resumen y normalización |
 | **HTML + CSS + JavaScript** | Frontend |
@@ -82,3 +121,36 @@ GET /api/tournaments
 El proyecto explora cómo combinar **arquitectura de APIs + fuentes externas + procesamiento asíncrono + LLMs + MCP** manteniendo cada responsabilidad separada.
 
 La IA es una pieza de la arquitectura, no la arquitectura completa.
+
+
+### Objetivo de Noticias
+Fecha real de publicación + titular-resumen + resumen redactado de 2–3 frases. Nunca se muestra un fragmento RSS truncado como resumen.
+
+### Objetivo de En juego
+Torneo activo + dónde verlo + próximo partido femenino en hora española + resultados femeninos finalizados agrupados por ronda.
+
+
+## Contrato funcional
+
+**Noticias**
+- filtro por jugadoras del ranking femenino o términos explícitos `female / women / femenino`;
+- fecha original de publicación visible en cada tarjeta;
+- titular-resumen;
+- resumen redactado de 2–3 frases;
+- nunca extractos RSS truncados.
+
+**En juego**
+- torneo femenino activo;
+- ciudad, fechas y dónde verlo;
+- próximo partido femenino convertido a hora de España;
+- resultados ya finalizados sin esperar al final del torneo;
+- agrupados por ronda;
+- ganadoras, perdedoras y marcador.
+
+
+### En juego no usa Groq
+La sección de resultados es determinista:
+
+`FIP → Playwright/HTTP → parser Python → /api/live → frontend`
+
+Los marcadores, rondas y próximo partido no dependen de cuotas ni disponibilidad de un modelo de lenguaje.

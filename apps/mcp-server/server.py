@@ -109,6 +109,7 @@ async def api_live_debug(gender: str = "female"):
         "results_count": len(data.get("results", [])),
         "has_next_match": bool(data.get("next_match")),
         "source_url": data.get("source_url", ""),
+        "extraction": data.get("_debug", {}),
     }
 
 
@@ -152,7 +153,7 @@ async def resumen_diario_padel_femenino():
 
 @app.get("/api/version")
 async def api_version():
-    return {"version": "v7-female-women-news-live-2026-08-08"}
+    return {"version": "v20-live-no-groq-2026-08-08"}
 
 @app.get("/")
 async def index():
@@ -162,7 +163,7 @@ async def index():
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
-            "X-App-Version": "v7-female-women-news-live-2026-08-08",
+            "X-App-Version": "v20-live-no-groq-2026-08-08",
         },
     )
 

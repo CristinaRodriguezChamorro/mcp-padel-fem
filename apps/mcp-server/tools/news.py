@@ -14,6 +14,7 @@ import unicodedata
 from groq import Groq
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
+from email.utils import parsedate_to_datetime
 from tools.live_data import get_womens_ranking_names
 
 RSS_FEEDS = [
@@ -155,7 +156,8 @@ def clean_text(text: str) -> str:
     return text.strip()
 
 
-async def scrape(session: aiohttp.ClientSession, url: str) -> str:
+async def scrape(session: aiohttp.ClientSession, url: str) -> dict:
+    """Obtiene texto + fecha original si la web la publica."""
     try:
         async with session.get(
             url,
@@ -163,10 +165,26 @@ async def scrape(session: aiohttp.ClientSession, url: str) -> str:
             headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
         ) as resp:
             if resp.status != 200:
-                return ""
+                return {"text": "", "published_date": ""}
             html = await resp.text()
 
         soup = BeautifulSoup(html, "html.parser")
+        page_date = ""
+
+        for node in (
+            soup.find("meta", attrs={"property": "article:published_time"}),
+            soup.find("meta", attrs={"name": "date"}),
+            soup.find("meta", attrs={"name": "publish-date"}),
+            soup.find("time", attrs={"datetime": True}),
+        ):
+            if not node:
+                continue
+            raw = node.get("content") or node.get("datetime") or ""
+            m = re.search(r"(\d{4}-\d{2}-\d{2})", raw)
+            if m:
+                page_date = m.group(1)
+                break
+
         for tag in soup.find_all(["nav", "footer", "aside", "script", "style", "header"]):
             tag.decompose()
 
@@ -175,18 +193,22 @@ async def scrape(session: aiohttp.ClientSession, url: str) -> str:
             soup.find("div", class_=re.compile(r"(article|content|body|text|entry)", re.I)) or
             soup.find("main") or soup
         )
-        parts = [p.get_text().strip() for p in body.find_all("p") if len(p.get_text().strip()) > 40]
-        return " ".join(parts)[:3000]
+        parts = [
+            p.get_text().strip()
+            for p in body.find_all("p")
+            if len(p.get_text().strip()) > 40
+        ]
+        return {"text": " ".join(parts)[:5000], "published_date": page_date}
     except Exception as e:
         print(f"  scrape error {url}: {e}")
-        return ""
+        return {"text": "", "published_date": ""}
 
 
 async def generar_noticia(client: Groq, sem: asyncio.Semaphore, articulos: list) -> dict | None:
     """Groq/Llama resume y homogeneiza noticias YA clasificadas como femeninas."""
     texto_articulos = ""
     for i, art in enumerate(articulos[:3], 1):
-        texto_articulos += f"\n--- Artículo {i} ---\nTítulo: {art['titulo']}\nContenido: {art['texto'][:1200]}\n"
+        texto_articulos += f"\n--- Artículo {i} ---\nTítulo: {art['titulo']}\nContenido: {art['texto'][:2400]}\n"
 
     prompt = f"""Eres periodista deportiva española especializada en pádel femenino.
 Escribes para una web dirigida a aficionadas españolas. Tu estilo es directo, natural y periodístico — como lo haría un redactor de Marca o As, pero sin ser rimbombante.
@@ -211,10 +233,19 @@ REGLA CRÍTICA:
 Ahora escribe sobre estos artículos ya filtrados:
 {texto_articulos}
 
+REGLAS DE SALIDA:
+- El titular debe funcionar como un RESUMEN de una línea: sujeto + hecho principal + contexto relevante.
+- Máximo 14 palabras. No copies literalmente el titular original salvo que sea imprescindible.
+- El resumen debe ser una síntesis redactada por ti, NO un fragmento recortado del artículo.
+- 2 o 3 frases completas, entre 45 y 85 palabras en total.
+- Prioriza: qué pasó, quiénes participaron, resultado/consecuencia y contexto relevante.
+- Nunca termines con "..." ni dejes una frase a medias.
+- No añadas información que no esté en las fuentes.
+
 Genera SOLO este JSON:
 {{
-  "titular": "Titular de máximo 12 palabras que cuente LO QUE PASÓ. NUNCA solo un nombre.",
-  "resumen": "3-4 frases contando la noticia con datos concretos. Tono directo y natural, como si se lo contaras a una aficionada."
+  "titular": "Titular-resumen breve que explique el hecho principal.",
+  "resumen": "Resumen redactado de 2-3 frases completas; nunca un extracto textual cortado."
 }}"""
 
     async with sem:
@@ -240,10 +271,76 @@ Genera SOLO este JSON:
                             domain = urlparse(url).netloc.replace("www.", "")
                             fuentes.append({"domain": domain, "titulo": art["titulo"], "url": url})
                             vistos.add(url)
-                    return {"titular": titular, "resumen": resumen, "fuentes": fuentes}
+                    return {
+                        "titular": titular,
+                        "resumen": resumen,
+                        "fecha": _latest_article_date(articulos) or datetime.date.today().isoformat(),
+                        "fuentes": fuentes,
+                    }
         except Exception as e:
             print(f"  generar error: {e}")
     return None
+
+
+
+async def generar_noticia_individual(client: Groq, sem: asyncio.Semaphore, art: dict) -> dict | None:
+    """Segundo intento: siempre genera un resumen real, nunca un recorte RSS."""
+    prompt = f"""Eres periodista deportiva española especializada en pádel femenino.
+
+FUENTE:
+Título original: {art.get('titulo', '')}
+Contenido: {art.get('texto', '')[:2800]}
+
+Redacta SOLO información del circuito femenino.
+
+Devuelve SOLO JSON:
+{{
+  "titular": "máximo 14 palabras; resume el hecho principal",
+  "resumen": "2-3 frases completas, 45-85 palabras, síntesis propia; nunca un extracto cortado"
+}}
+
+Reglas:
+- No inventes datos.
+- No menciones jugadores masculinos.
+- No uses puntos suspensivos.
+- El titular debe decir qué ha ocurrido.
+"""
+    async with sem:
+        try:
+            resp = await asyncio.to_thread(lambda: client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                max_tokens=350,
+                temperature=0.2,
+                messages=[{"role": "user", "content": prompt}],
+            ))
+            raw = resp.choices[0].message.content.strip()
+            match = re.search(r"\{.*\}", raw, re.DOTALL)
+            if not match:
+                return None
+            data = json.loads(match.group())
+            titular = clean_text(data.get("titular", ""))
+            resumen = clean_text(data.get("resumen", ""))
+            if not titular or not resumen or resumen.endswith("..."):
+                return None
+
+            url = art.get("url", "")
+            fuentes = []
+            if url:
+                fuentes.append({
+                    "domain": urlparse(url).netloc.replace("www.", ""),
+                    "titulo": art.get("titulo", ""),
+                    "url": url,
+                })
+
+            return {
+                "titular": titular,
+                "resumen": resumen,
+                "fecha": art.get("published_date") or datetime.date.today().isoformat(),
+                "fuentes": fuentes,
+            }
+        except Exception as exc:
+            print(f"  resumen individual error: {exc}")
+            return None
 
 
 def agrupar(articulos: list) -> list[list]:
@@ -273,6 +370,36 @@ def agrupar(articulos: list) -> list[list]:
     return grupos
 
 
+def _rss_publication_iso(entry) -> str:
+    """Normalize the original article publication date to YYYY-MM-DD."""
+    # feedparser structured date is the most robust path.
+    parsed = entry.get("published_parsed") or entry.get("updated_parsed")
+    if parsed:
+        try:
+            return datetime.date(parsed.tm_year, parsed.tm_mon, parsed.tm_mday).isoformat()
+        except Exception:
+            pass
+
+    raw = entry.get("published", "") or entry.get("updated", "")
+    if raw:
+        try:
+            dt = parsedate_to_datetime(raw)
+            return dt.date().isoformat()
+        except Exception:
+            pass
+
+    return ""
+
+
+def _latest_article_date(articulos: list) -> str:
+    dates = sorted(
+        {a.get("published_date", "") for a in articulos if a.get("published_date")},
+        reverse=True,
+    )
+    return dates[0] if dates else ""
+
+
+
 async def get_latest_news() -> dict:
     client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
     print("\n=== PADELfem: inicio pipeline ===")
@@ -298,6 +425,7 @@ async def get_latest_news() -> dict:
                     "texto": clean_text(entry.get("summary", "") or entry.get("description", "")),
                     "url": link,
                     "published": entry.get("published", ""),
+                    "published_date": _rss_publication_iso(entry),
                 })
         except Exception as e:
             print(f"  feed error {feed_url}: {e}")
@@ -327,12 +455,16 @@ async def get_latest_news() -> dict:
         )
 
     depurados = []
-    for art, texto in zip(femeninos, textos):
-        candidato = texto if isinstance(texto, str) and len(texto) > len(art["texto"]) else art["texto"]
+    for art, scraped in zip(femeninos, textos):
+        scraped_text = scraped.get("text", "") if isinstance(scraped, dict) else ""
+        scraped_date = scraped.get("published_date", "") if isinstance(scraped, dict) else ""
+
+        if scraped_date:
+            art["published_date"] = scraped_date
+
+        candidato = scraped_text if len(scraped_text) > len(art["texto"]) else art["texto"]
         fragmento = _extraer_fragmentos_femeninos(candidato, ranking_names)
 
-        # Si el scraping devuelve un artículo mixto sin contenido femenino
-        # verificable, no se manda al modelo.
         if not fragmento:
             fragmento = _extraer_fragmentos_femeninos(
                 f"{art['titulo']}. {art.get('texto', '')}",
@@ -361,25 +493,29 @@ async def get_latest_news() -> dict:
     noticias = [r for r in generados if isinstance(r, dict)]
     print(f"Noticias generadas: {len(noticias)}")
 
-    # Fallback robusto: si Groq falla, se queda sin cuota o devuelve algo no parseable,
-    # NO dejamos vacía la pestaña Noticias. Mostramos directamente las noticias
-    # femeninas encontradas en los RSS con su titular, un resumen corto y la fuente.
-    if not noticias:
-        print("  noticias: usando fallback RSS sin IA")
-        for art in femeninos[:4]:
-            resumen = clean_text(art.get("texto", ""))
-            if not resumen:
-                resumen = "Última información publicada sobre el circuito profesional femenino de pádel."
-            if len(resumen) > 420:
-                resumen = resumen[:417].rsplit(" ", 1)[0] + "..."
-            url = art.get("url", "")
-            domain = urlparse(url).netloc.replace("www.", "") if url else ""
-            fuentes = [{"domain": domain, "titulo": art.get("titulo", ""), "url": url}] if url else []
-            noticias.append({
-                "titular": art.get("titulo", "Noticia de pádel femenino"),
-                "resumen": resumen,
-                "fuentes": fuentes,
-            })
+    # Si faltan resúmenes, hacemos un segundo intento artículo a artículo.
+    # Nunca mostramos un fragmento RSS truncado como si fuera un resumen.
+    if len(noticias) < min(4, len(femeninos)):
+        usados_urls = {
+            f.get("url", "")
+            for noticia in noticias
+            for f in noticia.get("fuentes", [])
+        }
+        candidatos = [
+            art for art in femeninos
+            if art.get("url", "") not in usados_urls
+        ][:4]
+
+        if candidatos:
+            print(f"  noticias: reintentando {len(candidatos)} resúmenes individuales")
+            reintentos = await asyncio.gather(
+                *[generar_noticia_individual(client, sem, art) for art in candidatos]
+            )
+            for item in reintentos:
+                if item and len(noticias) < 4:
+                    noticias.append(item)
+
+    # Si el modelo no puede producir un resumen fiable, esa noticia no se publica.
 
     return {
         "date": datetime.date.today().isoformat(),

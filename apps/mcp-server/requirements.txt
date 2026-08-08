@@ -8,3 +8,4 @@ aiohttp
 lxml
 httpx
 pypdf
+playwright

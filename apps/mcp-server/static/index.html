@@ -198,33 +198,38 @@ nav {
 }
 
 /* ── EN JUEGO ── */
-.live-tournament{display:flex;flex-direction:column;gap:14px}
-.live-summary{padding:18px 20px;display:grid;grid-template-columns:1fr auto;gap:18px;align-items:center;background:linear-gradient(135deg,#171928,#111521);border:1px solid #34384a;border-radius:14px}
-.live-kicker{font-size:.66em;font-weight:900;text-transform:uppercase;letter-spacing:1.3px;color:var(--pink);margin-bottom:6px}
-.live-name{font-size:1.38em;font-weight:950;color:#fff;letter-spacing:-.02em}
-.live-place{font-size:.84em;color:#b9bac4;margin-top:6px}
-.live-dates{font-size:.78em;color:#d5d5dc;font-weight:700;white-space:nowrap}
-.live-watch{margin-top:-4px;padding:0 4px;display:flex;gap:9px;align-items:center;flex-wrap:wrap}
-.live-watch-label{font-size:.66em;font-weight:900;color:#9b9ca7;text-transform:uppercase;letter-spacing:1px}
-.live-watch-chip{background:#181b27;border:1px solid #34384a;border-radius:999px;padding:6px 12px;font-size:.76em;color:#fff}
-.next-match{padding:17px 20px;border:1px solid #a25cff;background:linear-gradient(135deg,rgba(133,72,210,.12),rgba(30,26,48,.35));border-radius:13px;position:relative}
-.next-label{font-size:.69em;font-weight:950;letter-spacing:1.1px;text-transform:uppercase;color:#c77dff;margin-bottom:9px}
-.next-round{font-size:.82em;font-weight:850;color:#c77dff;margin-bottom:8px}
-.next-pairs{font-size:1em;font-weight:950;color:#fff;line-height:1.4}
-.next-when{font-size:.79em;color:#b6b6c0;margin-top:9px}
-.results-title{padding:5px 0 0;font-size:.78em;text-transform:uppercase;letter-spacing:.7px;font-weight:950;color:#fff}
-.round-group{padding:0;border:1px solid #34384a;background:linear-gradient(180deg,#151925,#111520);border-radius:13px;overflow:hidden}
-.round-heading{font-size:.74em;color:#c77dff;font-weight:950;text-transform:uppercase;letter-spacing:.8px;margin:0;padding:12px 16px 8px}
+.live-tournament{display:flex;flex-direction:column;gap:16px}
+.live-summary{padding:22px 24px;display:grid;grid-template-columns:1fr auto;gap:22px;align-items:center;background:linear-gradient(135deg,#161825 0%,#11131d 100%);border:1px solid #34374a;border-radius:16px;box-shadow:0 10px 30px rgba(0,0,0,.22)}
+.live-kicker{display:inline-flex;align-items:center;gap:7px;font-size:.68em;font-weight:950;text-transform:uppercase;letter-spacing:1.4px;color:#ff5da8;margin-bottom:8px}
+.live-name{font-size:1.55em;font-weight:950;color:#fff;letter-spacing:-.025em}
+.live-place{font-size:.86em;color:#bfc1cc;margin-top:7px}
+.live-dates{font-size:.8em;color:#e6e6eb;font-weight:800;white-space:nowrap;background:#1a1d29;border:1px solid #35394c;border-radius:999px;padding:8px 12px}
+.live-watch{display:flex;gap:9px;align-items:center;flex-wrap:wrap;padding:0 3px}
+.live-watch-label{font-size:.66em;font-weight:950;color:#9da0ad;text-transform:uppercase;letter-spacing:1px}
+.live-watch-chip{background:#181b27;border:1px solid #34384a;border-radius:999px;padding:7px 12px;font-size:.76em;color:#fff}
+.next-match{padding:18px 20px;border:1px solid #9d5cff;background:linear-gradient(135deg,rgba(132,69,210,.18),rgba(35,27,54,.5));border-radius:14px;box-shadow:0 0 0 1px rgba(157,92,255,.05),0 10px 25px rgba(90,40,140,.12)}
+.next-label{font-size:.68em;font-weight:950;letter-spacing:1.2px;text-transform:uppercase;color:#c789ff;margin-bottom:10px}
+.next-round{font-size:.78em;font-weight:900;color:#b76bff;margin-bottom:8px}
+.next-pairs{font-size:1.02em;font-weight:950;color:#fff;line-height:1.45}
+.next-when{font-size:.8em;color:#b9bbc7;margin-top:9px}
+.results-title{margin-top:2px;font-size:.72em;text-transform:uppercase;letter-spacing:1.05px;font-weight:950;color:#a4a6b2}
+.round-group{overflow:hidden;background:linear-gradient(180deg,#151823 0%,#11141d 100%);border:1px solid #34384a;border-radius:14px;box-shadow:0 8px 24px rgba(0,0,0,.16)}
+.round-heading{margin:0;padding:13px 16px 10px;font-size:.7em;color:#c789ff;font-weight:950;text-transform:uppercase;letter-spacing:1px;background:rgba(121,75,172,.08)}
 .round-group .result-row{margin:0;border-top:1px solid #2d3140}
 .round-group .result-row:first-of-type{border-top:0}
-.result-row{background:transparent;border:0;border-radius:0;padding:14px 16px}
-.result-pairs{display:grid;grid-template-columns:minmax(220px,1.6fr) minmax(150px,.8fr) auto;gap:18px;align-items:center}
+.result-row{background:transparent;border:0;border-radius:0;padding:15px 16px}
+.result-pairs{display:grid;grid-template-columns:minmax(240px,1.65fr) minmax(110px,.65fr) auto;gap:18px;align-items:center}
 .result-names{min-width:0}
-.result-winner{font-size:.91em;color:#fff;font-weight:950}
-.result-loser{font-size:.82em;color:#9fa1ad;margin-top:4px}
-.result-score{font-size:.96em;color:#c77dff;font-weight:950;white-space:nowrap;margin:0;letter-spacing:.7px}
-.result-date{font-size:.72em;color:#9fa1ad;white-space:nowrap;text-align:right}
-.live-empty{padding:34px 28px;text-align:center;color:var(--muted);background:#141722;border:1px solid #303442;border-radius:13px}
+.result-winner{font-size:.93em;color:#fff;font-weight:950}
+.result-loser{font-size:.82em;color:#9fa2af;margin-top:5px}
+.result-score{font-size:1em;color:#c789ff;font-weight:950;white-space:nowrap;letter-spacing:.8px}
+.result-date{font-size:.72em;color:#8f92a0;white-space:nowrap;text-align:right}
+.live-empty{padding:36px 28px;text-align:center;color:var(--muted);background:#141722;border:1px solid #303442;border-radius:14px}
+.news-date{font-size:.74em;color:#aeb0bb;font-weight:800;margin:6px 0 10px;letter-spacing:.1px}
+
+.results-title{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.results-source{font-size:.82em;text-transform:none;letter-spacing:0;color:#7f8290;font-weight:800}
+.live-footer{padding:8px 2px 0;color:#6f7280;font-size:.68em;text-align:right}
 @media(max-width:650px){.tabs{overflow-x:auto;max-width:68vw}.tab{white-space:nowrap;padding:7px 12px}.live-summary{grid-template-columns:1fr}.live-dates{padding-top:0}.result-pairs{grid-template-columns:1fr auto;gap:10px}.result-date{grid-column:1/-1;text-align:left}.live-watch,.live-summary{padding-left:16px;padding-right:16px}}
 </style>
 </head>
@@ -309,6 +314,20 @@ function show(id,btn){document.querySelectorAll('.section').forEach(s=>s.classLi
 const hoy=new Date().toLocaleDateString('es-ES',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
 document.getElementById('fecha').textContent=hoy.charAt(0).toUpperCase()+hoy.slice(1);
 
+
+function formatNewsDate(iso){
+  if(!iso)return'Fecha no disponible';
+  const d=new Date(iso+'T12:00:00');
+  if(Number.isNaN(d.getTime()))return iso;
+  const today=new Date(); today.setHours(0,0,0,0);
+  const cmp=new Date(d); cmp.setHours(0,0,0,0);
+  const diff=Math.round((today-cmp)/86400000);
+  if(diff===0)return'Hoy';
+  if(diff===1)return'Ayer';
+  if(diff>1 && diff<7)return`Hace ${diff} días`;
+  return d.toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'});
+}
+
 function renderFuentes(fuentes){if(!fuentes?.length)return'';return`<div class="card-fuentes"><div class="fuentes-label">Fuentes</div>${fuentes.map(f=>`<div class="fuente-item"><span class="fuente-domain">${f.domain}</span><a href="${f.url}" target="_blank" class="fuente-titulo">${f.titulo}</a></div>`).join('')}</div>`;}
 
 async function loadNews(){
@@ -317,8 +336,8 @@ async function loadNews(){
     const items=data.resumen_diario||[];
     if(!items.length){document.getElementById('news-grid').innerHTML='<div class="empty-msg">No hay noticias ahora mismo.<br>Vuelve más tarde 🎾</div>';return;}
     const[featured,...rest]=items;
-    const featuredHtml=`<div class="news-featured" style="animation-delay:0s"><div class="news-featured-body"><div class="featured-tag">🔥 Destacado</div><div class="titular">${featured.titular}</div><div class="divider"></div><div class="resumen">${featured.resumen}</div>${renderFuentes(featured.fuentes)}</div></div>`;
-    const restHtml=rest.map((item,i)=>`<div class="news-card" style="animation-delay:${(i+1)*.07}s"><div class="card-num">${String(i+2).padStart(2,'0')}</div><div class="news-card-content"><div class="card-tag">📰 Noticia</div><div class="titular">${item.titular}</div><div class="resumen">${item.resumen}</div>${renderFuentes(item.fuentes)}</div></div>`).join('');
+    const featuredHtml=`<div class="news-featured" style="animation-delay:0s"><div class="news-featured-body"><div class="featured-tag">🔥 Destacado</div><div class="news-date">📅 ${formatNewsDate(featured.fecha)}</div><div class="titular">${featured.titular}</div><div class="divider"></div><div class="resumen">${featured.resumen}</div>${renderFuentes(featured.fuentes)}</div></div>`;
+    const restHtml=rest.map((item,i)=>`<div class="news-card" style="animation-delay:${(i+1)*.07}s"><div class="card-num">${String(i+2).padStart(2,'0')}</div><div class="news-card-content"><div class="card-tag">📰 Noticia</div><div class="news-date">📅 ${formatNewsDate(item.fecha)}</div><div class="titular">${item.titular}</div><div class="resumen">${item.resumen}</div>${renderFuentes(item.fuentes)}</div></div>`).join('');
     document.getElementById('news-grid').innerHTML=featuredHtml+restHtml;
   }catch(e){document.getElementById('news-grid').innerHTML=`<div class="empty-msg">Error: ${e.message}</div>`;}
 }
@@ -395,8 +414,9 @@ async function loadEnJuego(){
       </div>
       <div class="live-watch"><div class="live-watch-label">Dónde verlo</div>${watch||'<span class="live-watch-chip">Sin dato</span>'}</div>
       ${nextHtml}
-      <div class="results-title">Resultados</div>
+      <div class="results-title"><span>Resultados</span><span class="results-source">Datos oficiales FIP</span></div>
       ${resultsHtml||'<div class="live-empty">Aún no hay resultados femeninos finalizados publicados.</div>'}
+      <div class="live-footer">Datos oficiales FIP · actualización automática</div>
     </div>`;
   }catch(e){
     el.innerHTML=`<div class="live-empty">No se pudo cargar la información en directo.<br><small>${e.message||''}</small></div>`;
