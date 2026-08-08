@@ -944,7 +944,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
         "female_targets_found": 0,
         "female_targets_clicked": 0,
         "raw_match_blocks": 0,
-        "source_mode": "winner-anchor-all-states",
+        "source_mode": "winner-anchor-all-dates",
     }
 
     if async_playwright is None:
@@ -1057,7 +1057,79 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                 except Exception as exc:
                     print(f"  collect-state error {tag}: {exc}")
 
+
+            async def collect_all_date_states(prefix: str):
+                # date selects
+                try:
+                    selects = page.locator("select")
+                    for si in range(await selects.count()):
+                        sel = selects.nth(si)
+                        opts = sel.locator("option")
+                        count = await opts.count()
+                        if not 2 <= count <= 15:
+                            continue
+
+                        labels = []
+                        for oi in range(count):
+                            try:
+                                labels.append(re.sub(r"\s+", " ", (await opts.nth(oi).inner_text()).strip()))
+                            except Exception:
+                                labels.append("")
+
+                        if not any(re.search(
+                            r"(?:\bMon\b|\bTue\b|\bWed\b|\bThu\b|\bFri\b|\bSat\b|\bSun\b|"
+                            r"\bMonday\b|\bTuesday\b|\bWednesday\b|\bThursday\b|\bFriday\b|\bSaturday\b|\bSunday\b|"
+                            r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9})",
+                            label, re.I
+                        ) for label in labels):
+                            continue
+
+                        for oi, label in enumerate(labels):
+                            if not label:
+                                continue
+                            try:
+                                value = await opts.nth(oi).get_attribute("value")
+                                if value is not None:
+                                    await sel.select_option(value=value)
+                                else:
+                                    await sel.select_option(label=label)
+                                await page.wait_for_timeout(650)
+                                await collect_state(f"{prefix}|date:{label}")
+                            except Exception:
+                                pass
+                except Exception:
+                    pass
+
+                # date buttons/chips
+                try:
+                    buttons = page.locator("button, [role=button], [role=tab], [class*=date], [class*=day]")
+                    seen_dates = set()
+                    for bi in range(min(await buttons.count(), 160)):
+                        el = buttons.nth(bi)
+                        try:
+                            label = re.sub(r"\s+", " ", (await el.inner_text()).strip())
+                            if not label or label in seen_dates:
+                                continue
+                            if not re.search(
+                                r"(?:\bMon\b|\bTue\b|\bWed\b|\bThu\b|\bFri\b|\bSat\b|\bSun\b|"
+                                r"\bMonday\b|\bTuesday\b|\bWednesday\b|\bThursday\b|\bFriday\b|\bSaturday\b|\bSunday\b|"
+                                r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9})",
+                                label, re.I
+                            ):
+                                continue
+                            if not await el.is_visible():
+                                continue
+                            seen_dates.add(label)
+                            await el.click(force=True, timeout=1800)
+                            await page.wait_for_timeout(650)
+                            await collect_state(f"{prefix}|date:{label}")
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
             await collect_state("default")
+            await collect_all_date_states("default")
 
             # Probe any clickable element around the visible Female/Women label.
             try:
@@ -1135,33 +1207,12 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                     if clicked:
                         diag["female_targets_clicked"] += 1
                         await page.wait_for_timeout(800)
-                        await collect_state(f"female-probe:{ti}:{meta.get('tag')}:{meta.get('type')}:{meta.get('value')}")
+                        state_prefix = f"female-probe:{ti}:{meta.get('tag')}:{meta.get('type')}:{meta.get('value')}"
+                        await collect_state(state_prefix)
+                        await collect_all_date_states(state_prefix)
                 except Exception:
                     pass
 
-            # Scan date dropdowns too.
-            try:
-                selects = page.locator("select")
-                for si in range(await selects.count()):
-                    sel = selects.nth(si)
-                    opts = sel.locator("option")
-                    count = await opts.count()
-                    if not 2 <= count <= 15:
-                        continue
-                    for oi in range(count):
-                        try:
-                            val = await opts.nth(oi).get_attribute("value")
-                            label = re.sub(r"\s+", " ", (await opts.nth(oi).inner_text()).strip())
-                            if val is not None:
-                                await sel.select_option(value=val)
-                            else:
-                                await sel.select_option(label=label)
-                            await page.wait_for_timeout(650)
-                            await collect_state(f"date-select:{label}")
-                        except Exception:
-                            pass
-            except Exception:
-                pass
 
             await browser.close()
             browser = None
@@ -1304,6 +1355,70 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     ranking_full, _, _ = await _womens_ranking_validation_sets()
 
+    month_map = {
+        "jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,
+        "jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12,
+        "ene":1,"abr":4,"ago":8,"dic":12,
+    }
+
+    def date_from_tag(tag: str) -> str:
+        raw = str(tag or "")
+        year = date.today().year
+
+        m = re.search(r"\b(\d{1,2})[/-](\d{1,2})(?:[/-](20\d{2}))?\b", raw)
+        if m:
+            d, mo = int(m.group(1)), int(m.group(2))
+            y = int(m.group(3) or year)
+            try:
+                return date(y, mo, d).isoformat()
+            except Exception:
+                pass
+
+        m = re.search(r"\b(\d{1,2})\s+([A-Za-z]{3,12})\b", raw)
+        if m:
+            d = int(m.group(1))
+            mon = m.group(2).lower()[:3]
+            mo = month_map.get(mon)
+            if mo:
+                try:
+                    return date(year, mo, d).isoformat()
+                except Exception:
+                    pass
+        return ""
+
+    def infer_round(context: str, match_date: str) -> str:
+        low = context.lower()
+        if re.search(r"semi[- ]?final", low): return "Semifinales"
+        if re.search(r"quarter[- ]?final", low): return "Cuartos de final"
+        if re.search(r"round of 16|octav", low): return "Octavos de final"
+        if re.search(r"\bfinal\b", low): return "Final"
+        if re.search(r"\bqual|clasif", low): return "Clasificación"
+        if re.search(r"2nd round|second round|segunda", low): return "Segunda ronda"
+        if re.search(r"1st round|first round|primera", low): return "Primera ronda"
+
+        # For current Premier Padel week: use tournament end date if parseable.
+        raw_dates = str(event.get("dates", "") or "")
+        m = re.search(r"(\d{1,2})\s*[-–]\s*(\d{1,2})\s+([A-Za-z]{3,12})(?:\s+(20\d{2}))?", raw_dates, re.I)
+        if m and match_date:
+            end_day = int(m.group(2))
+            mo = month_map.get(m.group(3).lower()[:3])
+            y = int(m.group(4) or date.today().year)
+            if mo:
+                try:
+                    end_dt = date(y, mo, end_day)
+                    md = date.fromisoformat(match_date)
+                    delta = (end_dt - md).days
+                    if delta == 0: return "Final"
+                    if delta == 1: return "Semifinales"
+                    if delta == 2: return "Cuartos de final"
+                    if delta == 3: return "Octavos de final"
+                    if delta in {4,5}: return "Primera ronda"
+                    if delta >= 6: return "Clasificación"
+                except Exception:
+                    pass
+
+        return "Partidos"
+
     def map_ranked(raw: str) -> str | None:
         norm = _norm_person_name(raw)
         if not norm:
@@ -1390,26 +1505,24 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
             winner, loser = pair_b, pair_a
             display = list(zip(b_sc, a_sc))
 
-        context = (block.get("text", "") + " " + block.get("tag", "")).lower()
-        if re.search(r"semi[- ]?final", context):
-            rnd = "Semifinales"
-        elif re.search(r"quarter[- ]?final", context):
-            rnd = "Cuartos de final"
-        elif re.search(r"round of 16", context):
-            rnd = "Octavos de final"
-        elif re.search(r"\bfinal\b", context):
-            rnd = "Final"
-        elif re.search(r"\bqual", context):
-            rnd = "Clasificación"
-        else:
-            rnd = "Partidos"
+        context = block.get("text", "") + " " + block.get("tag", "")
+        match_date = date_from_tag(block.get("tag", ""))
+
+        if match_date:
+            try:
+                if date.fromisoformat(match_date) > date.today():
+                    continue
+            except Exception:
+                pass
+
+        rnd = infer_round(context, match_date)
 
         parsed.append({
             "round": rnd,
             "winner": winner,
             "loser": loser,
             "score": "  ".join(f"{a}-{b}" for a,b in display),
-            "date": "",
+            "date": match_date,
         })
 
     valid = []
@@ -1422,7 +1535,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     _LIVE_DEBUG_STATE.update({
         "browser": capture_diag,
-        "parser": "winner-anchor-filter-later-v35",
+        "parser": "all-finished-tournament-v36",
         "raw_match_blocks": len(blocks),
         "female_match_blocks": len(female_blocks),
         "parsed_results": len(parsed),
@@ -1431,12 +1544,27 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         "groq_used": False,
     })
 
+    valid.sort(
+        key=lambda x: (
+            x.get("date", ""),
+            ROUND_ORDER.get(x.get("round", "Partidos"), 0),
+        ),
+        reverse=True,
+    )
+
+    result_dates = sorted(
+        {x.get("date", "") for x in valid if x.get("date")},
+        reverse=True,
+    )
+    _LIVE_DEBUG_STATE["result_dates"] = result_dates
+
     print(
-        "  live v35:",
+        "  live v36:",
         f"raw={len(blocks)}",
         f"female={len(female_blocks)}",
         f"parsed={len(parsed)}",
         f"valid={len(valid)}",
+        f"dates={len(result_dates)}",
     )
 
     return valid
