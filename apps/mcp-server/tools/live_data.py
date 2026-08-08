@@ -1423,54 +1423,6 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         "ene":1,"abr":4,"ago":8,"dic":12,
     }
 
-
-    def _event_end_date() -> date | None:
-        raw = str(event.get("dates", "") or "")
-        # "2–9 agosto 2026", "2-9 August 2026"
-        m = re.search(
-            r"(\d{1,2})\s*[-–]\s*(\d{1,2})\s+([A-Za-zÁÉÍÓÚáéíóú]{3,14})(?:\s+(20\d{2}))?",
-            raw, re.I
-        )
-        if m:
-            end_day = int(m.group(2))
-            mon = _norm_person_name(m.group(3)).split()[0][:3]
-            mo = month_map.get(mon)
-            y = int(m.group(4) or date.today().year)
-            if mo:
-                try:
-                    return date(y, mo, end_day)
-                except Exception:
-                    pass
-
-        nums = re.findall(r"\b(\d{1,2})[/-](\d{1,2})[/-](20\d{2})\b", raw)
-        if nums:
-            d, mo, y = nums[-1]
-            try:
-                return date(int(y), int(mo), int(d))
-            except Exception:
-                pass
-        return None
-
-    def _current_round_from_calendar() -> str:
-        """
-        Standard Premier Padel cadence:
-        final = last day, semifinals = day before, QF = two days before,
-        R16 = three days before.
-        """
-        end_dt = _event_end_date()
-        if not end_dt:
-            return "Partidos"
-        delta = (end_dt - date.today()).days
-        if delta <= 0:
-            return "Final"
-        if delta == 1:
-            return "Semifinales"
-        if delta == 2:
-            return "Cuartos de final"
-        if delta == 3:
-            return "Octavos de final"
-        return "Primera ronda"
-
     def date_from_tag(tag: str) -> str:
         raw = str(tag or "")
         year = date.today().year
@@ -1611,127 +1563,6 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
             "date": match_date,
         })
 
-    # -----------------------------------------------------------------
-    # ROUND RECONSTRUCTION
-    # v39 returned the full set of matches, but FIP did not expose round labels.
-    # Keep any explicit round already found. For unresolved matches, split the
-    # draw backwards from the CURRENT stage. This matches tournament progression:
-    # SF=2, QF=4, R16=8, older matches=Primera ronda.
-    # -----------------------------------------------------------------
-    unresolved = [x for x in parsed if x.get("round") == "Partidos"]
-
-    if unresolved:
-        stage = _current_round_from_calendar()
-
-        # Source order from the working v39 extractor is cumulative draw order.
-        # We allocate from the end (most advanced/current matches) backwards.
-        capacities_by_stage = {
-            "Final": [
-                ("Final", 1),
-                ("Semifinales", 2),
-                ("Cuartos de final", 4),
-                ("Octavos de final", 8),
-            ],
-            "Semifinales": [
-                ("Semifinales", 2),
-                ("Cuartos de final", 4),
-                ("Octavos de final", 8),
-            ],
-            "Cuartos de final": [
-                ("Cuartos de final", 4),
-                ("Octavos de final", 8),
-            ],
-            "Octavos de final": [
-                ("Octavos de final", 8),
-            ],
-            "Primera ronda": [],
-            "Partidos": [],
-        }
-
-        # Critical detail: the current round may be only PARTIALLY completed.
-        # Older rounds are complete. We infer how many current-round matches have
-        # finished from the total once completed prior rounds are removed.
-        prior_complete_sizes = {
-            "Final": 2 + 4 + 8,
-            "Semifinales": 4 + 8,
-            "Cuartos de final": 8,
-            "Octavos de final": 0,
-            "Primera ronda": 0,
-            "Partidos": 0,
-        }
-        current_capacity = {
-            "Final": 1,
-            "Semifinales": 2,
-            "Cuartos de final": 4,
-            "Octavos de final": 8,
-            "Primera ronda": 999,
-            "Partidos": 999,
-        }
-
-        n = len(unresolved)
-        older_unknown = 0
-
-        # Main draw can have byes, so first-round count is whatever remains
-        # after the completed standard later rounds and current completed matches.
-        if stage in {"Final","Semifinales","Cuartos de final","Octavos de final"}:
-            complete_prior = prior_complete_sizes[stage]
-            # Pick the largest plausible number of completed current matches
-            # while leaving a non-negative older round remainder.
-            cur_done = min(current_capacity[stage], max(0, n - complete_prior))
-            # If this gives zero while we do have matches at current stage, keep zero:
-            # the UI should not invent a current result that hasn't finished.
-            older_unknown = n - complete_prior - cur_done
-        else:
-            cur_done = 0
-            older_unknown = n
-
-        pos = 0
-
-        # Older unknown block = Primera ronda.
-        if older_unknown > 0:
-            for x in unresolved[:older_unknown]:
-                x["round"] = "Primera ronda"
-            pos = older_unknown
-
-        # Then complete prior rounds in chronological order.
-        chronological = []
-        if stage in {"Final","Semifinales","Cuartos de final","Octavos de final"}:
-            chronological.append(("Octavos de final", 8))
-        if stage in {"Final","Semifinales","Cuartos de final"}:
-            chronological.append(("Cuartos de final", 4))
-        if stage in {"Final","Semifinales"}:
-            chronological.append(("Semifinales", 2))
-        if stage == "Final":
-            chronological.append(("Final", 1))
-
-        # For the CURRENT stage, replace its full capacity by actually completed count.
-        rebuilt = []
-        for label, size in chronological:
-            if label == stage:
-                size = cur_done
-            rebuilt.append((label, size))
-
-        # In Semifinals stage, chronological above includes SF after QF.
-        # In QF stage, includes QF after R16, etc.
-        for label, size in rebuilt:
-            if size <= 0:
-                continue
-            end = min(len(unresolved), pos + size)
-            for x in unresolved[pos:end]:
-                x["round"] = label
-            pos = end
-
-        # Any still-unassigned tail belongs to the current stage.
-        for x in unresolved[pos:]:
-            x["round"] = stage if stage != "Partidos" else "Partidos"
-
-        _LIVE_DEBUG_STATE["round_reconstruction"] = {
-            "stage": stage,
-            "total_unresolved": n,
-            "older_first_round": older_unknown,
-            "current_completed": cur_done,
-        }
-
     # Dedupe all tournament results.
     valid = []
     seen = set()
@@ -1758,7 +1589,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     _LIVE_DEBUG_STATE.update({
         "browser": capture_diag,
-        "parser": "v39-working-extractor-round-reconstruction-v41",
+        "parser": "full-draw-proximity-v39",
         "raw_blocks": len(blocks),
         "parsed_results": len(parsed),
         "valid_results": len(valid),
@@ -1767,7 +1598,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
     })
 
     print(
-        "  live v41:",
+        "  live v39:",
         f"blocks={len(blocks)}",
         f"parsed={len(parsed)}",
         f"valid={len(valid)}",

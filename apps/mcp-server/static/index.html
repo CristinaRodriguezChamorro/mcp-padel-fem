@@ -199,17 +199,331 @@ nav {
 
 /* ── EN JUEGO ── */
 
-.live-tournament{width:min(100%,1180px);margin:0 auto;display:flex;flex-direction:column;gap:10px}
-.live-summary{display:grid;grid-template-columns:210px minmax(0,1fr) 300px;align-items:center;gap:24px;padding:14px 16px;border:1px solid #30394a;border-radius:10px;background:linear-gradient(110deg,#0b1422,#111a2a 58%,#0b1421)}
-.live-logo-box{height:76px;border-radius:7px;background:#050b14;display:flex;align-items:center;justify-content:center;color:#fff;font-size:.92em;font-weight:1000;letter-spacing:.08em;text-align:center}
-.live-kicker{display:none}.live-name{color:#fff;font-size:1.30em;font-weight:1000;text-transform:none}.live-place{margin-top:8px;color:#bbb7c1;font-size:.82em}.live-dates{color:#bbb7c1;background:none;border:0;padding:0;font-size:1em;font-weight:500}
-.live-watch{display:flex;flex-direction:column;align-items:flex-start;gap:7px;padding:0}.live-watch-label{color:#b7b2bc;font-size:.8em;font-weight:500;text-transform:none;letter-spacing:0}.live-watch-chips{display:flex;gap:15px}.live-watch-chip{border:0;background:none;padding:0;color:#fff;font-size:.82em;font-weight:650}
-.next-match{position:relative;border:1px solid #9854cf;border-radius:10px;background:linear-gradient(110deg,#13172a,#0d1726);padding:12px 23px 15px}.next-match:after{content:"›";position:absolute;right:22px;top:50%;transform:translateY(-50%);color:#aaa6b0;font-size:2em}.next-label{color:#be77ef;font-size:.73em;font-weight:1000;text-transform:uppercase;margin-bottom:8px}.next-round{display:block;border:0;background:none;padding:0;margin:0 0 7px;color:#c27df1;font-size:.84em;font-weight:650}.next-versus{display:flex;align-items:center;gap:14px}.next-team{color:#fff;font-size:1em;font-weight:950}.next-team.right{text-align:left}.next-vs{border:0;background:none;padding:0;color:#8f8995;font-size:.75em}.next-when{margin-top:9px;color:#aaa6b0;font-size:.78em}
-.results-title{margin:3px 0 0;color:#fff;font-size:.9em;font-weight:1000;letter-spacing:0;text-transform:uppercase}.results-source{display:none}
-.round-group{overflow:hidden;border:1px solid #303949;border-radius:10px;background:linear-gradient(110deg,#0c1421,#111a29)}.round-heading{padding:9px 18px 3px;border:0;background:none;color:#bd77ef;font-size:.81em;font-weight:1000;letter-spacing:0;text-transform:uppercase}
-.result-row{border-top:1px solid #2d3544}.round-heading+.result-row{border-top:0}.result-card{display:grid;grid-template-columns:38px minmax(0,1fr) 230px 155px 20px;grid-template-areas:"trophy winner score date arrow" "trophy loser score date arrow";align-items:center;gap:2px 10px;padding:9px 18px;background:transparent}.result-card:before{content:"🏆";grid-area:trophy;font-size:1.05em}.result-card:after{content:"›";grid-area:arrow;color:#aaa6b0;font-size:1.5em}.result-winner{grid-area:winner;color:#fff;font-size:.9em;font-weight:950;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.result-winner .trophy{display:none}.result-loser{grid-area:loser;color:#98949f;font-size:.84em;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.result-score{grid-area:score;color:#bd77ef;font-size:.92em;font-weight:950;white-space:nowrap}.result-meta{grid-area:date;display:flex;justify-content:flex-end;margin:0}.result-status{display:none}.result-date{color:#aaa6b0;font-size:.77em;white-space:nowrap}.result-date:before{content:"▣";margin-right:7px}
-.live-more{height:42px;display:flex;align-items:center;justify-content:center;border-radius:8px;background:linear-gradient(90deg,#101927,#111b2b);color:#d2ced7;font-size:.83em}.live-footer{display:flex;justify-content:space-between;color:#77727f;font-size:.67em;padding:6px 0 0;text-align:left}.live-empty{padding:32px;text-align:center;color:#8e8995;border:1px solid #303949;border-radius:10px;background:#0e1623}
-@media(max-width:650px){.tabs{overflow-x:auto;max-width:68vw}.tab{white-space:nowrap;padding:7px 12px}.live-summary{grid-template-columns:1fr;padding:14px}.live-logo-box{display:none}.live-watch-chips{gap:8px;flex-wrap:wrap}.next-versus{display:grid;grid-template-columns:1fr;gap:4px}.next-match:after{display:none}.result-card{grid-template-columns:28px minmax(0,1fr) auto;grid-template-areas:"trophy winner score" "trophy loser date";gap:4px 8px;padding:10px 12px}.result-card:after{display:none}.result-meta{justify-content:flex-start}.live-footer{flex-direction:column;gap:4px}}</style>
+.live-tournament{
+  width:min(100%,1180px);
+  margin:0 auto;
+  display:flex;
+  flex-direction:column;
+  gap:12px;
+}
+
+/* Tarjeta principal del torneo */
+.live-summary{
+  position:relative;
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  align-items:center;
+  gap:28px;
+  min-height:118px;
+  padding:22px 26px 22px 250px;
+  border:1px solid #30394a;
+  border-radius:10px;
+  background:
+    linear-gradient(110deg,#0b1320 0%,#111a2a 56%,#0b1320 100%);
+  box-shadow:none;
+}
+.live-summary:before{
+  content:"PREMIER PADEL";
+  position:absolute;
+  left:18px;
+  top:18px;
+  width:205px;
+  height:82px;
+  border-radius:8px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  text-align:center;
+  color:#fff;
+  font-size:1.05em;
+  font-weight:1000;
+  letter-spacing:.13em;
+  background:
+    radial-gradient(circle at 18% 50%,#d5a83c 0 5px,transparent 6px),
+    linear-gradient(135deg,#050a13,#07101b);
+}
+.live-kicker{display:none}
+.live-name{
+  color:#fff;
+  font-size:1.35em;
+  font-weight:1000;
+  letter-spacing:-.02em;
+  text-transform:none;
+}
+.live-place{
+  color:#bbb7c2;
+  font-size:.84em;
+  font-weight:550;
+  margin-top:9px;
+}
+.live-dates{
+  color:#c8c4ce;
+  background:none;
+  border:0;
+  border-radius:0;
+  padding:0;
+  font-size:.83em;
+  font-weight:550;
+  white-space:nowrap;
+}
+
+/* Dónde verlo */
+.live-watch{
+  display:flex;
+  align-items:center;
+  gap:14px;
+  flex-wrap:wrap;
+  padding:0 4px;
+}
+.live-watch-label{
+  color:#aaa6b2;
+  font-size:.76em;
+  font-weight:500;
+  letter-spacing:0;
+  text-transform:none;
+  margin-right:4px;
+}
+.live-watch-chip{
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  color:#fff;
+  background:transparent;
+  border:0;
+  border-radius:0;
+  padding:0;
+  font-size:.82em;
+  font-weight:650;
+}
+
+/* Próximo partido */
+.next-match{
+  position:relative;
+  border:1px solid #9355c6;
+  border-radius:10px;
+  background:linear-gradient(110deg,#13182a,#0d1726);
+  padding:14px 54px 16px 24px;
+  box-shadow:none;
+}
+.next-match:after{
+  content:"›";
+  position:absolute;
+  right:24px;
+  top:50%;
+  transform:translateY(-50%);
+  color:#aaa6b1;
+  font-size:2em;
+  font-weight:300;
+}
+.next-label{
+  color:#bd76ed;
+  font-size:.73em;
+  font-weight:1000;
+  text-transform:uppercase;
+  letter-spacing:.2px;
+  margin-bottom:9px;
+}
+.next-round{
+  display:block;
+  color:#bf78ef;
+  background:none;
+  border:0;
+  border-radius:0;
+  padding:0;
+  font-size:.84em;
+  font-weight:650;
+  margin-bottom:9px;
+}
+.next-versus{
+  display:flex;
+  align-items:center;
+  gap:14px;
+}
+.next-team{
+  color:#fff;
+  font-size:1.02em;
+  font-weight:950;
+  line-height:1.25;
+}
+.next-team.right{text-align:left}
+.next-vs{
+  color:#8e8995;
+  font-size:.74em;
+  font-weight:800;
+  border:0;
+  background:none;
+  border-radius:0;
+  padding:0;
+  text-transform:uppercase;
+}
+.next-when{
+  color:#aaa6b0;
+  font-size:.78em;
+  font-weight:500;
+  margin-top:10px;
+}
+
+/* Cabecera resultados */
+.results-title{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:12px;
+  margin-top:3px;
+  color:#fff;
+  font-size:.92em;
+  font-weight:1000;
+  text-transform:uppercase;
+  letter-spacing:0;
+}
+.results-source{
+  color:#6f6b77;
+  font-size:.72em;
+  font-weight:650;
+  text-transform:none;
+  letter-spacing:0;
+}
+
+/* Bloques por ronda */
+.round-group{
+  overflow:hidden;
+  border-radius:10px;
+  border:1px solid #303949;
+  background:linear-gradient(110deg,#0d1522,#111a29);
+  box-shadow:none;
+}
+.round-heading{
+  padding:10px 18px 5px;
+  color:#bd77ef;
+  background:transparent;
+  border-bottom:0;
+  font-size:.82em;
+  font-weight:1000;
+  letter-spacing:0;
+  text-transform:uppercase;
+}
+
+/* Filas de partido estilo mockup */
+.result-row{
+  border-top:1px solid #2d3544;
+}
+.round-group .result-row:first-of-type{border-top:0}
+.result-card{
+  position:relative;
+  display:grid;
+  grid-template-columns:38px minmax(0,1fr) 230px 155px 22px;
+  grid-template-areas:
+    "trophy winner score date arrow"
+    "trophy loser score date arrow";
+  align-items:center;
+  column-gap:10px;
+  row-gap:2px;
+  padding:10px 18px;
+  background:transparent;
+}
+.result-card:before{
+  content:"🏆";
+  grid-area:trophy;
+  font-size:1.05em;
+}
+.result-card:after{
+  content:"›";
+  grid-area:arrow;
+  color:#aaa6b0;
+  font-size:1.5em;
+  font-weight:300;
+}
+.result-winner{
+  grid-area:winner;
+  color:#fff;
+  font-size:.92em;
+  font-weight:950;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.result-winner .trophy{display:none}
+.result-loser{
+  grid-area:loser;
+  color:#98949f;
+  font-size:.84em;
+  font-weight:500;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.result-score{
+  grid-area:score;
+  color:#bd77ef;
+  font-size:.95em;
+  font-weight:1000;
+  letter-spacing:.1px;
+  white-space:nowrap;
+}
+.result-meta{
+  grid-area:date;
+  display:flex;
+  align-items:center;
+  justify-content:flex-end;
+  gap:0;
+  margin:0;
+}
+.result-status{display:none}
+.result-date{
+  color:#aaa6b0;
+  font-size:.77em;
+  font-weight:500;
+  white-space:nowrap;
+}
+.result-date:before{
+  content:"▣";
+  margin-right:7px;
+  color:#aaa6b0;
+}
+
+/* Estado vacío + footer */
+.live-empty{
+  padding:34px 24px;
+  color:#8d8995;
+  text-align:center;
+  border:1px solid #303949;
+  border-radius:10px;
+  background:#0e1623;
+}
+.live-footer{
+  padding-top:5px;
+  color:#686472;
+  font-size:.66em;
+  text-align:right;
+}
+@media(max-width:650px){
+.tabs{overflow-x:auto;max-width:68vw}
+.tab{white-space:nowrap;padding:7px 12px}
+.live-summary{
+  grid-template-columns:1fr;
+  padding:18px;
+  min-height:auto;
+}
+.live-summary:before{display:none}
+.live-dates{justify-self:start}
+.live-watch{gap:9px}
+.next-match{padding:16px}
+.next-match:after{display:none}
+.next-versus{display:grid;grid-template-columns:1fr;gap:6px}
+.next-team.right{text-align:left}
+.results-title{align-items:flex-start;flex-direction:column;gap:4px}
+.result-card{
+  grid-template-columns:30px minmax(0,1fr) auto;
+  grid-template-areas:
+    "trophy winner score"
+    "trophy loser date";
+  gap:4px 8px;
+  padding:10px 12px;
+}
+.result-card:after{display:none}
+.result-meta{justify-content:flex-start}
+}
+</style>
 </head>
 <body>
 <nav>
@@ -328,31 +642,115 @@ async function loadTorneos(){try{const data=await fetch('/api/calendar').then(r=
 
 async function loadEnJuego(){
   const el=document.getElementById('live-content');
-  const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-  const fmtDate=iso=>{if(!iso)return'';const d=new Date(iso+'T12:00:00');return Number.isNaN(d.getTime())?iso:d.toLocaleDateString('es-ES',{day:'numeric',month:'short',year:'numeric'}).replace('.','')};
+
+  const fmtResultDate=(iso)=>{
+    if(!iso)return'';
+    const d=new Date(iso+'T12:00:00');
+    if(Number.isNaN(d.getTime()))return iso;
+    return d.toLocaleDateString('es-ES',{day:'2-digit',month:'2-digit'});
+  };
+
   try{
-    const d=await fetch('/api/live?gender=women').then(r=>{if(!r.ok)throw new Error(`HTTP ${r.status}`);return r.json()});
-    if(!d.active){el.innerHTML=`<div class="live-empty">${d.error?'No se pudo actualizar la información de En juego.':'Ahora mismo no hay ningún torneo Premier Padel en juego.'}</div>`;return}
-    const watch=(d.watch||[]).map(x=>`<span class="live-watch-chip">📺 ${esc(x)}</span>`).join('');
-    const groups={};(d.results||[]).forEach(r=>(groups[r.round||'Partidos']??=[]).push(r));
-    const order=['Final','Semifinales','Cuartos de final','Octavos de final','Segunda ronda','Primera ronda','Clasificación','Partidos'];
-    let next='';
-    if(d.next_match){const n=d.next_match;next=`<div class="next-match"><div class="next-label">PRÓXIMO PARTIDO</div><div class="next-round">${esc(n.round||'')}</div><div class="next-versus"><div class="next-team">${esc(n.pair1||'')}</div><div class="next-vs">VS</div><div class="next-team right">${esc(n.pair2||'')}</div></div><div class="next-when">▣ ${esc(n.when||'Horario por confirmar')}</div></div>`}
-    let res='';
-    for(const round of order){if(!groups[round]?.length)continue;res+=`<section class="round-group"><div class="round-heading">${esc(round)}</div>`;for(const m of groups[round])res+=`<div class="result-row"><div class="result-card"><div class="result-winner">${esc(m.winner||'')}<span class="trophy">🏆</span></div><div class="result-loser">${esc(m.loser||'')}</div><div class="result-score">${esc(m.score||'')}</div><div class="result-meta"><span class="result-status">Finalizado</span><span class="result-date">${esc(fmtDate(m.date))}</span></div></div></div>`;res+=`</section>`}
+    const d=await fetch('/api/live?gender=women').then(r=>{
+      if(!r.ok)throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    });
+
+    if(!d.active){
+      const msg=d.error
+        ? 'No se pudo actualizar la información de En juego.'
+        : 'Ahora mismo no hay ningún torneo Premier Padel en juego.';
+      el.innerHTML=`<div class="live-empty">${msg}</div>`;
+      return;
+    }
+
+    const watch=(d.watch||[])
+      .map(x=>`<span class="live-watch-chip">📺 ${x}</span>`)
+      .join('');
+
+    let nextHtml='';
+    if(d.next_match){
+      const n=d.next_match;
+      nextHtml=`<div class="next-match">
+        <div class="next-label">Próximo partido</div>
+        <div class="next-round">${n.round||'Próximo partido'}</div>
+        <div class="next-versus">
+          <div class="next-team">${n.pair1||''}</div>
+          <div class="next-vs">vs</div>
+          <div class="next-team right">${n.pair2||''}</div>
+        </div>
+        <div class="next-when">🕒 ${n.when||'Horario por confirmar'}</div>
+      </div>`;
+    }
+
+    const groups={};
+    (d.results||[]).forEach(r=>{
+      const round=r.round||'Partidos';
+      (groups[round]??=[]).push(r);
+    });
+
+    const roundOrder=[
+      'Final','Semifinales','Cuartos de final','Octavos de final',
+      'Segunda ronda','Primera ronda','Clasificación','Partidos'
+    ];
+    const ordered=[
+      ...roundOrder.filter(r=>groups[r]),
+      ...Object.keys(groups).filter(r=>!roundOrder.includes(r))
+    ];
+
+    const resultsHtml=ordered.map(round=>{
+      const matches=groups[round].map(r=>`
+        <div class="result-row">
+          <div class="result-card">
+            <div class="result-winner">${r.winner||''}<span class="trophy">🏆</span></div>
+            <div class="result-loser">${r.loser||''}</div>
+            <div class="result-score">${r.score||''}</div>
+            <div class="result-meta">
+              <span class="result-status">Finalizado</span>
+              ${r.date?`<span class="result-date">· ${fmtResultDate(r.date)}</span>`:''}
+            </div>
+          </div>
+        </div>`).join('');
+
+      return `<div class="round-group">
+        <div class="round-heading">${round}</div>
+        ${matches}
+      </div>`;
+    }).join('');
+
     el.innerHTML=`<div class="live-tournament">
       <div class="live-summary">
-        <div class="live-logo-box">PREMIER PADEL<br>${esc((d.name||'').toUpperCase())}</div>
-        <div><div class="live-name">${esc(d.name||'Torneo actual')}</div><div class="live-place">📍 ${esc(d.place||'')} ${d.dates?` · <span class="live-dates">${esc(d.dates)}</span>`:''}</div></div>
-        <div class="live-watch"><div class="live-watch-label">¿Dónde verlo?</div><div class="live-watch-chips">${watch||'<span class="live-watch-chip">Por confirmar</span>'}</div></div>
+        <div>
+          <div class="live-kicker"><span class="live-dot"></span>En juego</div>
+          <div class="live-name">${d.name||''}</div>
+          <div class="live-place">📍 ${d.place||''}</div>
+        </div>
+        <div class="live-dates">${d.dates||''}</div>
       </div>
-      ${next}
-      <div class="results-title">RESULTADOS FEMENINOS</div>
-      ${res||'<div class="live-empty">Todavía no hay resultados femeninos finalizados disponibles.</div>'}
-      ${(d.results||[]).length>8?'<div class="live-more">Ver todos los resultados femeninos⌄</div>':''}
-      <div class="live-footer"><span>Datos oficiales de padelfip.com · actualización automática</span><span>Fuente: FIP · Order of Play & Results</span></div>
+
+      <div class="live-watch">
+        <div class="live-watch-label">Dónde verlo</div>
+        ${watch||'<span class="live-watch-chip">Por confirmar</span>'}
+      </div>
+
+      ${nextHtml}
+
+      <div class="results-title">
+        <span>Resultados femeninos</span>
+        <span class="results-source">${(d.results||[]).length} partidos · Datos oficiales FIP</span>
+      </div>
+
+      ${resultsHtml||'<div class="live-empty">Todavía no hay resultados femeninos finalizados disponibles.</div>'}
+
+      <div class="live-footer">Datos oficiales FIP · actualización automática</div>
     </div>`;
-  }catch(e){el.innerHTML=`<div class="live-empty">No se pudo cargar la información en directo.<br><small>${esc(e.message||'')}</small></div>`}
+
+  }catch(e){
+    el.innerHTML=`<div class="live-empty">
+      No se pudo cargar la información en directo.
+      <br><small>${e.message||''}</small>
+    </div>`;
+  }
 }
 
 const SPONSORS_DATA=[{name:"Gemma Triay",pair:"Pareja: Delfina Brea",flag:"🇪🇸",emoji:"👑",rank:"#1",wikiTitle:"Gemma_Triay",note:"La número 1 del mundo. Bullpadel construyó su pala más vendida en torno a ella. Contrato hasta 2027.",categories:[{label:"🏏 Pala",brands:[{name:"Bullpadel Elite W 2026",cls:"bullpadel"}]},{label:"👕 Ropa",brands:[{name:"Bullpadel",cls:"bullpadel"}]},{label:"👟 Calzado",brands:[{name:"Bullpadel Hack",cls:"bullpadel"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Delfina Brea",pair:"Pareja: Gemma Triay",flag:"🇦🇷",emoji:"⭐",rank:"#2",wikiTitle:"Delfina_Brea",note:"La argentina más dominante de la historia del circuito. Bullpadel la tiene como embajadora global.",categories:[{label:"🏏 Pala",brands:[{name:"Bullpadel Vertex 05 W 2026",cls:"bullpadel"}]},{label:"👕 Ropa",brands:[{name:"Bullpadel",cls:"bullpadel"}]},{label:"👟 Calzado",brands:[{name:"Bullpadel Hack",cls:"bullpadel"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Ari Sánchez",pair:"Pareja: Paula Josemaría",flag:"🇪🇸",emoji:"🔥",rank:"#3",wikiTitle:"Ari_Sánchez",note:"Fichaje estrella de Adidas en 2025. Su carisma la convierte en la cara más marketiniana del pádel femenino español.",categories:[{label:"🏏 Pala",brands:[{name:"Adidas Metalbone W 2026",cls:"adidas"}]},{label:"👕 Ropa",brands:[{name:"Adidas",cls:"adidas"}]},{label:"👟 Calzado",brands:[{name:"Adidas Adizero",cls:"adidas"}]},{label:"⌚ Otros",brands:[{name:"Garmin",cls:"generic"}]}]},{name:"Paula Josemaría",pair:"Pareja: Ari Sánchez",flag:"🇪🇸",emoji:"💥",rank:"#4",wikiTitle:"Paula_Josemaría",note:"La pegada más potente del circuito. Head la fichó hace años y sigue siendo una de sus apuestas más claras.",categories:[{label:"🏏 Pala",brands:[{name:"Head Delta Pro W 2026",cls:"head"}]},{label:"👕 Ropa",brands:[{name:"Head",cls:"head"}]},{label:"👟 Calzado",brands:[{name:"Head Sprint Pro",cls:"head"}]},{label:"🥤 Nutrición",brands:[{name:"HSN",cls:"generic"}]}]},{name:"Alejandra Salazar",pair:"Pareja: Lucía Sainz",flag:"🇪🇸",emoji:"🏆",rank:"#5",wikiTitle:"Alejandra_Salazar",note:"Leyenda viva del circuito. Adidas la ha renovado season tras season; uno de los contratos más longevos del pádel femenino español.",categories:[{label:"🏏 Pala",brands:[{name:"Adidas Adipower W 2026",cls:"adidas"}]},{label:"👕 Ropa",brands:[{name:"Adidas",cls:"adidas"}]},{label:"👟 Calzado",brands:[{name:"Adidas Adizero",cls:"adidas"}]},{label:"🎾 Pelotas",brands:[{name:"Adidas",cls:"adidas"}]}]},{name:"Lucía Sainz",pair:"Pareja: Alejandra Salazar",flag:"🇪🇸",emoji:"✨",rank:"#6",wikiTitle:"Lucía_Sainz",note:"Nox la apoya desde sus inicios. Una de las jugadoras más seguidas en redes; clave para la marca en Europa.",categories:[{label:"🏏 Pala",brands:[{name:"Nox ML10 Pro Cup W 2026",cls:"nox"}]},{label:"👕 Ropa",brands:[{name:"Nox",cls:"nox"}]},{label:"👟 Calzado",brands:[{name:"K-Swiss Ultrashot",cls:"k-swiss"}]},{label:"🧴 Recuperación",brands:[{name:"Pilexil",cls:"generic"}]}]},{name:"Marta Ortega",pair:"Pareja: Ariana Sánchez",flag:"🇪🇸",emoji:"🎯",rank:"#7",wikiTitle:"Marta_Ortega_Gallego",note:"Nox apostó fuerte por ella y le está saliendo de lujo. Marta es la imagen de la renovación de la marca.",categories:[{label:"🏏 Pala",brands:[{name:"Nox AT10 Luxury W 2026",cls:"nox"}]},{label:"👕 Ropa",brands:[{name:"Nox",cls:"nox"}]},{label:"👟 Calzado",brands:[{name:"K-Swiss Ultrashot",cls:"k-swiss"}]},{label:"⌚ Otros",brands:[{name:"Garmin",cls:"generic"}]}]},{name:"Ariana Sánchez",pair:"Pareja: Marta Ortega",flag:"🇪🇸",emoji:"🚀",rank:"#8",wikiTitle:"Ariana_Sánchez_Fallada",note:"Head la tiene muy bien atada. Su nueva pareja con Marta promete resultados y más visibilidad para la marca.",categories:[{label:"🏏 Pala",brands:[{name:"Head Graphene W 2026",cls:"head"}]},{label:"👕 Ropa",brands:[{name:"Head",cls:"head"}]},{label:"👟 Calzado",brands:[{name:"Head Sprint Pro",cls:"head"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Jessica Castello",pair:"Pareja: Tamara Icardo",flag:"🇪🇸",emoji:"🌟",rank:"Top 10",wikiTitle:"Jessica_Castello",note:"Vibora la ha hecho su bandera en el pádel femenino español. Muy activa en RRSS y con una comunidad fiel.",categories:[{label:"🏏 Pala",brands:[{name:"Vibora Yarara Edition W",cls:"vibora"}]},{label:"👕 Ropa",brands:[{name:"Vibora",cls:"vibora"}]},{label:"👟 Calzado",brands:[{name:"Asics Gel-Padel",cls:"asics"}]}]},{name:"Tamara Icardo",pair:"Pareja: Jessica Castello",flag:"🇪🇸",emoji:"💪",rank:"Top 10",wikiTitle:"Tamara_Icardo",note:"Varlion la acompaña desde que debutó en el circuito profesional. Imagen de la elegancia dentro de la pista.",categories:[{label:"🏏 Pala",brands:[{name:"Varlion LW Carbon W 2026",cls:"varlion"}]},{label:"👕 Ropa",brands:[{name:"Varlion",cls:"varlion"}]},{label:"👟 Calzado",brands:[{name:"Asics Gel-Padel",cls:"asics"}]},{label:"🥤 Nutrición",brands:[{name:"Powerade",cls:"generic"}]}]}];
