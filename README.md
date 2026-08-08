@@ -52,7 +52,7 @@ Los resultados se incorporan a medida que terminan los partidos, sin esperar a q
 
 El filtro de noticias **no depende de una lista de jugadoras hardcodeada**.
 
-Primero se obtiene el **ranking femenino actualizado** y se extraen dinámicamente los nombres y apellidos de las jugadoras. Esa información se usa junto con términos como `women`, `female` o `femenino` para filtrar los feeds RSS.
+Primero se obtiene el **ranking femenino actualizado** y se construye una lista dinámica con los nombres completos de las jugadoras. Una noticia pasa el filtro si aparece al menos una jugadora del ranking **o** si contiene una señal explícita de contenido femenino como `women`, `female`, `woman`, `femenino`, `femenina` o `mujeres`. Después, Groq/Llama resume únicamente el contenido que ya ha superado ese filtro.
 
 ```text
 Ranking femenino → nombres de jugadoras

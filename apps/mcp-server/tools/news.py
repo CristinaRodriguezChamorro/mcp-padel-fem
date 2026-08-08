@@ -37,7 +37,7 @@ FILTRO_FEMENINO = (
 )
 
 # Cache local: el ranking no necesita consultarse en cada refresh de noticias.
-_ranking_names_cache = {"ts": 0.0, "aliases": set()}
+_ranking_names_cache = {"ts": 0.0, "names": None}
 RANKING_NAMES_TTL = 6 * 60 * 60
 
 
@@ -48,84 +48,106 @@ def _normalizar(texto: str) -> str:
     return re.sub(r"[^a-z0-9]+", " ", texto).strip()
 
 
-def _ranking_aliases(names: list[str]) -> set[str]:
+def _ranking_full_names(names: list[str]) -> set[str]:
     """
-    Genera aliases dinámicos desde el ranking:
-    - nombre completo
-    - apellido final
-
-    El apellido permite detectar titulares deportivos del tipo
-    "Triay y Brea ganan...", sin mantener una lista manual.
+    Normaliza los nombres completos devueltos por el ranking femenino.
+    No genera apellidos sueltos ni heurísticas adicionales.
     """
-    full_names = []
-    surnames = []
-
-    for name in names:
-        norm = _normalizar(name)
-        if not norm:
-            continue
-
-        full_names.append(norm)
-        parts = norm.split()
-        if len(parts) >= 2 and len(parts[-1]) >= 4:
-            surnames.append(parts[-1])
-
-    # Un apellido solo se usa si no es ambiguo dentro del propio ranking.
-    counts = {}
-    for surname in surnames:
-        counts[surname] = counts.get(surname, 0) + 1
-
-    unique_surnames = {s for s, count in counts.items() if count == 1}
-    return set(full_names) | unique_surnames
+    return {
+        norm
+        for name in names
+        if (norm := _normalizar(name))
+    }
 
 
-async def get_dynamic_ranking_aliases() -> set[str]:
+async def get_dynamic_ranking_names() -> set[str]:
+    """
+    Obtiene primero el ranking femenino y guarda sus nombres completos en caché.
+    Las noticias se filtran únicamente contra este conjunto.
+    """
     now = time.time()
-    if (
-        _ranking_names_cache["aliases"]
-        and (now - _ranking_names_cache["ts"]) < RANKING_NAMES_TTL
-    ):
-        return _ranking_names_cache["aliases"]
+    cached = _ranking_names_cache.get("names")
+    if cached and (now - _ranking_names_cache["ts"]) < RANKING_NAMES_TTL:
+        return cached
 
     try:
         names = await get_womens_ranking_names(limit=200)
-        aliases = _ranking_aliases(names)
+        normalized_names = _ranking_full_names(names)
         _ranking_names_cache["ts"] = now
-        _ranking_names_cache["aliases"] = aliases
-        print(f"Filtro noticias: {len(aliases)} aliases dinámicos desde ranking femenino")
-        return aliases
+        _ranking_names_cache["names"] = normalized_names
+        print(
+            f"Filtro noticias: {len(normalized_names)} jugadoras cargadas "
+            "desde el ranking femenino"
+        )
+        return normalized_names
     except Exception as exc:
         print(f"  ranking filter error: {exc}")
-        return _ranking_names_cache["aliases"]
+        return cached or set()
 
 
 def es_noticia_femenina(
     titulo: str,
     texto: str,
-    ranking_aliases: set[str],
+    ranking_names: set[str],
 ) -> bool:
     """
-    Filtro determinista:
-    1) términos explícitos de competición femenina;
-    2) nombres/apellidos obtenidos dinámicamente del ranking femenino.
+    Regla determinista:
 
-    Groq NO decide si una noticia es femenina.
+    La noticia se conserva si cumple AL MENOS una condición:
+    1) aparece el nombre completo de una jugadora del ranking femenino;
+    2) aparece una señal explícita de contenido femenino
+       (women, female, woman, femenino, femenina, mujeres...).
+
+    Groq NO interviene en esta decisión.
     """
     if any(b in titulo.lower() for b in BASURA):
         return False
 
     contenido = _normalizar(f"{titulo} {texto}")
+    padded = f" {contenido} "
+
+    # Señal explícita de contenido femenino.
+    female_terms = {_normalizar(term) for term in FILTRO_FEMENINO}
+    if any(term and f" {term} " in padded for term in female_terms):
+        return True
+
+    # Nombre completo de una jugadora del ranking.
+    return any(
+        player_name and f" {player_name} " in padded
+        for player_name in ranking_names
+    )
+
+
+def _extraer_fragmentos_femeninos(texto: str, ranking_names: set[str]) -> str:
+    """
+    Conserva únicamente las frases donde aparece alguna jugadora del ranking.
+    Esto evita que un artículo mixto lleve contenido masculino al resumen.
+    """
+    if not texto:
+        return ""
+
+    frases = re.split(r"(?<=[.!?])\s+", texto)
+    seleccion = []
 
     female_terms = {_normalizar(term) for term in FILTRO_FEMENINO}
-    if any(term in contenido for term in female_terms):
-        return True
 
-    padded = f" {contenido} "
-    if any(f" {alias} " in padded for alias in ranking_aliases if alias):
-        return True
+    for frase in frases:
+        norm = _normalizar(frase)
+        padded = f" {norm} "
 
-    return False
+        has_ranked_player = any(
+            player_name and f" {player_name} " in padded
+            for player_name in ranking_names
+        )
+        has_female_term = any(
+            term and f" {term} " in padded
+            for term in female_terms
+        )
 
+        if has_ranked_player or has_female_term:
+            seleccion.append(frase.strip())
+
+    return " ".join(seleccion)[:3000]
 
 def clean_text(text: str) -> str:
     text = re.sub(r'<[^>]+>', '', text)
@@ -180,7 +202,13 @@ EJEMPLOS de buen resumen:
 - "Gemma Triay y Delfina Brea no dieron opción en la final del Major de Roma. Las número 1 del mundo ganaron 6-2 6-1 en menos de una hora y suman su quinto título de la temporada. Con este resultado se colocan a solo un torneo del récord de victorias consecutivas."
 - "Paula Josemaría vuelve a la competición tras perderse los últimos dos meses por una lesión en el hombro. La madrileña debutó ayer en Buenos Aires con victoria y confirmó que llega en buena forma al tramo final de la temporada."
 
-Ahora escribe sobre estos artículos:
+REGLA CRÍTICA:
+- Resume EXCLUSIVAMENTE información del circuito femenino.
+- No menciones jugadores masculinos, parejas masculinas ni resultados masculinos.
+- Si alguna fuente contiene información mixta, ignora por completo la parte masculina.
+- No inventes nombres ni resultados.
+
+Ahora escribe sobre estos artículos ya filtrados:
 {texto_articulos}
 
 Genera SOLO este JSON:
@@ -276,16 +304,16 @@ async def get_latest_news() -> dict:
 
     print(f"RSS: {len(raw)} artículos")
 
-    ranking_aliases = await get_dynamic_ranking_aliases()
+    ranking_names = await get_dynamic_ranking_names()
     femeninos = [
         art for art in raw
         if es_noticia_femenina(
             art["titulo"],
             art.get("texto", ""),
-            ranking_aliases,
+            ranking_names,
         )
     ]
-    print(f"Filtro dinámico ranking + términos: {len(femeninos)} noticias femeninas")
+    print(f"Filtro ranking femenino: {len(femeninos)} noticias")
     for art in femeninos:
         print(f"  ✓ {art['titulo'][:70]}")
 
@@ -298,9 +326,28 @@ async def get_latest_news() -> dict:
             return_exceptions=True
         )
 
+    depurados = []
     for art, texto in zip(femeninos, textos):
-        if isinstance(texto, str) and len(texto) > len(art["texto"]):
-            art["texto"] = texto
+        candidato = texto if isinstance(texto, str) and len(texto) > len(art["texto"]) else art["texto"]
+        fragmento = _extraer_fragmentos_femeninos(candidato, ranking_names)
+
+        # Si el scraping devuelve un artículo mixto sin contenido femenino
+        # verificable, no se manda al modelo.
+        if not fragmento:
+            fragmento = _extraer_fragmentos_femeninos(
+                f"{art['titulo']}. {art.get('texto', '')}",
+                ranking_names,
+            )
+
+        if fragmento:
+            art["texto"] = fragmento
+            depurados.append(art)
+
+    femeninos = depurados
+    print(f"Tras depurar artículos mixtos: {len(femeninos)} noticias")
+
+    if not femeninos:
+        return {"resumen_diario": [], "date": datetime.date.today().isoformat()}
 
     grupos = agrupar(femeninos)[:4]
     print(f"Grupos: {len(grupos)}")
