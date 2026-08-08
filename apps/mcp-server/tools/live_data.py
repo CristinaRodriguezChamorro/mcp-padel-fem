@@ -10,9 +10,11 @@ import aiohttp
 import os
 import re
 import json
+import io
 from datetime import date
 from bs4 import BeautifulSoup
 from groq import Groq
+from pypdf import PdfReader
 
 COUNTRY_FLAGS = {
     "ESP": "🇪🇸", "ARG": "🇦🇷", "POR": "🇵🇹", "ITA": "🇮🇹",
@@ -450,25 +452,327 @@ async def _get_gender_filtered_event_html(event: dict, gender: str = "female") -
     return best_html
 
 
+ROUND_ORDER = {
+    "Final": 100,
+    "Semifinales": 90,
+    "Cuartos de final": 80,
+    "Octavos de final": 70,
+    "Segunda ronda": 60,
+    "Primera ronda": 50,
+    "Clasificación": 40,
+}
+
+PLACE_TIMEZONES = {
+    "london": "Europe/London",
+    "madrid": "Europe/Madrid",
+    "valencia": "Europe/Madrid",
+    "gijón": "Europe/Madrid",
+    "gijon": "Europe/Madrid",
+    "málaga": "Europe/Madrid",
+    "malaga": "Europe/Madrid",
+    "barcelona": "Europe/Madrid",
+    "roma": "Europe/Rome",
+    "rome": "Europe/Rome",
+    "paris": "Europe/Paris",
+    "bordeaux": "Europe/Paris",
+    "brussels": "Europe/Brussels",
+    "rotterdam": "Europe/Amsterdam",
+    "milano": "Europe/Rome",
+    "milan": "Europe/Rome",
+    "malmö": "Europe/Stockholm",
+    "malmo": "Europe/Stockholm",
+    "doha": "Asia/Qatar",
+    "dubai": "Asia/Dubai",
+    "riyadh": "Asia/Riyadh",
+    "asunción": "America/Asuncion",
+    "asuncion": "America/Asuncion",
+    "buenos aires": "America/Argentina/Buenos_Aires",
+    "miami": "America/New_York",
+    "new york": "America/New_York",
+}
+
+
+def _normalize_round(value: str) -> str:
+    raw = re.sub(r"\s+", " ", str(value or "")).strip()
+    low = raw.lower()
+    if not raw:
+        return "Partidos"
+    if re.search(r"\b(final|f)\b", low) and "semi" not in low and "quarter" not in low:
+        return "Final"
+    if "semi" in low or re.search(r"\bsf\b", low):
+        return "Semifinales"
+    if "quarter" in low or "cuarto" in low or re.search(r"\bqf\b", low):
+        return "Cuartos de final"
+    if "round of 16" in low or "r16" in low or "octav" in low:
+        return "Octavos de final"
+    if "2nd round" in low or "second round" in low or "segunda" in low or re.search(r"\br2\b", low):
+        return "Segunda ronda"
+    if "1st round" in low or "first round" in low or "primera" in low or re.search(r"\br1\b", low):
+        return "Primera ronda"
+    if "qual" in low or "clasif" in low:
+        return "Clasificación"
+    return raw[:60]
+
+
+def _event_timezone(place: str) -> str:
+    low = (place or "").lower()
+    for key, tz in PLACE_TIMEZONES.items():
+        if key in low:
+            return tz
+    return "Europe/Madrid"
+
+
+def _extract_pdf_text(data: bytes) -> str:
+    try:
+        reader = PdfReader(io.BytesIO(data))
+        return "\n".join((page.extract_text() or "") for page in reader.pages)
+    except Exception as exc:
+        print(f"  PDF extract error: {exc}")
+        return ""
+
+
+async def _fetch_bytes(url: str) -> bytes:
+    try:
+        async with aiohttp.ClientSession(
+            headers={"User-Agent": "Mozilla/5.0 (compatible; PadelFem/1.0)"}
+        ) as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
+                if resp.status != 200:
+                    return b""
+                return await resp.read()
+    except Exception as exc:
+        print(f"  fetch bytes error {url}: {exc}")
+        return b""
+
+
+def _official_document_urls(event: dict) -> dict:
+    """Extrae del HTML oficial enlaces de Results/Draw y Order of Play."""
+    soup = BeautifulSoup(event.get("html", ""), "html.parser")
+    base = event.get("url", "")
+    result_docs, oop_docs = [], []
+
+    for a in soup.find_all("a", href=True):
+        href = urljoin(base, a.get("href", ""))
+        text = _clean_text(a).lower()
+        low = href.lower()
+        if not href:
+            continue
+        if ("order of play" in text or "order-of-play" in low or "order_of_play" in low):
+            oop_docs.append(href)
+        if (
+            "result" in text or "result" in low or
+            "draw" in text or "main-draw" in low or "main_draw" in low
+        ):
+            result_docs.append(href)
+
+    # Hidden/dynamic attributes often contain the Female endpoint/PDF.
+    for el in soup.find_all(True):
+        blob = " ".join(
+            str(el.get(k, "")) for k in
+            ("data-url", "data-href", "data-pdf", "data-src", "data-endpoint", "href")
+        )
+        if not blob:
+            continue
+        for candidate in re.findall(r'https?://[^\s"\']+|/[^\s"\']+', blob):
+            url = urljoin(base, candidate)
+            low = url.lower()
+            if "order" in low and "play" in low:
+                oop_docs.append(url)
+            if any(k in low for k in ("result", "draw")):
+                result_docs.append(url)
+
+    return {
+        "results": list(dict.fromkeys(result_docs)),
+        "oop": list(dict.fromkeys(oop_docs)),
+    }
+
+
+async def _collect_official_result_text(event: dict, gender: str) -> str:
+    """
+    Reúne datos de Results/Draws desde la fuente oficial.
+    Prioriza documentos/URLs con female/women y conserva el HTML filtrado como fallback.
+    """
+    gender = "female" if gender in {"female", "women", "woman"} else gender
+    aliases = _gender_aliases(gender)
+    docs = _official_document_urls(event)["results"]
+
+    def priority(url: str) -> tuple:
+        low = url.lower()
+        has_gender = any(a in low for a in aliases)
+        is_pdf = low.endswith(".pdf") or ".pdf?" in low
+        return (has_gender, is_pdf)
+
+    docs = sorted(docs, key=priority, reverse=True)
+    chunks = []
+
+    for url in docs[:12]:
+        low = url.lower()
+        # Evitamos documentos explícitamente masculinos.
+        if gender == "female" and any(x in low for x in ("-men-", "_men_", "/men/", "male")) and not any(
+            x in low for x in ("women", "female")
+        ):
+            continue
+
+        if ".pdf" in low:
+            raw = await _fetch_bytes(url)
+            text = _extract_pdf_text(raw)
+        else:
+            html = await _fetch(url)
+            text = _clean_text(BeautifulSoup(html, "html.parser")) if html else ""
+
+        if text and len(text) > 150:
+            chunks.append(f"FUENTE {url}\n{text}")
+
+    filtered_html = await _get_gender_filtered_event_html(event, gender)
+    filtered_text = _clean_text(BeautifulSoup(filtered_html, "html.parser")) if filtered_html else ""
+    if filtered_text:
+        chunks.append("PÁGINA DEL EVENTO / RESULTS\n" + filtered_text)
+
+    return "\n\n".join(chunks)[:140000]
+
+
+async def _extract_next_womens_match(event: dict) -> dict | None:
+    """
+    Lee el Order of Play oficial y obtiene el siguiente partido femenino.
+    Las horas se convierten a Europe/Madrid.
+    """
+    docs = _official_document_urls(event)["oop"]
+    if not docs:
+        return None
+
+    texts = []
+    for url in docs[:6]:
+        if ".pdf" in url.lower():
+            raw = await _fetch_bytes(url)
+            txt = _extract_pdf_text(raw)
+        else:
+            html = await _fetch(url)
+            txt = _clean_text(BeautifulSoup(html, "html.parser")) if html else ""
+        if txt and re.search(r"\b(Women|Female)\b", txt, re.I):
+            texts.append(txt)
+
+    if not texts:
+        return None
+
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        return None
+
+    source = "\n\n".join(texts)[:50000]
+    client = Groq(api_key=api_key)
+    prompt = f"""Extrae SOLO los partidos FEMENINOS del Order of Play oficial FIP.
+No inventes nada.
+
+DATOS:
+{source}
+
+Devuelve SOLO JSON:
+[
+  {{
+    "round":"SF",
+    "pair1":"Apellido / Apellido",
+    "pair2":"Apellido / Apellido",
+    "date":"2026-08-08",
+    "time":"12:00",
+    "time_type":"exact"
+  }}
+]
+
+Reglas:
+- pair1 y pair2: exactamente dos jugadoras separadas por " / ".
+- round puede ser F, SF, QF, R16, R2, R1, Qualifying.
+- date ISO YYYY-MM-DD si se puede leer.
+- time en HH:MM 24h solo si hay hora exacta o "not before".
+- time_type: "exact", "not_before" o "followed_by".
+- Si dice "Followed by", time puede quedar vacío.
+- Solo mujeres.
+"""
+    try:
+        resp = await asyncio.to_thread(lambda: client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            max_tokens=2000,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}],
+        ))
+        raw = resp.choices[0].message.content.strip()
+        m = re.search(r"\[.*\]", raw, re.DOTALL)
+        matches = json.loads(m.group()) if m else []
+    except Exception as exc:
+        print(f"  next match extraction error: {exc}")
+        return None
+
+    event_tz = ZoneInfo(_event_timezone(event.get("place", "")))
+    madrid_tz = ZoneInfo("Europe/Madrid")
+    now_madrid = datetime.now(madrid_tz)
+
+    normalized = []
+    for item in matches:
+        pair1 = str(item.get("pair1", "")).strip()
+        pair2 = str(item.get("pair2", "")).strip()
+        rnd = _normalize_round(str(item.get("round", "")))
+        d = str(item.get("date", "")).strip()
+        tm = str(item.get("time", "")).strip()
+        time_type = str(item.get("time_type", "exact")).strip()
+
+        if "/" not in pair1 or "/" not in pair2:
+            continue
+
+        dt_madrid = None
+        if d and tm and re.fullmatch(r"\d{4}-\d{2}-\d{2}", d) and re.fullmatch(r"\d{2}:\d{2}", tm):
+            try:
+                local_dt = datetime.strptime(f"{d} {tm}", "%Y-%m-%d %H:%M").replace(tzinfo=event_tz)
+                dt_madrid = local_dt.astimezone(madrid_tz)
+            except Exception:
+                pass
+
+        normalized.append({
+            "round": rnd,
+            "pair1": pair1,
+            "pair2": pair2,
+            "time_type": time_type,
+            "datetime_madrid": dt_madrid,
+        })
+
+    if not normalized:
+        return None
+
+    # Primero un partido que todavía no haya empezado; si no hay hora exacta,
+    # mantenemos el orden oficial.
+    future = [m for m in normalized if m["datetime_madrid"] and m["datetime_madrid"] >= now_madrid - timedelta(minutes=15)]
+    chosen = min(future, key=lambda x: x["datetime_madrid"]) if future else normalized[0]
+
+    dt = chosen.pop("datetime_madrid", None)
+    if dt:
+        today = now_madrid.date()
+        if dt.date() == today:
+            day_label = "Hoy"
+        elif dt.date() == today + timedelta(days=1):
+            day_label = "Mañana"
+        else:
+            day_label = dt.strftime("%d/%m")
+        prefix = "No antes de " if chosen.get("time_type") == "not_before" else ""
+        chosen["when"] = f"{day_label} · {prefix}{dt.strftime('%H:%M')} (hora de España)"
+        chosen["iso_madrid"] = dt.isoformat()
+    else:
+        chosen["when"] = "A continuación · hora por confirmar"
+        chosen["iso_madrid"] = ""
+
+    return chosen
+
+
 async def _extract_official_results(event: dict, gender: str = "female") -> list:
     """
-    Devuelve los partidos femeninos YA TERMINADOS del torneo que sigue en curso.
-
-    Importante: no espera a que termine el torneo. En cuanto la fuente oficial FIP
-    publica un partido finalizado (primera ronda, octavos, cuartos, etc.), ese
-    resultado puede aparecer en "En juego" en la siguiente actualización.
+    Resultados finalizados del torneo en curso.
+    Lee Results/Draws oficiales y conserva la ronda para agruparlos en la interfaz.
     """
     gender = (gender or "female").strip().lower()
-    if gender == "women":
+    if gender in {"women", "woman"}:
         gender = "female"
     if gender not in {"female", "male"}:
         gender = "female"
-    filtered_html = await _get_gender_filtered_event_html(event, gender)
-    soup = BeautifulSoup(filtered_html, "html.parser")
-    for tag in soup.find_all(["script", "style", "nav", "footer", "header"]):
-        tag.decompose()
-    official_text = _clean_text(soup)
-    if not official_text:
+
+    source = await _collect_official_result_text(event, gender)
+    if not source:
         return []
 
     api_key = os.environ.get("GROQ_API_KEY")
@@ -476,95 +780,96 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         print("  live results: GROQ_API_KEY no configurada")
         return []
 
-    # La página de FIP coloca normalmente primero el cuadro masculino y después
-    # el femenino. En la versión anterior cortábamos los primeros 60k caracteres,
-    # por lo que muchas veces Groq ni siquiera recibía los partidos femeninos.
-    #
-    # Intentamos extraer contenedores cuyo id/class/atributos indiquen female/women.
-    gender_chunks = []
-    for el in soup.find_all(True):
-        attrs = " ".join([
-            str(el.get("id", "")),
-            " ".join(el.get("class", []) if isinstance(el.get("class", []), list) else [str(el.get("class", ""))]),
-            str(el.get("data-gender", "")),
-            str(el.get("data-category", "")),
-            str(el.get("aria-label", "")),
-        ]).lower()
-        if any(k in attrs for k in _gender_aliases(gender)):
-            txt = _clean_text(el)
-            if len(txt) > 120:
-                gender_chunks.append(txt)
-
-    # Quitamos duplicados conservando orden.
-    unique_chunks = []
-    seen_chunks = set()
-    for chunk in gender_chunks:
-        key = chunk[:500]
-        if key not in seen_chunks:
-            seen_chunks.add(key)
-            unique_chunks.append(chunk)
-
-    if unique_chunks:
-        source = "\n\n".join(unique_chunks)[:90000]
-    else:
-        # Fallback: usar la parte final del documento, donde FIP suele renderizar
-        # el cuadro femenino, en vez de la parte inicial dominada por el masculino.
-        source = official_text[-90000:]
-
     client = Groq(api_key=api_key)
     requested_label = "FEMENINO" if gender == "female" else "MASCULINO"
-    prompt = f"""Extrae resultados del circuito {requested_label} únicamente del siguiente texto de la web OFICIAL FIP.
-No uses conocimiento externo. No deduzcas marcadores. No completes nombres.
+    prompt = f"""Extrae TODOS los partidos FINALIZADOS del cuadro {requested_label}
+que estén demostrados en estas fuentes OFICIALES FIP.
 
-FUENTE OFICIAL FIP:
+La página Results puede contener varios días. No esperes al final del torneo:
+si un partido ya está finalizado, inclúyelo.
+
+FUENTE FIP:
 {source}
 
-Devuelve SOLO JSON con TODOS los partidos FEMENINOS FINALIZADOS que aparezcan claramente en la fuente, ordenados de la ronda más reciente a la más antigua:
-[{{"round":"Semifinal", "winner":"Apellido / Apellido", "loser":"Apellido / Apellido", "score":"6-1, 7-5"}}]
+Devuelve SOLO JSON:
+[
+  {{
+    "round":"Quarter-finals",
+    "winner":"Apellido / Apellido",
+    "loser":"Apellido / Apellido",
+    "score":"6-3, 7-5",
+    "date":"2026-08-07"
+  }}
+]
 
 Reglas:
-- Cada pareja debe contener exactamente 2 jugadoras.
-- winner es la pareja marcada como vencedora en FIP.
-- score es el resultado por sets desde el punto de vista de winner.
-- No incluyas partidos sin resultado final.
-- No incluyas el género contrario al solicitado ({requested_label}).
-- Si no puedes demostrar un partido con el texto, omítelo.
-- Si no hay resultados femeninos claros, devuelve []."""
+- Solo {requested_label}.
+- winner y loser son parejas de exactamente 2 jugadoras/jugadores.
+- winner debe ser el vencedor oficial.
+- score desde el punto de vista del ganador.
+- Solo partidos con marcador final.
+- round: Final, Semi-finals, Quarter-finals, Round of 16, 2nd Round, 1st Round o Qualifying.
+- date ISO si aparece el día; si no, "".
+- No inventes nombres, ronda, fecha ni marcador.
+"""
 
     try:
         resp = await asyncio.to_thread(lambda: client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            max_tokens=5000,
+            max_tokens=7000,
             temperature=0,
             messages=[{"role": "user", "content": prompt}],
         ))
         raw = resp.choices[0].message.content.strip()
         m = re.search(r"\[.*\]", raw, re.DOTALL)
-        if not m:
-            return []
-        parsed = json.loads(m.group())
-    except Exception as e:
-        print(f"  official FIP result extraction error: {e}")
+        parsed = json.loads(m.group()) if m else []
+    except Exception as exc:
+        print(f"  official FIP result extraction error: {exc}")
         return []
 
-    normalized_source = re.sub(r"\s+", " ", official_text).lower()
+    normalized_source = re.sub(r"\s+", " ", source).lower()
     valid = []
-    for item in parsed[:40]:
+    seen = set()
+
+    for item in parsed[:80]:
         winner = str(item.get("winner", "")).strip()
         loser = str(item.get("loser", "")).strip()
         score = str(item.get("score", "")).strip()
-        rnd = str(item.get("round", "")).strip()
+        rnd = _normalize_round(str(item.get("round", "")))
+        match_date = str(item.get("date", "")).strip()
+
         if not winner or not loser or not score or "/" not in winner or "/" not in loser:
             continue
         if not re.fullmatch(r"\d{1,2}-\d{1,2}(?:\s*,\s*\d{1,2}-\d{1,2}){1,2}", score):
             continue
 
+        # Validación mínima contra la fuente oficial.
         names = [x.strip().lower() for x in re.split(r"/", winner + "/" + loser) if x.strip()]
         surnames = [n.split()[-1] for n in names if n.split()]
         if len(surnames) != 4 or not all(tok in normalized_source for tok in surnames):
             continue
 
-        valid.append({"round": rnd, "winner": winner, "loser": loser, "score": score})
+        key = (rnd.lower(), winner.lower(), loser.lower(), score)
+        if key in seen:
+            continue
+        seen.add(key)
+
+        valid.append({
+            "round": rnd,
+            "winner": winner,
+            "loser": loser,
+            "score": score.replace(",", "  "),
+            "date": match_date,
+        })
+
+    # Ronda más avanzada primero; dentro de ronda, fecha más reciente primero.
+    valid.sort(
+        key=lambda x: (
+            ROUND_ORDER.get(x["round"], 0),
+            x.get("date", ""),
+        ),
+        reverse=True,
+    )
     return valid
 
 
@@ -578,14 +883,15 @@ async def get_tournament_now(gender: str = "female") -> dict:
     if not event:
         return {
             "active": False, "name": "", "place": "", "dates": "",
-            "watch": [], "results": [], "updated": today_str,
+            "watch": [], "results": [], "next_match": None, "updated": today_str,
             "gender": gender,
             "source": "FIP", "source_url": FIP_PREMIER_CALENDAR_URL.format(year=date.today().year),
         }
 
-    watch, results = await asyncio.gather(
+    watch, results, next_match = await asyncio.gather(
         _get_watch_official(),
         _extract_official_results(event, gender),
+        _extract_next_womens_match(event) if gender in {"female", "women", "woman"} else asyncio.sleep(0, result=None),
     )
     return {
         "active": True,
@@ -594,6 +900,7 @@ async def get_tournament_now(gender: str = "female") -> dict:
         "dates": event["dates"],
         "watch": watch,
         "results": results,
+        "next_match": next_match,
         "updated": today_str,
         "gender": gender,
         "source": "FIP · Premier Padel",

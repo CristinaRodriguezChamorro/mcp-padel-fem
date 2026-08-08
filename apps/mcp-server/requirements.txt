@@ -7,3 +7,4 @@ groq
 aiohttp
 lxml
 httpx
+pypdf
