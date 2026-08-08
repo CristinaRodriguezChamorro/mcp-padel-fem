@@ -1101,11 +1101,25 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                             if (seen.has(key)) continue;
                             seen.add(key);
 
+                            let roundContext = '';
+                            let dateContext = '';
+                            let cur = c.el;
+                            for (let up=0; up<8 && cur; up++, cur=cur.parentElement) {
+                              const t = clean(cur.innerText || '');
+                              if (!roundContext) {
+                                const rm=t.match(/(final|semi[- ]?finals?|quarter[- ]?finals?|round of 16|round of 32|qualif(?:ying|ication)?|1st round|2nd round)/i);
+                                if(rm) roundContext=rm[1];
+                              }
+                              if (!dateContext) {
+                                const dm=t.match(/(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)?\s*,?\s*\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[A-Za-z]*/i)
+                                  || t.match(/\b\d{1,2}[/-]\d{1,2}(?:[/-]20\d{2})?\b/);
+                                if(dm) dateContext=dm[0];
+                              }
+                              if(roundContext && dateContext) break;
+                            }
                             out.push({
-                              tag: c.tag,
-                              text: c.text.slice(0,1600),
-                              players: ordered,
-                              scores: c.scores
+                              tag:c.tag,text:c.text.slice(0,1600),players:ordered,scores:c.scores,
+                              round_context:roundContext,date_context:dateContext
                             });
                           }
 
@@ -1544,7 +1558,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
             winner, loser = pair_b, pair_a
             display = list(zip(b_sc,a_sc))
 
-        match_date = date_from_tag(block.get("tag",""))
+        match_date = date_from_tag(block.get("date_context","")) or date_from_tag(block.get("tag",""))
         if match_date:
             try:
                 if date.fromisoformat(match_date) > date.today():
@@ -1552,7 +1566,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
             except Exception:
                 pass
 
-        context = str(block.get("text","")) + " " + str(block.get("tag",""))
+        context = str(block.get("round_context","")) + " " + str(block.get("text","")) + " " + str(block.get("tag",""))
         rnd = infer_round(context, match_date)
 
         parsed.append({
@@ -1562,6 +1576,26 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
             "score": "  ".join(f"{a}-{b}" for a,b in display),
             "date": match_date,
         })
+
+    # Only unresolved matches are inferred. Explicit FIP round labels always win.
+    unresolved=[x for x in parsed if x.get("round")=="Partidos"]
+    if unresolved:
+        by_date={}
+        for x in unresolved: by_date.setdefault(x.get("date",""),[]).append(x)
+        dated=sorted(k for k in by_date if k)
+        if dated:
+            labels=["Semifinales","Cuartos de final","Octavos de final","Primera ronda","Clasificación"]
+            for idx,d in enumerate(reversed(dated)):
+                for x in by_date[d]: x["round"]=labels[min(idx,len(labels)-1)]
+        else:
+            # Source order fallback for a standard elimination draw.
+            # Last 2 completed unresolved matches = SF, previous 4 = QF, previous 8 = R16.
+            n=len(unresolved); pos=n
+            for label,size in [("Semifinales",2),("Cuartos de final",4),("Octavos de final",8)]:
+                if pos>=size:
+                    for x in unresolved[pos-size:pos]: x["round"]=label
+                    pos-=size
+            for x in unresolved[:pos]: x["round"]="Primera ronda"
 
     # Dedupe all tournament results.
     valid = []
@@ -1589,7 +1623,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     _LIVE_DEBUG_STATE.update({
         "browser": capture_diag,
-        "parser": "full-draw-proximity-v39",
+        "parser": "round-aware-full-draw-v40",
         "raw_blocks": len(blocks),
         "parsed_results": len(parsed),
         "valid_results": len(valid),
@@ -1598,7 +1632,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
     })
 
     print(
-        "  live v39:",
+        "  live v40:",
         f"blocks={len(blocks)}",
         f"parsed={len(parsed)}",
         f"valid={len(valid)}",
