@@ -373,7 +373,7 @@ No uses conocimiento externo. No deduzcas marcadores. No completes nombres.
 FUENTE OFICIAL FIP:
 {source}
 
-Devuelve SOLO JSON, máximo 8 partidos FINALIZADOS, los de la ronda más reciente primero:
+Devuelve SOLO JSON con TODOS los partidos FEMENINOS FINALIZADOS que aparezcan claramente en la fuente, ordenados de la ronda más reciente a la más antigua:
 [{{"round":"Semifinal", "winner":"Apellido / Apellido", "loser":"Apellido / Apellido", "score":"6-1, 7-5"}}]
 
 Reglas:
@@ -388,7 +388,7 @@ Reglas:
     try:
         resp = await asyncio.to_thread(lambda: client.chat.completions.create(
             model="llama-3.3-70b-versatile",
-            max_tokens=1200,
+            max_tokens=5000,
             temperature=0,
             messages=[{"role": "user", "content": prompt}],
         ))
@@ -403,7 +403,7 @@ Reglas:
 
     normalized_source = re.sub(r"\s+", " ", official_text).lower()
     valid = []
-    for item in parsed[:8]:
+    for item in parsed[:40]:
         winner = str(item.get("winner", "")).strip()
         loser = str(item.get("loser", "")).strip()
         score = str(item.get("score", "")).strip()
