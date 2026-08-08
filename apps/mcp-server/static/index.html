@@ -880,21 +880,48 @@ async function renderSponsors(){
   const initials=name=>(name||'').split(/\s+/).filter(Boolean).slice(0,2)
     .map(x=>x[0]?.toUpperCase()||'').join('');
   const fallback=p=>`<div class="sponsor-fallback"><div class="sponsor-fallback-initials">${initials(p.name)}</div><div class="sponsor-fallback-ball">🎾</div></div>`;
-  const norm=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 
-  // Use the full official/ranking name for sponsor photos.
-  // This fixes cases such as Gemma Triay -> Gemma Triay Pons.
+  const norm=s=>(s||'')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+    .toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+
   let ranking=[];
   try{ ranking=await fetch('/api/ranking').then(r=>r.json()); }catch(e){}
 
+  // Find the matching ranking row for each sponsor.
+  // Ari Sánchez is matched to Ariana Sánchez Fallada by surname + first-name prefix.
+  const rankingRowFor=p=>{
+    const sp=norm(p.name).split(/\s+/);
+    const first=sp[0]||'', surname=sp[1]||'';
+
+    return ranking.find(r=>{
+      const rp=norm(r.name).split(/\s+/);
+      const rFirst=rp[0]||'', rSurname=rp[1]||'';
+      const firstMatches =
+        rFirst===first ||
+        rFirst.startsWith(first) ||
+        first.startsWith(rFirst);
+      return firstMatches && rSurname===surname;
+    }) || null;
+  };
+
   const fullPhotoName=p=>{
-    const target=norm(p.name).split(/\s+/);
-    const first=target[0]||'', surname=target[1]||'';
-    const hit=ranking.find(r=>{
-      const parts=norm(r.name).split(/\s+/);
-      return parts[0]===first && parts[1]===surname;
-    });
-    return hit?.name || p.name;
+    const row=rankingRowFor(p);
+    return row?.name || p.name;
+  };
+
+  // Convert ranking pair "Triay / Brea" into just the partner surname.
+  const currentPartner=p=>{
+    const row=rankingRowFor(p);
+    const pair=(row?.pair||'').trim();
+    if(!pair)return 'Por confirmar';
+
+    const surnames=pair.split('/').map(x=>x.trim()).filter(Boolean);
+    if(surnames.length<2)return pair;
+
+    const ownSurname=(norm(p.name).split(/\s+/)[1]||'');
+    const partner=surnames.find(x=>norm(x)!==ownSurname);
+    return partner || surnames[1] || pair;
   };
 
   const setDirectPhoto=(p,i)=>{
@@ -912,17 +939,19 @@ async function renderSponsors(){
 
     const photoName=fullPhotoName(p);
     box.replaceChildren(img);
-    img.src=`/api/sponsor-photo-image?name=${encodeURIComponent(photoName)}&wiki_title=${encodeURIComponent(p.wikiTitle||'')}&v=65`;
+    img.src=`/api/sponsor-photo-image?name=${encodeURIComponent(photoName)}&v=66`;
   };
 
-  list.innerHTML=SPONSORS_DATA.map((p,i)=>`
+  list.innerHTML=SPONSORS_DATA.map((p,i)=>{
+    const partner=currentPartner(p);
+    return `
     <article class="sponsor-card" style="animation-delay:${i*.05}s">
       <div class="sponsor-profile">
         <div class="sponsor-avatar" id="av-${i}">${fallback(p)}</div>
         <div class="sponsor-meta">
           <div class="sponsor-name">${p.name}</div>
           <div class="sponsor-identity"><span>${p.flag}</span><span>Jugadora profesional</span></div>
-          <div class="sponsor-pair">${p.pair.replace('Pareja:','Pareja: <strong>')}</strong></div>
+          <div class="sponsor-pair">Pareja: <strong>${partner}</strong></div>
           <div class="sponsor-rank-line">
             <span class="sponsor-rank-icon">🏆</span>
             <div class="sponsor-rank-copy"><small>Ranking FIP</small><strong>${p.rank.startsWith('#')?p.rank.slice(1)+' del mundo':p.rank}</strong></div>
@@ -934,7 +963,8 @@ async function renderSponsors(){
       <div class="sponsor-products">
         ${p.categories.map(cat=>`<div class="sponsor-category"><div class="category-label">${cat.label}</div><div class="brand-chips">${cat.brands.map(b=>`<span class="chip ${b.cls}">▸ ${b.name}</span>`).join('')}</div></div>`).join('')}
       </div>
-    </article>`).join('');
+    </article>`;
+  }).join('');
 
   SPONSORS_DATA.forEach((p,i)=>setDirectPhoto(p,i));
 }

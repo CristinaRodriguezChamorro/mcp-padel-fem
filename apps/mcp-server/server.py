@@ -591,7 +591,7 @@ async def resumen_diario_padel_femenino():
 
 @app.get("/api/version")
 async def api_version():
-    return {"version": "v65-sponsors-photo-fix-live-larger-2026-08-08"}
+    return {"version": "v66-sponsors-current-pairs-ari-photo-2026-08-08"}
 
 @app.get("/")
 async def index():
@@ -601,7 +601,7 @@ async def index():
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
-            "X-App-Version": "v65-sponsors-photo-fix-live-larger-2026-08-08",
+            "X-App-Version": "v66-sponsors-current-pairs-ari-photo-2026-08-08",
         },
     )
 
