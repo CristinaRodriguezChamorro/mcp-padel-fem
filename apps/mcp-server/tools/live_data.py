@@ -1983,6 +1983,7 @@ def _normalize_next_match(item: dict | None) -> dict | None:
         "pair1": pair1,
         "pair2": pair2,
         "when": str(item.get("when", "") or "Horario por confirmar"),
+        "date": str(item.get("date", "") or ""),
         "iso_madrid": str(item.get("iso_madrid", "") or ""),
         "status": "próximo",
     }
@@ -2166,6 +2167,49 @@ def _annotate_result_rounds(results: list, next_match: dict | None, event: dict)
     return results
 
 
+def _repair_current_round_from_previous(results: list, event: dict) -> list:
+    """
+    Repair round labels using bracket membership, not DOM wording.
+
+    On semifinal day, any completed match whose two pairs are both quarterfinal
+    winners is a semifinal. This lets us recognize that BOTH semifinals are done
+    even when FIP's stale OOP still points at one of them.
+    """
+    stage = _stage_from_event(event)
+    previous_round = _round_before(stage)
+    if stage not in {"Cuartos de final", "Semifinales", "Final"} or not previous_round:
+        return results
+
+    previous = [x for x in results if x.get("round") == previous_round]
+    previous_winners = [
+        str(x.get("winner", "") or "").strip()
+        for x in previous
+        if _concrete_pair(str(x.get("winner", "") or ""))
+    ]
+
+    if len(previous_winners) < 2:
+        return results
+
+    repaired = 0
+    for item in results:
+        winner = str(item.get("winner", "") or "").strip()
+        loser = str(item.get("loser", "") or "").strip()
+        if not (_concrete_pair(winner) and _concrete_pair(loser)):
+            continue
+
+        winner_from_prev = any(_same_pair(winner, p) for p in previous_winners)
+        loser_from_prev = any(_same_pair(loser, p) for p in previous_winners)
+
+        if winner_from_prev and loser_from_prev and item.get("round") != stage:
+            item["round"] = stage
+            repaired += 1
+
+    if repaired:
+        print(f"  round repair: {repaired} partidos relabelados como {stage}")
+
+    return results
+
+
 def _pair_key(value: str) -> str:
     """Canonical full pair key, independent of accents/order spacing."""
     parts = [
@@ -2245,6 +2289,38 @@ def _round_before(round_name: str) -> str | None:
     except ValueError:
         return None
     return chain[idx - 1] if idx > 0 else None
+
+
+def _match_already_completed(results: list, match: dict | None) -> bool:
+    """
+    True if both proposed pairs already appear together in a completed result.
+
+    Pair comparison uses first-surname signatures, so:
+      Gemma Triay Pons / Delfina Brea Senesi
+    matches:
+      Gemma Triay / Delfina Brea
+    """
+    if not match:
+        return False
+
+    p1 = str(match.get("pair1", "") or "").strip()
+    p2 = str(match.get("pair2", "") or "").strip()
+    if not (_concrete_pair(p1) and _concrete_pair(p2)):
+        return False
+
+    for item in results or []:
+        winner = str(item.get("winner", "") or "").strip()
+        loser = str(item.get("loser", "") or "").strip()
+        if not (_concrete_pair(winner) and _concrete_pair(loser)):
+            continue
+
+        same_order = _same_pair(p1, winner) and _same_pair(p2, loser)
+        swapped = _same_pair(p1, loser) and _same_pair(p2, winner)
+
+        if same_order or swapped:
+            return True
+
+    return False
 
 
 def _derive_next_match_from_bracket(results: list, event: dict) -> dict | None:
@@ -3211,26 +3287,51 @@ async def get_tournament_now(gender: str = "female") -> dict:
         print(f"  current live-match error: {current_match}")
         current_match = None
 
+    # IMPORTANT: Order of Play can be stale. If FIP still proposes a match that
+    # already exists in completed results, discard it BEFORE round annotation.
+    if isinstance(oop_next, dict) and _match_already_completed(results or [], oop_next):
+        print(
+            "  next-match stale OOP descartado:",
+            f"{oop_next.get('pair1','')} vs {oop_next.get('pair2','')}",
+        )
+        oop_next = None
+
     # First label all v39 results using today's stage.
-    # If OOP provides a round, it improves the annotation, but results do not depend on it.
     results = _annotate_result_rounds(results or [], oop_next, event)
+    results = _repair_current_round_from_previous(results, event)
 
     # Build a deterministic next match from the actual completed bracket.
     bracket_next = _derive_next_match_from_bracket(results, event)
 
-    # Prefer OOP only when it has REAL pairs; otherwise bracket-derived pairs are better.
+    # Prefer OOP only when it has REAL pairs AND it is not already completed.
     next_match = None
     if isinstance(oop_next, dict):
         p1 = str(oop_next.get("pair1", "") or "")
         p2 = str(oop_next.get("pair2", "") or "")
-        if _concrete_pair(p1) and _concrete_pair(p2):
+        if (
+            _concrete_pair(p1)
+            and _concrete_pair(p2)
+            and not _match_already_completed(results, oop_next)
+        ):
             next_match = oop_next
 
-    if not next_match and bracket_next:
+    if (
+        not next_match
+        and bracket_next
+        and not _match_already_completed(results, bracket_next)
+    ):
         next_match = bracket_next
 
     if not next_match:
-        next_match = _fallback_next_match(results, oop_next, event)
+        next_match = _fallback_next_match(results, None, event)
+
+    # Final safety net: a completed match must NEVER occupy Próximo partido.
+    if _match_already_completed(results, next_match):
+        print(
+            "  next-match safety: partido ya finalizado eliminado:",
+            f"{(next_match or {}).get('pair1','')} vs {(next_match or {}).get('pair2','')}",
+        )
+        next_match = _fallback_next_match(results, None, event)
 
     normalized_results = []
     for result in (results or []):

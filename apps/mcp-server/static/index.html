@@ -501,14 +501,14 @@ nav {
 .result-card{
   position:relative;
   display:grid;
-  grid-template-columns:46px minmax(0,1fr) 260px 175px;
+  grid-template-columns:42px minmax(0,1fr) 220px 145px;
   grid-template-areas:
     "trophy winner score date"
     "trophy loser score date";
   align-items:center;
   column-gap:10px;
   row-gap:2px;
-  padding:16px 24px;
+  padding:18px 24px;
   background:transparent;
 }
 .result-card:before{
@@ -522,9 +522,11 @@ nav {
   color:#fff;
   font-size:1.02em;
   font-weight:950;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
+  white-space:normal;
+  overflow:visible;
+  text-overflow:clip;
+  overflow-wrap:anywhere;
+  line-height:1.28;
 }
 .result-winner .trophy{display:none}
 .result-loser{
@@ -532,9 +534,11 @@ nav {
   color:#98949f;
   font-size:.94em;
   font-weight:500;
-  white-space:nowrap;
-  overflow:hidden;
-  text-overflow:ellipsis;
+  white-space:normal;
+  overflow:visible;
+  text-overflow:clip;
+  overflow-wrap:anywhere;
+  line-height:1.28;
 }
 .result-score{
   grid-area:score;
@@ -989,9 +993,16 @@ async function loadEnJuego(){
     const topMatch=d.current_match||d.next_match;
     if(topMatch){
       const n=topMatch;
+      const todayMadrid=new Intl.DateTimeFormat('en-CA',{
+        timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit'
+      }).format(new Date());
+      const matchDate=(n.date||'').trim();
+      const whenText=(n.when||'').trim().toLowerCase();
+      const isToday=matchDate===todayMadrid || whenText.startsWith('hoy');
       const isLive=n.status==='live';
+      const showDirecto=isLive||isToday;
       nextHtml=`<div class="next-match">
-        <div class="next-label">${isLive?'🔴 EN DIRECTO':'Próximo partido'}</div>
+        <div class="next-label">${showDirecto?'🔴 EN DIRECTO':'Próximo partido'}</div>
         <div class="next-round">${n.round||'Próximo partido'}</div>
         <div class="next-versus">
           <div class="next-team">${n.pair1||''}</div>
@@ -1000,7 +1011,9 @@ async function loadEnJuego(){
         </div>
         ${isLive&&n.score?`<div class="next-live-score">${n.score}</div>`:''}
         <div class="next-when">🕒 ${n.when||'Horario por confirmar'}</div>
-        ${n.status_detail?`<div class="next-status-detail">${n.status_detail}</div>`:''}
+        ${(!isLive&&isToday)
+          ? `<div class="next-status-detail">Partido de hoy. El marcador aparecerá en cuanto FIP publique datos del encuentro.</div>`
+          : (n.status_detail?`<div class="next-status-detail">${n.status_detail}</div>`:'')}
       </div>`;
     }
 
