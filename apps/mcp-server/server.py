@@ -377,6 +377,51 @@ async def _wiki_player_photo(name: str, wiki_title: str = "") -> str | None:
     return None
 
 
+@app.get("/api/sponsor-photo-image")
+async def api_sponsor_photo_image(name: str, wiki_title: str = ""):
+    """
+    Sponsor-only photo endpoint.
+    Uses the same resolved player source, but requests the image with a browser-like
+    Accept header and returns it directly. Ranking remains untouched.
+    """
+    if not name.strip():
+        return Response(status_code=404)
+
+    src = await _wiki_player_photo(name.strip(), wiki_title.strip())
+    if not src:
+        print(f"  sponsor-photo: {name} -> sin fuente")
+        return Response(status_code=404)
+
+    try:
+        parsed=httpx.URL(src)
+        host=(parsed.host or "").lower()
+        referer="https://www.padelfip.com/" if "padelfip.com" in host else "https://commons.wikimedia.org/"
+
+        headers={
+            "User-Agent":"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/150 Safari/537.36",
+            "Accept":"image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "Referer":referer,
+        }
+
+        async with httpx.AsyncClient(follow_redirects=True,timeout=15) as client:
+            resp=await client.get(src,headers=headers)
+
+        ct=(resp.headers.get("content-type") or "").lower()
+        if resp.status_code!=200 or not ct.startswith("image/") or not resp.content:
+            print(f"  sponsor-photo FAILED: {name} status={resp.status_code} type={ct}")
+            return Response(status_code=404)
+
+        print(f"  sponsor-photo OK: {name} bytes={len(resp.content)} type={ct.split(';')[0]}")
+        return Response(
+            content=resp.content,
+            media_type=ct.split(";")[0],
+            headers={"Cache-Control":"public, max-age=86400"}
+        )
+    except Exception as exc:
+        print(f"  sponsor-photo EXCEPTION: {name}: {type(exc).__name__}: {exc}")
+        return Response(status_code=404)
+
+
 @app.get("/api/player-photo-image")
 async def api_player_photo_image(name: str, wiki_title: str = ""):
     """
@@ -546,7 +591,7 @@ async def resumen_diario_padel_femenino():
 
 @app.get("/api/version")
 async def api_version():
-    return {"version": "v64-force-photo-requests-2026-08-08"}
+    return {"version": "v65-sponsors-photo-fix-live-larger-2026-08-08"}
 
 @app.get("/")
 async def index():
@@ -556,7 +601,7 @@ async def index():
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
-            "X-App-Version": "v64-force-photo-requests-2026-08-08",
+            "X-App-Version": "v65-sponsors-photo-fix-live-larger-2026-08-08",
         },
     )
 

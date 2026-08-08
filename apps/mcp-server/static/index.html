@@ -192,15 +192,19 @@ nav {
   animation:fadeUp .35s ease-out backwards;box-shadow:0 14px 34px rgba(0,0,0,.18)
 }
 .sponsor-profile{
-  display:grid;grid-template-columns:minmax(260px,390px) minmax(0,1fr);
-  gap:30px;align-items:stretch;padding:18px;border-bottom:1px solid var(--border)
+  display:grid;grid-template-columns:280px minmax(0,1fr);
+  gap:30px;align-items:center;padding:22px;border-bottom:1px solid var(--border)
 }
 .sponsor-avatar{
-  position:relative;width:100%;height:270px;border-radius:15px;overflow:hidden;
+  position:relative;width:280px;height:220px;border-radius:15px;overflow:hidden;
   background:linear-gradient(145deg,var(--pink),#7652cf 60%,var(--orange));
   border:1px solid rgba(255,255,255,.08)
 }
-.sponsor-avatar img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:center 18%;display:block}
+.sponsor-avatar img{
+  position:absolute;inset:0;width:100%;height:100%;
+  object-fit:cover;object-position:center 18%;display:block;
+  image-rendering:auto
+}
 .sponsor-avatar.has-photo{background:#090d16}
 .sponsor-avatar.has-photo .sponsor-fallback{display:none!important}
 .sponsor-avatar .sponsor-fallback{
@@ -255,7 +259,7 @@ nav {
   .rank-flag{display:none}
   .rank-pts{grid-column:3;font-size:.82em}
   .sponsor-profile{grid-template-columns:1fr;padding:14px;gap:14px}
-  .sponsor-avatar{height:230px}
+  .sponsor-avatar{width:100%;height:210px}
   .sponsor-meta{padding:2px 4px 8px}
   .sponsor-name{font-size:1.55em}
   .sponsor-products{grid-template-columns:1fr 1fr;padding:12px}
@@ -266,7 +270,7 @@ nav {
 /* ── EN JUEGO ── */
 
 .live-tournament{
-  width:min(100%,1320px);
+  width:min(100%,1400px);
   margin:0 auto;
   display:flex;
   flex-direction:column;
@@ -280,7 +284,7 @@ nav {
   grid-template-columns:minmax(0,1fr) auto;
   align-items:center;
   gap:28px;
-  min-height:138px;
+  min-height:148px;
   padding:28px 32px 28px 286px;
   border:1px solid #30394a;
   border-radius:10px;
@@ -311,7 +315,7 @@ nav {
 .live-kicker{display:none}
 .live-name{
   color:#fff;
-  font-size:1.58em;
+  font-size:1.68em;
   font-weight:1000;
   letter-spacing:-.02em;
   text-transform:none;
@@ -398,7 +402,7 @@ nav {
 }
 .next-team{
   color:#fff;
-  font-size:1.14em;
+  font-size:1.20em;
   font-weight:950;
   line-height:1.25;
 }
@@ -489,7 +493,7 @@ nav {
   align-items:center;
   column-gap:10px;
   row-gap:2px;
-  padding:14px 22px;
+  padding:16px 24px;
   background:transparent;
 }
 .result-card:before{
@@ -520,7 +524,7 @@ nav {
 .result-score{
   grid-area:score;
   color:#bd77ef;
-  font-size:1.08em;
+  font-size:1.14em;
   font-weight:1000;
   letter-spacing:.1px;
   white-space:nowrap;
@@ -871,11 +875,27 @@ async function loadEnJuego(){
 }
 
 const SPONSORS_DATA=[{name:"Gemma Triay",pair:"Pareja: Delfina Brea",flag:"🇪🇸",emoji:"👑",rank:"#1",wikiTitle:"Gemma_Triay",note:"La número 1 del mundo. Bullpadel construyó su pala más vendida en torno a ella. Contrato hasta 2027.",categories:[{label:"🏏 Pala",brands:[{name:"Bullpadel Elite W 2026",cls:"bullpadel"}]},{label:"👕 Ropa",brands:[{name:"Bullpadel",cls:"bullpadel"}]},{label:"👟 Calzado",brands:[{name:"Bullpadel Hack",cls:"bullpadel"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Delfina Brea",pair:"Pareja: Gemma Triay",flag:"🇦🇷",emoji:"⭐",rank:"#2",wikiTitle:"Delfina_Brea",note:"La argentina más dominante de la historia del circuito. Bullpadel la tiene como embajadora global.",categories:[{label:"🏏 Pala",brands:[{name:"Bullpadel Vertex 05 W 2026",cls:"bullpadel"}]},{label:"👕 Ropa",brands:[{name:"Bullpadel",cls:"bullpadel"}]},{label:"👟 Calzado",brands:[{name:"Bullpadel Hack",cls:"bullpadel"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Ari Sánchez",pair:"Pareja: Paula Josemaría",flag:"🇪🇸",emoji:"🔥",rank:"#3",wikiTitle:"Ari_Sánchez",note:"Fichaje estrella de Adidas en 2025. Su carisma la convierte en la cara más marketiniana del pádel femenino español.",categories:[{label:"🏏 Pala",brands:[{name:"Adidas Metalbone W 2026",cls:"adidas"}]},{label:"👕 Ropa",brands:[{name:"Adidas",cls:"adidas"}]},{label:"👟 Calzado",brands:[{name:"Adidas Adizero",cls:"adidas"}]},{label:"⌚ Otros",brands:[{name:"Garmin",cls:"generic"}]}]},{name:"Paula Josemaría",pair:"Pareja: Ari Sánchez",flag:"🇪🇸",emoji:"💥",rank:"#4",wikiTitle:"Paula_Josemaría",note:"La pegada más potente del circuito. Head la fichó hace años y sigue siendo una de sus apuestas más claras.",categories:[{label:"🏏 Pala",brands:[{name:"Head Delta Pro W 2026",cls:"head"}]},{label:"👕 Ropa",brands:[{name:"Head",cls:"head"}]},{label:"👟 Calzado",brands:[{name:"Head Sprint Pro",cls:"head"}]},{label:"🥤 Nutrición",brands:[{name:"HSN",cls:"generic"}]}]},{name:"Alejandra Salazar",pair:"Pareja: Lucía Sainz",flag:"🇪🇸",emoji:"🏆",rank:"#5",wikiTitle:"Alejandra_Salazar",note:"Leyenda viva del circuito. Adidas la ha renovado season tras season; uno de los contratos más longevos del pádel femenino español.",categories:[{label:"🏏 Pala",brands:[{name:"Adidas Adipower W 2026",cls:"adidas"}]},{label:"👕 Ropa",brands:[{name:"Adidas",cls:"adidas"}]},{label:"👟 Calzado",brands:[{name:"Adidas Adizero",cls:"adidas"}]},{label:"🎾 Pelotas",brands:[{name:"Adidas",cls:"adidas"}]}]},{name:"Lucía Sainz",pair:"Pareja: Alejandra Salazar",flag:"🇪🇸",emoji:"✨",rank:"#6",wikiTitle:"Lucía_Sainz",note:"Nox la apoya desde sus inicios. Una de las jugadoras más seguidas en redes; clave para la marca en Europa.",categories:[{label:"🏏 Pala",brands:[{name:"Nox ML10 Pro Cup W 2026",cls:"nox"}]},{label:"👕 Ropa",brands:[{name:"Nox",cls:"nox"}]},{label:"👟 Calzado",brands:[{name:"K-Swiss Ultrashot",cls:"k-swiss"}]},{label:"🧴 Recuperación",brands:[{name:"Pilexil",cls:"generic"}]}]},{name:"Marta Ortega",pair:"Pareja: Ariana Sánchez",flag:"🇪🇸",emoji:"🎯",rank:"#7",wikiTitle:"Marta_Ortega_Gallego",note:"Nox apostó fuerte por ella y le está saliendo de lujo. Marta es la imagen de la renovación de la marca.",categories:[{label:"🏏 Pala",brands:[{name:"Nox AT10 Luxury W 2026",cls:"nox"}]},{label:"👕 Ropa",brands:[{name:"Nox",cls:"nox"}]},{label:"👟 Calzado",brands:[{name:"K-Swiss Ultrashot",cls:"k-swiss"}]},{label:"⌚ Otros",brands:[{name:"Garmin",cls:"generic"}]}]},{name:"Ariana Sánchez",pair:"Pareja: Marta Ortega",flag:"🇪🇸",emoji:"🚀",rank:"#8",wikiTitle:"Ariana_Sánchez_Fallada",note:"Head la tiene muy bien atada. Su nueva pareja con Marta promete resultados y más visibilidad para la marca.",categories:[{label:"🏏 Pala",brands:[{name:"Head Graphene W 2026",cls:"head"}]},{label:"👕 Ropa",brands:[{name:"Head",cls:"head"}]},{label:"👟 Calzado",brands:[{name:"Head Sprint Pro",cls:"head"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Jessica Castello",pair:"Pareja: Tamara Icardo",flag:"🇪🇸",emoji:"🌟",rank:"Top 10",wikiTitle:"Jessica_Castello",note:"Vibora la ha hecho su bandera en el pádel femenino español. Muy activa en RRSS y con una comunidad fiel.",categories:[{label:"🏏 Pala",brands:[{name:"Vibora Yarara Edition W",cls:"vibora"}]},{label:"👕 Ropa",brands:[{name:"Vibora",cls:"vibora"}]},{label:"👟 Calzado",brands:[{name:"Asics Gel-Padel",cls:"asics"}]}]},{name:"Tamara Icardo",pair:"Pareja: Jessica Castello",flag:"🇪🇸",emoji:"💪",rank:"Top 10",wikiTitle:"Tamara_Icardo",note:"Varlion la acompaña desde que debutó en el circuito profesional. Imagen de la elegancia dentro de la pista.",categories:[{label:"🏏 Pala",brands:[{name:"Varlion LW Carbon W 2026",cls:"varlion"}]},{label:"👕 Ropa",brands:[{name:"Varlion",cls:"varlion"}]},{label:"👟 Calzado",brands:[{name:"Asics Gel-Padel",cls:"asics"}]},{label:"🥤 Nutrición",brands:[{name:"Powerade",cls:"generic"}]}]}];
-function renderSponsors(){
+async function renderSponsors(){
   const list=document.getElementById('sponsors-list');
   const initials=name=>(name||'').split(/\s+/).filter(Boolean).slice(0,2)
     .map(x=>x[0]?.toUpperCase()||'').join('');
   const fallback=p=>`<div class="sponsor-fallback"><div class="sponsor-fallback-initials">${initials(p.name)}</div><div class="sponsor-fallback-ball">🎾</div></div>`;
+  const norm=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
+
+  // Use the full official/ranking name for sponsor photos.
+  // This fixes cases such as Gemma Triay -> Gemma Triay Pons.
+  let ranking=[];
+  try{ ranking=await fetch('/api/ranking').then(r=>r.json()); }catch(e){}
+
+  const fullPhotoName=p=>{
+    const target=norm(p.name).split(/\s+/);
+    const first=target[0]||'', surname=target[1]||'';
+    const hit=ranking.find(r=>{
+      const parts=norm(r.name).split(/\s+/);
+      return parts[0]===first && parts[1]===surname;
+    });
+    return hit?.name || p.name;
+  };
 
   const setDirectPhoto=(p,i)=>{
     const box=document.getElementById(`av-${i}`);
@@ -884,17 +904,15 @@ function renderSponsors(){
     const img=new Image();
     img.alt=p.name;
     img.decoding='async';
-    img.onload=()=>{
-      box.classList.add('has-photo');
-    };
+    img.onload=()=>box.classList.add('has-photo');
     img.onerror=()=>{
       box.classList.remove('has-photo');
       box.innerHTML=fallback(p);
     };
 
-    // Attach first so the browser definitely performs the request.
+    const photoName=fullPhotoName(p);
     box.replaceChildren(img);
-    img.src=`/api/player-photo-image?name=${encodeURIComponent(p.name)}&wiki_title=${encodeURIComponent(p.wikiTitle||'')}&v=64`;
+    img.src=`/api/sponsor-photo-image?name=${encodeURIComponent(photoName)}&wiki_title=${encodeURIComponent(p.wikiTitle||'')}&v=65`;
   };
 
   list.innerHTML=SPONSORS_DATA.map((p,i)=>`
