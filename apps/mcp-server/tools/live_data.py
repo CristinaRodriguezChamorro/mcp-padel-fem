@@ -1458,6 +1458,189 @@ def _round_from_snapshot(snapshot: str, event: dict) -> str:
     return "Partidos"
 
 
+async def _browser_fip_flat_results_fallback(event: dict) -> list:
+    """
+    Fallback SOLO si el extractor v39 devuelve cero bloques.
+
+    Lee los nodos visibles en orden DOM después de abrir Results + Female.
+    En vez de exigir un contenedor perfecto con 4 jugadoras, usa el ✓ como ancla
+    y busca las cuatro jugadoras del ranking más cercanas y los números de score.
+    """
+    if async_playwright is None:
+        return []
+
+    url = event.get("url", "")
+    if not url:
+        return []
+
+    try:
+        ranking_names = await get_womens_ranking_names(limit=250)
+    except Exception:
+        ranking_names = []
+
+    ranking_norm = [_norm_person_name(x) for x in ranking_names if x]
+    if not ranking_norm:
+        return []
+
+    browser = None
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            )
+            page = await browser.new_page(
+                viewport={"width": 1600, "height": 2200},
+                locale="en-US",
+            )
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            await page.wait_for_timeout(1400)
+
+            # Results
+            for label in ("Results", "Resultados"):
+                try:
+                    loc = page.get_by_text(label, exact=True).first
+                    if await loc.count():
+                        await loc.click(force=True, timeout=2200)
+                        await page.wait_for_timeout(800)
+                        break
+                except Exception:
+                    pass
+
+            # Female
+            activated = False
+            try:
+                labels = page.locator("label")
+                for i in range(await labels.count()):
+                    lab = labels.nth(i)
+                    txt = re.sub(r"\s+"," ",(await lab.inner_text()).strip()).lower()
+                    if txt not in {"female","women","femenino","femenina"}:
+                        continue
+                    target = await lab.get_attribute("for")
+                    if target:
+                        inp = page.locator(f"#{target}")
+                        if await inp.count():
+                            try:
+                                await inp.check(force=True, timeout=2000)
+                            except Exception:
+                                await inp.click(force=True, timeout=2000)
+                            activated = True
+                    if not activated:
+                        await lab.click(force=True, timeout=2000)
+                        activated = True
+                    break
+            except Exception:
+                pass
+
+            if not activated:
+                for label in ("Female","Women","Femenino","Femenina"):
+                    try:
+                        loc=page.get_by_text(label, exact=True).first
+                        if await loc.count():
+                            await loc.click(force=True, timeout=2000)
+                            activated=True
+                            break
+                    except Exception:
+                        pass
+
+            await page.wait_for_timeout(1200)
+
+            blocks = await page.evaluate(
+                r"""
+                (ranking) => {
+                  const norm=s=>(s||'')
+                    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+                    .toLowerCase().replace(/[^a-z0-9]+/g,' ')
+                    .replace(/\s+/g,' ').trim();
+                  const clean=s=>(s||'').replace(/\s+/g,' ').trim();
+
+                  const leaves=Array.from(document.querySelectorAll('body *'))
+                    .filter(el=>el.children.length===0)
+                    .filter(el=>{
+                      const st=getComputedStyle(el);
+                      return st.display!=='none' && st.visibility!=='hidden';
+                    })
+                    .map((el,i)=>({i,el,text:clean(el.textContent),n:norm(el.textContent)}))
+                    .filter(x=>x.text);
+
+                  const playerAt = x => {
+                    for(const p of ranking){
+                      if(!p)continue;
+                      if(x.n===p || x.n.includes(p) || p.includes(x.n)){
+                        // avoid tiny fragments matching long player names
+                        if(x.n.length<4) continue;
+                        return p;
+                      }
+                    }
+                    return null;
+                  };
+
+                  const playerHits=leaves.map(x=>({...x,player:playerAt(x)})).filter(x=>x.player);
+                  const ticks=leaves.filter(x=>x.text.includes('✓'));
+                  const out=[];
+                  const seen=new Set();
+
+                  for(const tick of ticks){
+                    const near=playerHits
+                      .map(p=>({...p,dist:Math.abs(p.i-tick.i)}))
+                      .filter(p=>p.dist<=120)
+                      .sort((a,b)=>a.dist-b.dist);
+
+                    const chosen=[];
+                    for(const p of near){
+                      if(!chosen.some(c=>c.player===p.player)) chosen.push(p);
+                      if(chosen.length===4) break;
+                    }
+                    if(chosen.length!==4) continue;
+
+                    chosen.sort((a,b)=>a.i-b.i);
+                    const minI=Math.min(...chosen.map(x=>x.i),tick.i)-35;
+                    const maxI=Math.max(...chosen.map(x=>x.i),tick.i)+35;
+                    const scores=leaves
+                      .filter(x=>x.i>=minI && x.i<=maxI && /^\d{1,2}$/.test(x.text))
+                      .map(x=>Number(x.text))
+                      .filter(n=>n>=0&&n<=20);
+
+                    if(scores.length<4) continue;
+
+                    const players=chosen.map(x=>x.player);
+                    const key=players.join('|')+'::'+scores.slice(0,8).join(',');
+                    if(seen.has(key))continue;
+                    seen.add(key);
+
+                    const context=leaves
+                      .filter(x=>x.i>=Math.max(0,minI) && x.i<=maxI)
+                      .map(x=>x.text).join(' ').slice(0,1600);
+
+                    out.push({
+                      tag:'flat-fallback',
+                      text:context,
+                      players,
+                      scores:scores.slice(0,8)
+                    });
+                  }
+                  return out;
+                }
+                """,
+                ranking_norm,
+            )
+
+            await browser.close()
+            browser = None
+
+            print(f"  FIP flat fallback: blocks={len(blocks or [])}")
+            return blocks or []
+
+    except Exception as exc:
+        print(f"  FIP flat fallback error: {type(exc).__name__}: {exc}")
+        if browser is not None:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+        return []
+
+
 async def _extract_official_results(event: dict, gender: str = "female") -> list:
     """
     EN JUEGO ONLY — v39
@@ -1475,6 +1658,10 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         blocks = json.loads(source).get("blocks", []) if source else []
     except Exception:
         blocks = []
+
+    if not blocks:
+        print("  live results: v39 devolvió 0 bloques; activando flat fallback")
+        blocks = await _browser_fip_flat_results_fallback(event)
 
     month_map = {
         "jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,

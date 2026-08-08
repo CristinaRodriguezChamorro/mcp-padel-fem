@@ -164,7 +164,7 @@ async def resumen_diario_padel_femenino():
 
 @app.get("/api/version")
 async def api_version():
-    return {"version": "v53-sponsors-redesign-ranking-photo-fix-2026-08-08"}
+    return {"version": "v54-photo-proxy-live-flat-fallback-2026-08-08"}
 
 @app.get("/")
 async def index():
@@ -174,7 +174,7 @@ async def index():
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
-            "X-App-Version": "v53-sponsors-redesign-ranking-photo-fix-2026-08-08",
+            "X-App-Version": "v54-photo-proxy-live-flat-fallback-2026-08-08",
         },
     )
 

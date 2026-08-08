@@ -721,7 +721,7 @@ async function loadRanking(){
   };
 
   const photoFor=async(name)=>{
-    const key='padelfem:photo:'+normalize(name);
+    const key='padelfem:v54:photo:'+normalize(name);
     const cached=localStorage.getItem(key);
     if(cached)return cached==='NONE'?null:cached;
     let src=null;
@@ -739,7 +739,7 @@ async function loadRanking(){
     const img=new Image(); img.alt=p.name; img.loading='lazy'; img.referrerPolicy='no-referrer';
     img.onload=()=>{box.replaceChildren(img);box.classList.add('has-photo')};
     img.onerror=()=>{box.classList.remove('has-photo');box.innerHTML=fallback(p.name)};
-    img.src=src;
+    img.src=`/api/photo?url=${encodeURIComponent(src)}`;
   };
 
   try{
@@ -889,7 +889,7 @@ function renderSponsors(){
     const d=await(await fetch(u)).json(); return Object.values(d.query?.pages||{})[0]?.thumbnail?.source||null;
   };
   const photoFor=async p=>{
-    const key='padelfem:sponsor-photo:'+normalize(p.name);
+    const key='padelfem:v54:sponsor-photo:'+normalize(p.name);
     const cached=localStorage.getItem(key); if(cached)return cached==='NONE'?null:cached;
     let src=null;
     try{
@@ -904,7 +904,7 @@ function renderSponsors(){
     const img=new Image();img.alt=p.name;img.loading='lazy';img.referrerPolicy='no-referrer';
     img.onload=()=>{box.replaceChildren(img);box.classList.add('has-photo')};
     img.onerror=()=>{box.classList.remove('has-photo');box.innerHTML=fallback(p)};
-    img.src=src;
+    img.src=`/api/photo?url=${encodeURIComponent(src)}`;
   };
 
   list.innerHTML=SPONSORS_DATA.map((p,i)=>`
