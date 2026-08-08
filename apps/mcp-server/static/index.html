@@ -704,42 +704,19 @@ async function loadRanking(){
   const initials=name=>(name||'').split(/\s+/).filter(Boolean).slice(0,2).map(x=>x[0]?.toUpperCase()||'').join('');
   const fallback=name=>`<div class="rank-photo-fallback"><span>${initials(name)}</span><span class="rank-photo-ball">🎾</span></div>`;
 
-  const normalize=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
-  const tokens=s=>normalize(s).split(/\s+/).filter(x=>x.length>2);
-  const titleMatches=(name,title)=>{
-    const n=tokens(name), t=tokens(title);
-    if(!n.length||!t.length)return false;
-    const surname=n[n.length-1];
-    return t.includes(surname) && n.filter(x=>t.includes(x)).length>=Math.min(2,n.length);
-  };
-
-  const wikiSearch=async(api,name)=>{
-    const u=`${api}?action=query&generator=search&gsrsearch=${encodeURIComponent('"'+name+'" padel')}&gsrlimit=8&prop=pageimages|info&format=json&pithumbsize=1000&origin=*`;
-    const d=await(await fetch(u)).json();
-    const pages=Object.values(d.query?.pages||{}).filter(p=>p.thumbnail?.source && titleMatches(name,p.title));
-    return pages[0]?.thumbnail?.source||null;
-  };
-
-  const photoFor=async(name)=>{
-    const key='padelfem:v54:photo:'+normalize(name);
-    const cached=localStorage.getItem(key);
-    if(cached)return cached==='NONE'?null:cached;
-    let src=null;
-    try{
-      src=await wikiSearch('https://es.wikipedia.org/w/api.php',name);
-      if(!src)src=await wikiSearch('https://en.wikipedia.org/w/api.php',name);
-    }catch(e){}
-    localStorage.setItem(key,src||'NONE');
-    return src;
-  };
-
   const setPhoto=async(p,i)=>{
-    const box=document.getElementById(`rank-photo-${i}`); if(!box)return;
-    const src=await photoFor(p.name); if(!src)return;
-    const img=new Image(); img.alt=p.name; img.loading='lazy'; img.referrerPolicy='no-referrer';
-    img.onload=()=>{box.replaceChildren(img);box.classList.add('has-photo')};
-    img.onerror=()=>{box.classList.remove('has-photo');box.innerHTML=fallback(p.name)};
-    img.src=`/api/photo?url=${encodeURIComponent(src)}`;
+    const box=document.getElementById(`rank-photo-${i}`);
+    if(!box)return;
+    try{
+      const d=await fetch(`/api/player-photo?name=${encodeURIComponent(p.name)}`).then(r=>r.json());
+      if(!d.photo)return;
+      const img=new Image();
+      img.alt=p.name;
+      img.loading='lazy';
+      img.onload=()=>{box.replaceChildren(img);box.classList.add('has-photo')};
+      img.onerror=()=>{box.classList.remove('has-photo');box.innerHTML=fallback(p.name)};
+      img.src=`/api/photo?url=${encodeURIComponent(d.photo)}`;
+    }catch(e){}
   };
 
   try{
@@ -750,10 +727,13 @@ async function loadRanking(){
         <div class="rank-pos ${i===0?'gold':i===1?'silver':i===2?'bronze':'other'}">${p.pos}</div>
         <div class="rank-photo" id="rank-photo-${i}">${fallback(p.name)}</div>
         <div class="rank-info"><div class="rank-name">${p.name}</div><div class="rank-pair">${p.pair||''}</div></div>
-        <div class="rank-flag">${p.flag||'🌍'}</div><div class="rank-pts">${p.pts} pts</div>
+        <div class="rank-flag">${p.flag||'🌍'}</div>
+        <div class="rank-pts">${p.pts} pts</div>
       </div>`).join('');
     data.forEach((p,i)=>setPhoto(p,i));
-  }catch(e){list.innerHTML='<div class="empty-msg">No se pudo cargar el ranking</div>'}
+  }catch(e){
+    list.innerHTML='<div class="empty-msg">No se pudo cargar el ranking</div>';
+  }
 }
 
 const TV_BY_BADGE={major:[{name:'Red Bull TV',cls:'redbull',icon:'🐂'},{name:'Movistar+',cls:'movistar',icon:'📡'}],p1:[{name:'Red Bull TV',cls:'redbull',icon:'🐂'},{name:'Movistar+',cls:'movistar',icon:'📡'}],p2:[{name:'Movistar+',cls:'movistar',icon:'📡'},{name:'YouTube',cls:'youtube',icon:'▶️'}],fip:[{name:'YouTube',cls:'youtube',icon:'▶️'}]};
@@ -882,29 +862,20 @@ function renderSponsors(){
   const list=document.getElementById('sponsors-list');
   const initials=name=>(name||'').split(/\s+/).filter(Boolean).slice(0,2).map(x=>x[0]?.toUpperCase()||'').join('');
   const fallback=p=>`<div class="sponsor-fallback"><div class="sponsor-fallback-initials">${initials(p.name)}</div><div class="sponsor-fallback-ball">🎾</div></div>`;
-  const normalize=s=>(s||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 
-  const exactThumb=async(api,title)=>{
-    const u=`${api}?action=query&redirects=1&titles=${encodeURIComponent(title)}&prop=pageimages&format=json&pithumbsize=1200&origin=*`;
-    const d=await(await fetch(u)).json(); return Object.values(d.query?.pages||{})[0]?.thumbnail?.source||null;
-  };
-  const photoFor=async p=>{
-    const key='padelfem:v54:sponsor-photo:'+normalize(p.name);
-    const cached=localStorage.getItem(key); if(cached)return cached==='NONE'?null:cached;
-    let src=null;
-    try{
-      src=await exactThumb('https://es.wikipedia.org/w/api.php',p.wikiTitle);
-      if(!src)src=await exactThumb('https://en.wikipedia.org/w/api.php',p.wikiTitle);
-    }catch(e){}
-    localStorage.setItem(key,src||'NONE'); return src;
-  };
   const setPhoto=async(p,i)=>{
-    const box=document.getElementById(`av-${i}`);if(!box)return;
-    const src=await photoFor(p);if(!src)return;
-    const img=new Image();img.alt=p.name;img.loading='lazy';img.referrerPolicy='no-referrer';
-    img.onload=()=>{box.replaceChildren(img);box.classList.add('has-photo')};
-    img.onerror=()=>{box.classList.remove('has-photo');box.innerHTML=fallback(p)};
-    img.src=`/api/photo?url=${encodeURIComponent(src)}`;
+    const box=document.getElementById(`av-${i}`);
+    if(!box)return;
+    try{
+      const d=await fetch(`/api/player-photo?name=${encodeURIComponent(p.name)}&wiki_title=${encodeURIComponent(p.wikiTitle||'')}`).then(r=>r.json());
+      if(!d.photo)return;
+      const img=new Image();
+      img.alt=p.name;
+      img.loading='lazy';
+      img.onload=()=>{box.replaceChildren(img);box.classList.add('has-photo')};
+      img.onerror=()=>{box.classList.remove('has-photo');box.innerHTML=fallback(p)};
+      img.src=`/api/photo?url=${encodeURIComponent(d.photo)}`;
+    }catch(e){}
   };
 
   list.innerHTML=SPONSORS_DATA.map((p,i)=>`
