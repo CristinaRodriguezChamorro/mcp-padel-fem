@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from fastmcp import FastMCP
 from tools.news import get_latest_news
-from tools.live_data import get_ranking_live, get_calendar_live
+from tools.live_data import get_ranking_live, get_calendar_live, get_tournament_now
 
 app = FastAPI(title="Padel Fem MCP")
 mcp = FastMCP("PadelFemMCP")
@@ -54,6 +54,17 @@ async def api_calendar():
         return cached
     data = await get_calendar_live()
     cache_set("calendar", data)
+    return data
+
+
+@app.get("/api/live")
+async def api_live():
+    # Marcadores oficiales cambian durante el día: caché de 3 minutos.
+    cached = cache_get("live", 3 * 60)
+    if cached:
+        return cached
+    data = await get_tournament_now()
+    cache_set("live", data)
     return data
 
 

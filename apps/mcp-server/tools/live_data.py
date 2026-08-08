@@ -218,3 +218,233 @@ def _fallback_calendar() -> list:
         {"day": "15-21", "month": "Jun", "name": "FIP Platinum Portugal", "place": "Paredes 🇵🇹",       "badge": "fip",   "badgeText": "FIP Platinum", "tv": "Movistar+",               "live": False},
         {"day": "22-28", "month": "Jun", "name": "Sweden Major",          "place": "Gotemburgo 🇸🇪",    "badge": "major", "badgeText": "MAJOR",        "tv": "Red Bull TV · Movistar+", "live": False},
     ]
+
+# ── TORNEO EN JUEGO + ÚLTIMOS RESULTADOS FEMENINOS ───────────────────────────
+# Fuentes oficiales únicamente:
+#   - FIP (padelfip.com): torneo activo, ubicación, fechas y marcadores.
+#   - Premier Padel (premierpadel.com): dónde verlo en España.
+
+from datetime import datetime
+from urllib.parse import urljoin
+
+FIP_LIVE_URL = "https://www.padelfip.com/live/"
+PREMIER_WATCH_URL = "https://premierpadel.com/en/news/where-to-watch-dont-miss-any-of-the-action-at-any-tournament"
+
+
+def _clean_text(node) -> str:
+    if not node:
+        return ""
+    return re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip()
+
+
+def _parse_fip_dates(text: str):
+    m = re.search(r"(\d{1,2}/\d{1,2}/\d{4})\s*(?:-|–|to|a|al)\s*(\d{1,2}/\d{1,2}/\d{4})", text, re.I)
+    if not m:
+        dates = re.findall(r"\b\d{1,2}/\d{1,2}/\d{4}\b", text)
+        if len(dates) < 2:
+            return None
+        a, b = dates[0], dates[1]
+    else:
+        a, b = m.group(1), m.group(2)
+    try:
+        return datetime.strptime(a, "%d/%m/%Y").date(), datetime.strptime(b, "%d/%m/%Y").date()
+    except Exception:
+        return None
+
+
+def _is_premier_name(text: str) -> bool:
+    return bool(re.search(r"\b(?:P1|P2|MAJOR|FINALS?)\b", text, re.I))
+
+
+def _format_dates_es(start, end) -> str:
+    months = ["", "enero", "febrero", "marzo", "abril", "mayo", "junio",
+              "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+    if start.month == end.month:
+        return f"{start.day}–{end.day} {months[start.month]} {end.year}"
+    return f"{start.day} {months[start.month]} – {end.day} {months[end.month]} {end.year}"
+
+
+async def _get_official_live_event() -> dict | None:
+    """Localiza en la página oficial FIP el Premier Padel que está activo hoy."""
+    html = await _fetch(FIP_LIVE_URL)
+    if not html:
+        return None
+
+    soup = BeautifulSoup(html, "html.parser")
+    today = date.today()
+    seen = set()
+
+    for a in soup.find_all("a", href=True):
+        href = a.get("href", "")
+        if "/event" not in href and "/evento" not in href:
+            continue
+        event_url = urljoin(FIP_LIVE_URL, href)
+        if event_url in seen:
+            continue
+        seen.add(event_url)
+
+        node = a
+        block = ""
+        for _ in range(6):
+            node = getattr(node, "parent", None)
+            if not node:
+                break
+            candidate = _clean_text(node)
+            if len(candidate) > len(block):
+                block = candidate
+            if _parse_fip_dates(candidate) and _is_premier_name(candidate):
+                block = candidate
+                break
+
+        if not _is_premier_name(block):
+            continue
+        dates = _parse_fip_dates(block)
+        if not dates:
+            continue
+        start, end = dates
+        if not (start <= today <= end):
+            continue
+
+        event_html = await _fetch(event_url)
+        if not event_html:
+            continue
+        event_soup = BeautifulSoup(event_html, "html.parser")
+        event_text = _clean_text(event_soup)
+        if "Female" not in event_text and "Femenino" not in event_text:
+            continue
+
+        h1 = event_soup.find("h1")
+        name = _clean_text(h1) if h1 else ""
+        if not name or not _is_premier_name(name):
+            candidates = [x.strip() for x in re.split(r"\s{2,}|\n", block) if _is_premier_name(x)]
+            name = candidates[0][:80] if candidates else "Premier Padel"
+
+        place = ""
+        m_place = re.search(r"([A-Za-zÀ-ÿ .'-]+\s*-\s*[A-Za-zÀ-ÿ .'-]+)\s*[|\n ]+\d{1,2}/\d{1,2}/\d{4}", event_text)
+        if m_place:
+            place = re.sub(r"\s+", " ", m_place.group(1)).strip()
+
+        return {
+            "name": name.upper(),
+            "place": place,
+            "dates": _format_dates_es(start, end),
+            "url": event_url,
+            "html": event_html,
+        }
+    return None
+
+
+async def _get_watch_official() -> list[str]:
+    """Dónde ver Premier Padel desde España según la web oficial del circuito."""
+    html = await _fetch(PREMIER_WATCH_URL)
+    if not html:
+        return ["Premier Padel YouTube", "Red Bull TV", "Movistar+"]
+
+    text = _clean_text(BeautifulSoup(html, "html.parser"))
+    watch = []
+    if re.search(r"Premier Padel YouTube", text, re.I):
+        watch.append("Premier Padel YouTube")
+    if re.search(r"Red\s*Bull\s*TV", text, re.I):
+        watch.append("Red Bull TV")
+    if re.search(r"Movistar", text, re.I) and re.search(r"Spain", text, re.I):
+        watch.append("Movistar+")
+    return watch or ["Premier Padel YouTube", "Red Bull TV"]
+
+
+async def _extract_official_womens_results(event: dict) -> list:
+    """Estructura resultados usando exclusivamente la ficha oficial FIP."""
+    soup = BeautifulSoup(event["html"], "html.parser")
+    for tag in soup.find_all(["script", "style", "nav", "footer", "header"]):
+        tag.decompose()
+    official_text = _clean_text(soup)
+    if not official_text:
+        return []
+
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        print("  live results: GROQ_API_KEY no configurada")
+        return []
+
+    source = official_text[:60000]
+    client = Groq(api_key=api_key)
+    prompt = f"""Extrae resultados del circuito FEMENINO únicamente del siguiente texto de la web OFICIAL FIP.
+No uses conocimiento externo. No deduzcas marcadores. No completes nombres.
+
+FUENTE OFICIAL FIP:
+{source}
+
+Devuelve SOLO JSON, máximo 8 partidos FINALIZADOS, los de la ronda más reciente primero:
+[{{"round":"Semifinal", "winner":"Apellido / Apellido", "loser":"Apellido / Apellido", "score":"6-1, 7-5"}}]
+
+Reglas:
+- Cada pareja debe contener exactamente 2 jugadoras.
+- winner es la pareja marcada como vencedora en FIP.
+- score es el resultado por sets desde el punto de vista de winner.
+- No incluyas partidos sin resultado final.
+- No incluyas masculino.
+- Si no puedes demostrar un partido con el texto, omítelo.
+- Si no hay resultados femeninos claros, devuelve []."""
+
+    try:
+        resp = await asyncio.to_thread(lambda: client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            max_tokens=1200,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}],
+        ))
+        raw = resp.choices[0].message.content.strip()
+        m = re.search(r"\[.*\]", raw, re.DOTALL)
+        if not m:
+            return []
+        parsed = json.loads(m.group())
+    except Exception as e:
+        print(f"  official FIP result extraction error: {e}")
+        return []
+
+    normalized_source = re.sub(r"\s+", " ", official_text).lower()
+    valid = []
+    for item in parsed[:8]:
+        winner = str(item.get("winner", "")).strip()
+        loser = str(item.get("loser", "")).strip()
+        score = str(item.get("score", "")).strip()
+        rnd = str(item.get("round", "")).strip()
+        if not winner or not loser or not score or "/" not in winner or "/" not in loser:
+            continue
+        if not re.fullmatch(r"\d{1,2}-\d{1,2}(?:\s*,\s*\d{1,2}-\d{1,2}){1,2}", score):
+            continue
+
+        names = [x.strip().lower() for x in re.split(r"/", winner + "/" + loser) if x.strip()]
+        surnames = [n.split()[-1] for n in names if n.split()]
+        if len(surnames) != 4 or not all(tok in normalized_source for tok in surnames):
+            continue
+
+        valid.append({"round": rnd, "winner": winner, "loser": loser, "score": score})
+    return valid
+
+
+async def get_tournament_now() -> dict:
+    """Torneo actual + resultados femeninos, usando únicamente fuentes oficiales."""
+    today_str = date.today().strftime("%d/%m/%Y")
+    event = await _get_official_live_event()
+    if not event:
+        return {
+            "active": False, "name": "", "place": "", "dates": "",
+            "watch": [], "results": [], "updated": today_str,
+            "source": "FIP", "source_url": FIP_LIVE_URL,
+        }
+
+    watch, results = await asyncio.gather(
+        _get_watch_official(),
+        _extract_official_womens_results(event),
+    )
+    return {
+        "active": True,
+        "name": event["name"],
+        "place": event["place"],
+        "dates": event["dates"],
+        "watch": watch,
+        "results": results,
+        "updated": today_str,
+        "source": "FIP · Premier Padel",
+        "source_url": event["url"],
+    }
