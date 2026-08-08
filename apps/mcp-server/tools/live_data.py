@@ -1065,7 +1065,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
         "states_scanned": 0,
         "candidate_blocks": 0,
         "female_blocks": 0,
-        "source_mode": "full-draw-proximity-v39",
+        "source_mode": "full-draw-alias-v77",
     }
 
     if async_playwright is None:
@@ -1080,8 +1080,8 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
     except Exception:
         ranking_names = []
 
-    ranking_norm = [_norm_person_name(x) for x in ranking_names if x]
-    if not ranking_norm:
+    ranking_profiles = _player_schedule_profiles(ranking_names)
+    if not ranking_profiles:
         return "", diag
 
     browser = None
@@ -1118,7 +1118,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                 try:
                     state = await page.evaluate(
                         r"""
-                        ({ranking, tag}) => {
+                        ({profiles, tag}) => {
                           const norm = s => (s || '')
                             .normalize('NFD')
                             .replace(/[\u0300-\u036f]/g,'')
@@ -1128,7 +1128,6 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                             .trim();
 
                           const clean = s => (s || '').replace(/\s+/g,' ').trim();
-                          const ranked = ranking.filter(Boolean);
                           const all = Array.from(document.querySelectorAll('body *'));
 
                           const leafNodes = el => Array.from(el.querySelectorAll('*'))
@@ -1140,13 +1139,30 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                             .map(Number)
                             .filter(n => n >= 0 && n <= 20);
 
-                          const rankedPlayers = el => {
-                            const text = ' ' + norm(el.innerText || el.textContent || '') + ' ';
+                          const profileMatchIn = textValue => {
+                            const text = ' ' + norm(textValue) + ' ';
                             const hits = [];
-                            for (const player of ranked) {
-                              if (player && text.includes(' ' + player + ' ')) hits.push(player);
+                            for (const p of profiles) {
+                              let bestIndex = -1;
+                              let matchedAlias = '';
+                              for (const alias of (p.aliases || [])) {
+                                if (!alias || alias.length < 4) continue;
+                                const idx = text.indexOf(' ' + alias + ' ');
+                                if (idx >= 0 && (bestIndex < 0 || idx < bestIndex)) {
+                                  bestIndex = idx;
+                                  matchedAlias = alias;
+                                }
+                              }
+                              if (bestIndex >= 0) {
+                                hits.push({
+                                  canonical: p.canonical,
+                                  display: p.display,
+                                  index: bestIndex,
+                                  alias: matchedAlias
+                                });
+                              }
                             }
-                            return [...new Set(hits)];
+                            return hits;
                           };
 
                           const candidates = [];
@@ -1155,8 +1171,16 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                             const text = clean(el.innerText);
                             if (!text || text.length < 25 || text.length > 2200) continue;
 
-                            const players = rankedPlayers(el);
-                            if (players.length !== 4) continue;
+                            const players = profileMatchIn(text);
+                            const unique = [];
+                            const seenCanon = new Set();
+                            for (const p of players.sort((a,b)=>a.index-b.index)) {
+                              if (!seenCanon.has(p.canonical)) {
+                                seenCanon.add(p.canonical);
+                                unique.push(p);
+                              }
+                            }
+                            if (unique.length !== 4) continue;
 
                             const scores = scoreValues(el);
                             if (scores.length < 4 || scores.length > 12) continue;
@@ -1165,12 +1189,11 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                               el,
                               tag,
                               text,
-                              players,
+                              players: unique,
                               scores
                             });
                           }
 
-                          // El bloque más pequeño suele corresponder a un partido.
                           const minimal = candidates.filter(c =>
                             !candidates.some(o => o !== c && c.el.contains(o.el))
                           );
@@ -1179,30 +1202,10 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                           const seen = new Set();
 
                           for (const c of minimal) {
-                            // Orden de jugadoras por aparición real en el DOM.
-                            const leaves = leafNodes(c.el);
-                            const ordered = [];
-                            for (const leaf of leaves) {
-                              const lt = norm(leaf.textContent || '');
-                              for (const player of ranked) {
-                                if (!player) continue;
-                                if (lt === player || lt.includes(player) || player.includes(lt)) {
-                                  if (!ordered.includes(player)) ordered.push(player);
-                                  break;
-                                }
-                              }
-                            }
-
-                            // Si los leafs no permiten orden, usar orden por posición en texto.
-                            if (ordered.length !== 4) {
-                              const full = ' ' + norm(c.text) + ' ';
-                              const positioned = c.players
-                                .map(p => ({p, i: full.indexOf(' ' + p + ' ')}))
-                                .filter(x => x.i >= 0)
-                                .sort((a,b) => a.i-b.i)
-                                .map(x => x.p);
-                              ordered.splice(0, ordered.length, ...positioned);
-                            }
+                            // Order by actual appearance of any accepted alias.
+                            const ordered = [...c.players]
+                              .sort((a,b)=>a.index-b.index)
+                              .map(x=>x.display);
 
                             if (ordered.length !== 4) continue;
 
@@ -1214,7 +1217,8 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                               tag: c.tag,
                               text: c.text.slice(0,1600),
                               players: ordered,
-                              scores: c.scores
+                              scores: c.scores,
+                              aliases: c.players.map(x=>x.alias)
                             });
                           }
 
@@ -1224,7 +1228,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                           };
                         }
                         """,
-                        {"ranking": ranking_norm, "tag": tag},
+                        {"profiles": ranking_profiles, "tag": tag},
                     )
                     diag["candidate_blocks"] += int(state.get("candidateCount", 0))
                     collected.extend(state.get("blocks", []) or [])
@@ -1528,8 +1532,8 @@ async def _browser_fip_flat_results_fallback(event: dict) -> list:
     except Exception:
         ranking_names = []
 
-    ranking_norm = [_norm_person_name(x) for x in ranking_names if x]
-    if not ranking_norm:
+    ranking_profiles = _player_schedule_profiles(ranking_names)
+    if not ranking_profiles:
         return []
 
     browser = None
