@@ -30,44 +30,6 @@ HTML/CSS/JS   FastMCP
 
 La arquitectura separa la **obtención de datos**, su **procesamiento** y la **forma de consumirlos**. El LLM se utiliza para resumir o normalizar contenido no estructurado; las decisiones deterministas, como identificar jugadoras mediante el ranking femenino, se resuelven con datos y código.
 
-## 🔴 En juego
-
-El backend detecta el torneo Premier Padel activo y consulta información oficial de **FIP**.
-
-Procesa **Results, Draws y Order of Play**, filtra el cuadro femenino (`female / women`), extrae resultados y los agrupa por ronda:
-
-```text
-SEMIFINALES
-
-Triay / Brea 🏆
-Josemaría / Sánchez
-6–3  6–4
-```
-
-También obtiene el **siguiente partido femenino** y convierte su hora local a **hora de España (`Europe/Madrid`)**.
-
-Los resultados se incorporan a medida que terminan los partidos, sin esperar a que finalice el torneo.
-
-## 📰 Noticias
-
-El filtro de noticias **no depende de una lista de jugadoras hardcodeada**.
-
-Primero se obtiene el **ranking femenino actualizado** y se construye una lista dinámica con los nombres completos de las jugadoras. Una noticia pasa el filtro si aparece al menos una jugadora del ranking **o** si contiene una señal explícita de contenido femenino como `women`, `female`, `woman`, `femenino`, `femenina` o `mujeres`. Después, Groq/Llama resume únicamente el contenido que ya ha superado ese filtro.
-
-```text
-Ranking femenino → nombres de jugadoras
-                         │
-RSS → filtro femenino ───┘
-          │
-          ▼
-      Groq + Llama
-  resumen / normalización
-          │
-          ▼
-       /api/news
-```
-
-**Groq no decide si una noticia es femenina.** Se utiliza como API de inferencia para ejecutar Llama y resumir/estructurar contenido que ya ha pasado el filtro.
 
 ## 🔌 MCP
 
