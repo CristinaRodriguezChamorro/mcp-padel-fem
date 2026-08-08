@@ -352,7 +352,13 @@ async def _get_watch_official() -> list[str]:
 
 
 async def _extract_official_womens_results(event: dict) -> list:
-    """Estructura resultados usando exclusivamente la ficha oficial FIP."""
+    """
+    Devuelve los partidos femeninos YA TERMINADOS del torneo que sigue en curso.
+
+    Importante: no espera a que termine el torneo. En cuanto la fuente oficial FIP
+    publica un partido finalizado (primera ronda, octavos, cuartos, etc.), ese
+    resultado puede aparecer en "En juego" en la siguiente actualización.
+    """
     soup = BeautifulSoup(event["html"], "html.parser")
     for tag in soup.find_all(["script", "style", "nav", "footer", "header"]):
         tag.decompose()
@@ -423,7 +429,10 @@ Reglas:
 
 
 async def get_tournament_now() -> dict:
-    """Torneo actual + resultados femeninos, usando únicamente fuentes oficiales."""
+    """
+    Torneo actual + resultados femeninos acumulados mientras el torneo está en curso.
+    No se espera a la final: cada partido terminado se muestra en cuanto FIP lo publica.
+    """
     today_str = date.today().strftime("%d/%m/%Y")
     event = await _get_official_live_event()
     if not event:
