@@ -4,7 +4,7 @@ import httpx
 import asyncio
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse, Response
+from fastapi.responses import FileResponse, StreamingResponse, Response, JSONResponse
 from fastmcp import FastMCP
 from tools.news import get_latest_news
 from tools.live_data import get_ranking_live, get_calendar_live, get_tournament_now
@@ -106,9 +106,21 @@ async def resumen_diario_padel_femenino():
 
 # ── STATIC ────────────────────────────────────────────────────────────────────
 
+@app.get("/api/version")
+async def api_version():
+    return {"version": "en-juego-v2-2026-08-08"}
+
 @app.get("/")
 async def index():
-    return FileResponse("static/index.html", media_type="text/html")
+    return FileResponse(
+        "static/index.html",
+        media_type="text/html",
+        headers={
+            "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+            "Pragma": "no-cache",
+            "X-App-Version": "en-juego-v2-2026-08-08",
+        },
+    )
 
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")

@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
+<!-- build: en-juego-v2-2026-08-08 -->
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Pádel Femenino Español 🎾</title>
@@ -201,8 +202,8 @@ nav {
 .live-summary{padding:24px 28px;display:grid;grid-template-columns:1fr auto;gap:18px;align-items:start;border-bottom:1px solid var(--border)}
 .live-kicker{font-size:.67em;font-weight:800;text-transform:uppercase;letter-spacing:1.2px;color:var(--pink);margin-bottom:7px}.live-name{font-size:1.45em;font-weight:900;color:#fff}.live-place{font-size:.86em;color:var(--muted);margin-top:5px}.live-dates{font-size:.78em;color:var(--orange);font-weight:700;white-space:nowrap;padding-top:4px}
 .live-watch{padding:15px 28px;border-bottom:1px solid var(--border);display:flex;gap:12px;align-items:center;flex-wrap:wrap}.live-watch-label{font-size:.64em;font-weight:800;color:var(--muted);text-transform:uppercase;letter-spacing:1px}.live-watch-chip{background:rgba(255,255,255,.07);border:1px solid var(--border);border-radius:20px;padding:5px 11px;font-size:.76em;color:#fff}
-.results-title{padding:20px 28px 10px;font-size:.73em;text-transform:uppercase;letter-spacing:1px;font-weight:800;color:var(--muted)}.results-list{padding:0 20px 20px;display:flex;flex-direction:column;gap:8px}.result-row{display:grid;grid-template-columns:80px 1fr auto;gap:14px;align-items:center;background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:12px;padding:13px 16px}.result-round{font-size:.68em;color:var(--pink);font-weight:800;text-transform:uppercase}.result-pairs{min-width:0}.result-winner{font-size:.9em;color:#fff;font-weight:800}.result-loser{font-size:.8em;color:var(--muted);margin-top:3px}.result-score{font-size:.95em;color:var(--orange);font-weight:900;white-space:nowrap}.result-state{font-size:.67em;color:#5bd38b;margin-right:5px}.live-empty{padding:34px 28px;text-align:center;color:var(--muted)}
-@media(max-width:650px){.tabs{overflow-x:auto;max-width:68vw}.tab{white-space:nowrap;padding:7px 12px}.live-summary{grid-template-columns:1fr}.live-dates{padding-top:0}.result-row{grid-template-columns:1fr auto}.result-round{grid-column:1/-1}.results-list{padding-left:0;padding-right:0}.live-watch,.live-summary{padding-left:18px;padding-right:18px}}
+.results-title{padding:20px 28px 10px;font-size:.73em;text-transform:uppercase;letter-spacing:1px;font-weight:800;color:var(--muted)}.results-list{padding:0 20px 20px;display:flex;flex-direction:column;gap:8px}.result-row{background:rgba(255,255,255,.04);border:1px solid var(--border);border-radius:12px;padding:15px 16px}.result-round{font-size:.68em;color:var(--pink);font-weight:800;text-transform:uppercase;margin-bottom:8px}.result-pairs{min-width:0}.result-winner{font-size:.93em;color:#fff;font-weight:900}.result-loser{font-size:.84em;color:var(--muted);margin-top:4px}.result-score{font-size:1em;color:var(--orange);font-weight:900;white-space:nowrap;margin-top:9px;letter-spacing:.4px}.live-empty{padding:34px 28px;text-align:center;color:var(--muted)}
+@media(max-width:650px){.tabs{overflow-x:auto;max-width:68vw}.tab{white-space:nowrap;padding:7px 12px}.live-summary{grid-template-columns:1fr}.live-dates{padding-top:0}.results-list{padding-left:0;padding-right:0}.live-watch,.live-summary{padding-left:18px;padding-right:18px}}
 </style>
 </head>
 <body>
@@ -312,7 +313,7 @@ async function loadEnJuego(){
     const d=await fetch('/api/live').then(r=>r.json());
     if(!d.active){el.innerHTML='<div class="live-empty">Ahora mismo no hay ningún torneo Premier Padel en juego.</div>';return;}
     const watch=(d.watch||[]).map(x=>`<span class="live-watch-chip">📺 ${x}</span>`).join('');
-    const results=(d.results||[]).map(r=>`<div class="result-row"><div class="result-round">${r.round||''}</div><div class="result-pairs"><div class="result-winner"><span class="result-state">✓</span>${r.winner||''}</div><div class="result-loser">${r.loser||''}</div></div><div class="result-score">${r.score||''}</div></div>`).join('');
+    const results=(d.results||[]).map(r=>`<div class="result-row">${r.round?`<div class="result-round">${r.round}</div>`:''}<div class="result-pairs"><div class="result-winner">${r.winner||''} 🏆</div><div class="result-loser">${r.loser||''}</div><div class="result-score">${r.score||''}</div></div></div>`).join('');
     el.innerHTML=`<div class="live-tournament"><div class="live-summary"><div><div class="live-kicker"><span class="live-dot" style="display:inline-block;margin-right:6px"></span>En juego</div><div class="live-name">${d.name||''}</div><div class="live-place">📍 ${d.place||''}</div></div><div class="live-dates">${d.dates||''}</div></div><div class="live-watch"><div class="live-watch-label">Dónde verlo</div>${watch||'<span class="live-watch-chip">Sin dato</span>'}</div><div class="results-title">Últimos resultados femeninos · finalizados</div>${results?`<div class="results-list">${results}</div>`:'<div class="live-empty">Aún no hay resultados femeninos finalizados publicados.</div>'}</div>`;
   }catch(e){el.innerHTML='<div class="live-empty">No se pudo cargar la información en directo.</div>';}
 }
