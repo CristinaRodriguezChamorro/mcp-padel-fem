@@ -933,22 +933,18 @@ def _norm_person_name(value: str) -> str:
 
 async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
     """
-    EN JUEGO ONLY — v33
+    EN JUEGO ONLY — v35
 
-    Flujo:
-      1) leer TODOS los bloques de resultados que FIP renderiza;
-      2) NO filtrar género durante la lectura;
-      3) devolver nombres/celdas de score en bruto;
-      4) el filtro femenino se aplica DESPUÉS en Python.
-
-    No se pulsa Female y no se usa Groq.
+    Read every completed-result state first, then filter women later.
+    Completed matches are located from the winner marker ✓.
     """
     diag = {
         "playwright": False,
-        "raw_blocks": 0,
         "states_scanned": 0,
-        "gender_states_scanned": 0,
-        "source_mode": "read-all-states-organize-filter",
+        "female_targets_found": 0,
+        "female_targets_clicked": 0,
+        "raw_match_blocks": 0,
+        "source_mode": "winner-anchor-all-states",
     }
 
     if async_playwright is None:
@@ -973,12 +969,9 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                 viewport={"width": 1440, "height": 1800},
                 locale="en-US",
             )
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            await page.wait_for_timeout(1600)
 
-            results_url = url + ("&" if "?" in url else "?") + "tab=Results"
-            await page.goto(results_url, wait_until="domcontentloaded", timeout=45000)
-            await page.wait_for_timeout(1800)
-
-            # Abrir Results, sin tocar Male/Female.
             for label in ("Results", "Resultados"):
                 try:
                     loc = page.get_by_text(label, exact=True).first
@@ -992,132 +985,161 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
             async def collect_state(tag: str):
                 diag["states_scanned"] += 1
                 try:
-                    data = await page.evaluate(
+                    blocks = await page.evaluate(
                         r"""
                         (tag) => {
                           const clean = s => (s || '').replace(/\s+/g,' ').trim();
                           const all = Array.from(document.querySelectorAll('body *'));
-                          const candidates = [];
 
-                          const leafNodes = el => Array.from(el.querySelectorAll('*'))
-                            .filter(x => x.children.length === 0);
+                          const scoreLeaves = el => Array.from(el.querySelectorAll('*'))
+                            .filter(x => x.children.length === 0)
+                            .map(x => clean(x.textContent))
+                            .filter(x => /^\d{1,2}$/.test(x))
+                            .map(Number)
+                            .filter(n => n >= 0 && n <= 20);
 
-                          for (const el of all) {
-                            const text = clean(el.innerText);
-                            if (!text || text.length < 18 || text.length > 1800) continue;
-
-                            const leaves = leafNodes(el);
-                            if (!leaves.length) continue;
-
-                            // Marcadores: valores numéricos que aparecen como celdas.
-                            const scoreCells = leaves
-                              .map(x => clean(x.textContent))
-                              .filter(x => /^\d{1,2}$/.test(x))
-                              .map(Number)
-                              .filter(n => n >= 0 && n <= 20);
-
-                            if (scoreCells.length < 4 || scoreCells.length > 12) continue;
-
-                            // Leemos nombres SIN saber todavía si son hombres o mujeres.
-                            const nameCells = leaves
-                              .map(x => clean(x.textContent))
-                              .filter(x => {
-                                if (x.length < 3 || x.length > 90) return false;
-                                if (/^\d+$/.test(x)) return false;
-                                if (/^(results?|resultados?|female|male|women|men|court|pista|score|sets?)$/i.test(x)) return false;
-                                if (/^\d{1,2}:\d{2}$/.test(x)) return false;
-                                return /[A-Za-zÀ-ÿ]/.test(x);
-                              });
-
-                            // Queremos el contenedor más pequeño de un partido.
-                            candidates.push({
-                              el,
-                              tag,
-                              text,
-                              scores: scoreCells,
-                              names: nameCells
+                          const nameLeaves = el => Array.from(el.querySelectorAll('*'))
+                            .filter(x => x.children.length === 0)
+                            .map(x => clean(x.textContent))
+                            .filter(x => {
+                              if (x.length < 3 || x.length > 90) return false;
+                              if (/^\d+$/.test(x)) return false;
+                              if (/^(results?|resultados?|female|male|women|men|court|pista|score|sets?|bye|qualify|main)$/i.test(x)) return false;
+                              if (/^\(?\d+\)?\s*✓?$/.test(x)) return false;
+                              if (/^\(?(Q|WC|LL)\)?$/i.test(x)) return false;
+                              return /[A-Za-zÀ-ÿ]/.test(x);
                             });
+
+                          const ticks = all.filter(el => {
+                            const text = clean(el.textContent);
+                            return text.includes('✓') && text.length <= 30;
+                          });
+
+                          const out = [];
+                          const seen = new Set();
+
+                          for (const tick of ticks) {
+                            let node = tick;
+                            let chosen = null;
+
+                            for (let depth = 0; depth < 10 && node; depth++, node = node.parentElement) {
+                              const text = clean(node.innerText);
+                              if (!text || text.length > 1800) continue;
+
+                              const scores = scoreLeaves(node);
+                              const names = nameLeaves(node);
+
+                              if (names.length >= 4 && names.length <= 14 &&
+                                  scores.length >= 4 && scores.length <= 10) {
+                                chosen = {
+                                  tag,
+                                  text: text.slice(0,1400),
+                                  names: names.slice(0,20),
+                                  scores
+                                };
+                                break;
+                              }
+                            }
+
+                            if (!chosen) continue;
+                            const key = chosen.names.slice(0,10).join('|') + '::' + chosen.scores.join(',');
+                            if (seen.has(key)) continue;
+                            seen.add(key);
+                            out.push(chosen);
                           }
 
-                          const minimal = candidates.filter(c =>
-                            !candidates.some(o => o !== c && c.el.contains(o.el))
-                          );
-
-                          return minimal.map(c => ({
-                            tag: c.tag,
-                            text: c.text.slice(0,1400),
-                            scores: c.scores,
-                            names: c.names.slice(0,30)
-                          }));
+                          return out;
                         }
                         """,
                         tag,
                     )
-                    raw_blocks.extend(data or [])
+                    raw_blocks.extend(blocks or [])
+                except Exception as exc:
+                    print(f"  collect-state error {tag}: {exc}")
+
+            await collect_state("default")
+
+            # Probe any clickable element around the visible Female/Women label.
+            try:
+                targets = await page.evaluate(
+                    r"""
+                    () => {
+                      const clean = s => (s || '').replace(/\s+/g,' ').trim().toLowerCase();
+                      const all = Array.from(document.querySelectorAll('body *'));
+                      const femaleNodes = all.filter(el =>
+                        ['female','women','femenino','femenina'].includes(clean(el.textContent))
+                      );
+
+                      const result = [];
+                      const seen = new Set();
+
+                      for (const node of femaleNodes) {
+                        let cur = node;
+                        for (let up = 0; up < 5 && cur; up++, cur = cur.parentElement) {
+                          const candidates = [
+                            cur,
+                            cur.previousElementSibling,
+                            cur.nextElementSibling,
+                            ...Array.from(cur.querySelectorAll(
+                              'input,button,label,a,[role="button"],[role="radio"],[role="tab"],[tabindex]'
+                            ))
+                          ].filter(Boolean);
+
+                          for (const el of candidates) {
+                            if (!el || !el.tagName) continue;
+                            if (!el.dataset.liveProbeId) {
+                              el.dataset.liveProbeId = 'probe-' + Math.random().toString(36).slice(2);
+                            }
+                            const id = el.dataset.liveProbeId;
+                            if (seen.has(id)) continue;
+                            seen.add(id);
+                            result.push({
+                              id,
+                              tag: el.tagName,
+                              type: el.getAttribute('type') || '',
+                              text: (el.innerText || el.textContent || '').replace(/\s+/g,' ').trim().slice(0,120),
+                              value: el.getAttribute('value') || ''
+                            });
+                          }
+                        }
+                      }
+                      return result.slice(0,40);
+                    }
+                    """
+                )
+            except Exception:
+                targets = []
+
+            diag["female_targets_found"] = len(targets)
+
+            for ti, meta in enumerate(targets):
+                try:
+                    clicked = await page.evaluate(
+                        r"""
+                        (id) => {
+                          const el = document.querySelector(`[data-live-probe-id="${id}"]`);
+                          if (!el) return false;
+                          try { el.scrollIntoView({block:'center'}); } catch(e) {}
+                          try { el.click(); } catch(e) {}
+                          try { el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true})); } catch(e) {}
+                          try {
+                            if ('checked' in el) el.checked = true;
+                            el.dispatchEvent(new Event('input',{bubbles:true}));
+                            el.dispatchEvent(new Event('change',{bubbles:true}));
+                          } catch(e) {}
+                          return true;
+                        }
+                        """,
+                        meta["id"],
+                    )
+                    if clicked:
+                        diag["female_targets_clicked"] += 1
+                        await page.wait_for_timeout(800)
+                        await collect_state(f"female-probe:{ti}:{meta.get('tag')}:{meta.get('type')}:{meta.get('value')}")
                 except Exception:
                     pass
 
-            # Estado inicial.
-            await collect_state("current")
-
-            # Recorremos TODOS los estados de controles de género sin decidir
-            # cuál es Female. Primero leemos; el filtro femenino va después.
-            try:
-                inputs = page.locator("input")
-                for ii in range(min(await inputs.count(), 12)):
-                    inp = inputs.nth(ii)
-                    try:
-                        meta = await inp.evaluate(
-                            """el => ({
-                                type: el.type || '',
-                                name: el.name || '',
-                                value: el.value || '',
-                                id: el.id || '',
-                                aria: el.getAttribute('aria-label') || ''
-                            })"""
-                        )
-                        meta_text = " ".join(str(v) for v in meta.values()).lower()
-                        likely_gender = (
-                            meta.get("type") in {"radio", "checkbox"} or
-                            any(k in meta_text for k in ("gender", "female", "male", "women", "men", "sex"))
-                        )
-                        if not likely_gender:
-                            continue
-
-                        await inp.click(force=True, timeout=1800)
-                        await page.wait_for_timeout(850)
-                        diag["gender_states_scanned"] += 1
-                        await collect_state(
-                            f"input:{ii}:{meta.get('name','')}:{meta.get('value','')}"
-                        )
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-            try:
-                gender_controls = page.locator("label, button, [role=button], [role=radio]")
-                seen_gender_labels = set()
-                for gi in range(min(await gender_controls.count(), 120)):
-                    el = gender_controls.nth(gi)
-                    try:
-                        label = re.sub(r"\s+", " ", (await el.inner_text()).strip())
-                        low = label.lower()
-                        if low not in {"female", "male", "women", "men", "femenino", "femenina", "masculino"}:
-                            continue
-                        if low in seen_gender_labels:
-                            continue
-                        seen_gender_labels.add(low)
-                        await el.click(force=True, timeout=1800)
-                        await page.wait_for_timeout(850)
-                        diag["gender_states_scanned"] += 1
-                        await collect_state(f"gender-control:{label}")
-                    except Exception:
-                        pass
-            except Exception:
-                pass
-
-            # Todos los días disponibles en selects.
+            # Scan date dropdowns too.
             try:
                 selects = page.locator("select")
                 for si in range(await selects.count()):
@@ -1126,46 +1148,18 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                     count = await opts.count()
                     if not 2 <= count <= 15:
                         continue
-
                     for oi in range(count):
                         try:
                             val = await opts.nth(oi).get_attribute("value")
-                            label = clean_label = re.sub(r"\s+", " ", (await opts.nth(oi).inner_text()).strip())
+                            label = re.sub(r"\s+", " ", (await opts.nth(oi).inner_text()).strip())
                             if val is not None:
                                 await sel.select_option(value=val)
                             else:
                                 await sel.select_option(label=label)
                             await page.wait_for_timeout(650)
-                            await collect_state(f"select:{clean_label}")
+                            await collect_state(f"date-select:{label}")
                         except Exception:
                             pass
-            except Exception:
-                pass
-
-            # Todos los días disponibles en botones/chips.
-            try:
-                buttons = page.locator("button, [role=button], [class*=date]")
-                seen_labels = set()
-                for bi in range(min(await buttons.count(), 100)):
-                    el = buttons.nth(bi)
-                    try:
-                        label = re.sub(r"\s+", " ", (await el.inner_text()).strip())
-                        if not label or label in seen_labels:
-                            continue
-                        if not re.search(
-                            r"(?:\bMon\b|\bTue\b|\bWed\b|\bThu\b|\bFri\b|\bSat\b|\bSun\b|"
-                            r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9})",
-                            label, re.I
-                        ):
-                            continue
-                        if not await el.is_visible():
-                            continue
-                        seen_labels.add(label)
-                        await el.click(force=True, timeout=1800)
-                        await page.wait_for_timeout(650)
-                        await collect_state(f"button:{label}")
-                    except Exception:
-                        pass
             except Exception:
                 pass
 
@@ -1173,7 +1167,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
             browser = None
 
     except Exception as exc:
-        print(f"  FIP raw capture error: {type(exc).__name__}: {exc}")
+        print(f"  FIP v35 capture error: {type(exc).__name__}: {exc}")
         if browser is not None:
             try:
                 await browser.close()
@@ -1181,27 +1175,26 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                 pass
         return "", diag
 
-    # Dedupe raw blocks, still NO gender filter.
     unique = []
     seen = set()
     for block in raw_blocks:
         key = (
+            tuple(block.get("names", [])[:10]),
             tuple(block.get("scores", [])),
-            tuple(block.get("names", [])[:12]),
-            re.sub(r"\s+", " ", block.get("text", ""))[:260],
         )
         if key in seen:
             continue
         seen.add(key)
         unique.append(block)
 
-    diag["raw_blocks"] = len(unique)
+    diag["raw_match_blocks"] = len(unique)
 
     print(
-        "  FIP raw results:",
+        "  FIP v35 capture:",
         f"states={diag['states_scanned']}",
-        f"gender_states={diag['gender_states_scanned']}",
-        f"raw_blocks={diag['raw_blocks']}",
+        f"female_targets={diag['female_targets_found']}",
+        f"clicked={diag['female_targets_clicked']}",
+        f"raw_matches={diag['raw_match_blocks']}",
     )
 
     return json.dumps({"blocks": unique, "diag": diag}, ensure_ascii=False), diag
@@ -1295,157 +1288,80 @@ def _round_from_snapshot(snapshot: str, event: dict) -> str:
 
 async def _extract_official_results(event: dict, gender: str = "female") -> list:
     """
-    EN JUEGO ONLY — organizar primero, filtrar después.
-
-    Etapas:
-      raw_blocks -> organized_matches -> female_matches -> final_results
-
-    Un bloque se considera femenino SOLO al final si se pueden asociar sus
-    cuatro participantes al ranking femenino dinámico.
+    EN JUEGO ONLY — v35
+    Read all completed match blocks first; filter women afterwards.
     """
-    source = ""
-    capture_diag = {}
-
     try:
         source, capture_diag = await _browser_fip_womens_results_text(event)
     except Exception as exc:
-        print(f"  live raw-source error: {type(exc).__name__}: {exc}")
-
-    if not source:
-        _LIVE_DEBUG_STATE.update({
-            "parser": "organize-then-filter-v33",
-            "raw_blocks": 0,
-            "organized_matches": 0,
-            "female_matches": 0,
-            "parsed_results": 0,
-            "valid_results": 0,
-            "groq_used": False,
-        })
-        return []
+        print(f"  v35 live-source error: {type(exc).__name__}: {exc}")
+        source, capture_diag = "", {}
 
     try:
-        raw_blocks = json.loads(source).get("blocks", [])
-    except Exception as exc:
-        print(f"  raw blocks JSON error: {exc}")
-        raw_blocks = []
+        blocks = json.loads(source).get("blocks", []) if source else []
+    except Exception:
+        blocks = []
 
-    # Ranking solo entra AHORA, después de leer los bloques.
-    ranking_full, ranking_surnames, _ = await _womens_ranking_validation_sets()
+    ranking_full, _, _ = await _womens_ranking_validation_sets()
 
-    def map_to_female(name: str) -> str | None:
-        norm = _norm_person_name(name)
+    def map_ranked(raw: str) -> str | None:
+        norm = _norm_person_name(raw)
         if not norm:
             return None
-
         if norm in ranking_full:
             return norm
+        candidates = [r for r in ranking_full if r and (r in norm or norm in r)]
+        return max(candidates, key=len) if candidates else None
 
-        # FIP puede añadir seed/WC/país al mismo leaf.
-        candidates = [
-            ranked for ranked in ranking_full
-            if ranked and (ranked in norm or norm in ranked)
-        ]
-        if candidates:
-            return max(candidates, key=len)
+    female_blocks = []
+    parsed = []
 
-        return None
-
-    # -----------------------------
-    # A) ORGANIZAR SIN FILTRAR SEXO
-    # -----------------------------
-    organized = []
-
-    for block in raw_blocks:
-        names = []
-        for raw_name in block.get("names", []):
-            cleaned = re.sub(r"\s+", " ", str(raw_name)).strip()
-            if cleaned and cleaned.casefold() not in {x.casefold() for x in names}:
-                names.append(cleaned)
-
-        scores = [
-            int(x) for x in block.get("scores", [])
-            if str(x).isdigit() and 0 <= int(x) <= 20
-        ]
-
-        if len(names) < 4 or len(scores) < 4:
-            continue
-
-        # Guardamos toda la info; todavía no sabemos género.
-        organized.append({
-            "tag": block.get("tag", ""),
-            "text": block.get("text", ""),
-            "names": names,
-            "scores": scores,
-        })
-
-    # -----------------------------
-    # B) FILTRAR SOLO MUJERES
-    # -----------------------------
-    female_matches = []
-
-    for match in organized:
+    for block in blocks:
         mapped = []
 
-        for raw_name in match["names"]:
-            female = map_to_female(raw_name)
-            if female and female not in mapped:
-                mapped.append(female)
+        for raw_name in block.get("names", []):
+            hit = map_ranked(str(raw_name))
+            if hit and hit not in mapped:
+                mapped.append(hit)
 
         if len(mapped) < 4:
-            whole = _norm_person_name(match.get("text", ""))
-            padded = f" {whole} "
+            whole = " " + _norm_person_name(block.get("text", "")) + " "
             for ranked in ranking_full:
-                if ranked and f" {ranked} " in padded and ranked not in mapped:
+                if ranked and f" {ranked} " in whole and ranked not in mapped:
                     mapped.append(ranked)
 
         if len(mapped) != 4:
             continue
 
-        female_matches.append({
-            **match,
-            "players": mapped,
-        })
+        female_blocks.append(block)
 
-    # -----------------------------
-    # C) RECONSTRUIR GANADOR + SCORE
-    # -----------------------------
-    parsed = []
-
-    for match in female_matches:
-        players = match["players"]
-        scores = match["scores"]
+        scores = [int(x) for x in block.get("scores", []) if str(x).isdigit()]
+        if len(scores) < 4:
+            continue
 
         layouts = []
-        # Probamos layouts agrupados e intercalados, porque FIP cambia DOM.
         for n in (6, 4):
             if len(scores) >= n:
                 chunk = scores[:n]
                 half = n // 2
-                layouts.append((chunk[:half], chunk[half:]))
-                layouts.append((chunk[0::2], chunk[1::2]))
+                layouts.extend([
+                    (chunk[:half], chunk[half:]),
+                    (chunk[0::2], chunk[1::2]),
+                ])
 
         chosen = None
-
-        for a_scores, b_scores in layouts:
-            if len(a_scores) != len(b_scores) or len(a_scores) < 2:
+        for a_sc, b_sc in layouts:
+            if len(a_sc) != len(b_sc) or len(a_sc) < 2:
                 continue
 
-            a_sets = 0
-            b_sets = 0
+            a_sets = b_sets = 0
             plausible = True
 
-            for a, b in zip(a_scores, b_scores):
+            for a, b in zip(a_sc, b_sc):
                 hi, lo = max(a, b), min(a, b)
-
-                # Marcador normal de pádel.
-                if hi == 6 and 0 <= lo <= 4:
-                    pass
-                elif hi == 7 and lo in {5, 6}:
-                    pass
-                else:
+                if not ((hi == 6 and 0 <= lo <= 4) or (hi == 7 and lo in {5,6})):
                     plausible = False
                     break
-
                 if a > b:
                     a_sets += 1
                 elif b > a:
@@ -1454,40 +1370,36 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
                     plausible = False
                     break
 
-            if not plausible:
-                continue
-            if a_sets == b_sets or max(a_sets, b_sets) < 2:
-                continue
-
-            chosen = (a_scores, b_scores, a_sets, b_sets)
-            break
+            if plausible and a_sets != b_sets and max(a_sets, b_sets) >= 2:
+                chosen = (a_sc, b_sc, a_sets, b_sets)
+                break
 
         if not chosen:
             continue
 
-        a_scores, b_scores, a_sets, b_sets = chosen
+        a_sc, b_sc, a_sets, b_sets = chosen
+        p1, p2, p3, p4 = [x.title() for x in mapped]
 
-        p1, p2, p3, p4 = [str(x).title() for x in players]
         pair_a = f"{p1} / {p2}"
         pair_b = f"{p3} / {p4}"
 
         if a_sets > b_sets:
             winner, loser = pair_a, pair_b
-            display_sets = list(zip(a_scores, b_scores))
+            display = list(zip(a_sc, b_sc))
         else:
             winner, loser = pair_b, pair_a
-            display_sets = list(zip(b_scores, a_scores))
+            display = list(zip(b_sc, a_sc))
 
-        low = (match.get("text", "") + " " + match.get("tag", "")).lower()
-        if re.search(r"semi[- ]?final", low):
+        context = (block.get("text", "") + " " + block.get("tag", "")).lower()
+        if re.search(r"semi[- ]?final", context):
             rnd = "Semifinales"
-        elif re.search(r"quarter[- ]?final", low):
+        elif re.search(r"quarter[- ]?final", context):
             rnd = "Cuartos de final"
-        elif re.search(r"round of 16", low):
+        elif re.search(r"round of 16", context):
             rnd = "Octavos de final"
-        elif re.search(r"\bfinal\b", low):
+        elif re.search(r"\bfinal\b", context):
             rnd = "Final"
-        elif re.search(r"\bqual", low):
+        elif re.search(r"\bqual", context):
             rnd = "Clasificación"
         else:
             rnd = "Partidos"
@@ -1496,50 +1408,33 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
             "round": rnd,
             "winner": winner,
             "loser": loser,
-            "score": "  ".join(f"{a}-{b}" for a, b in display_sets),
+            "score": "  ".join(f"{a}-{b}" for a,b in display),
             "date": "",
         })
 
-    # Dedupe final.
     valid = []
     seen = set()
     for item in parsed:
-        key = (
-            item["winner"].casefold(),
-            item["loser"].casefold(),
-            item["score"],
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        valid.append(item)
+        key = (item["winner"].casefold(), item["loser"].casefold(), item["score"])
+        if key not in seen:
+            seen.add(key)
+            valid.append(item)
 
     _LIVE_DEBUG_STATE.update({
         "browser": capture_diag,
-        "parser": "organize-then-filter-v33",
-        "raw_blocks": len(raw_blocks),
-        "organized_matches": len(organized),
-        "female_matches": len(female_matches),
+        "parser": "winner-anchor-filter-later-v35",
+        "raw_match_blocks": len(blocks),
+        "female_match_blocks": len(female_blocks),
         "parsed_results": len(parsed),
         "valid_results": len(valid),
         "ranking_players_seen": len(ranking_full),
-        "capture_gender_states": capture_diag.get("gender_states_scanned", 0),
-        "raw_block_sample": [
-            {
-                "names": m.get("names", [])[:8],
-                "scores": m.get("scores", [])[:8],
-                "text": m.get("text", "")[:180],
-            }
-            for m in organized[:3]
-        ],
         "groq_used": False,
     })
 
     print(
-        "  live v33:",
-        f"raw={len(raw_blocks)}",
-        f"organized={len(organized)}",
-        f"female={len(female_matches)}",
+        "  live v35:",
+        f"raw={len(blocks)}",
+        f"female={len(female_blocks)}",
         f"parsed={len(parsed)}",
         f"valid={len(valid)}",
     )
