@@ -2163,13 +2163,50 @@ def _annotate_result_rounds(results: list, next_match: dict | None, event: dict)
 
 
 def _pair_key(value: str) -> str:
-    """Canonical pair key, independent of accents/order spacing."""
+    """Canonical full pair key, independent of accents/order spacing."""
     parts = [
         _norm_person_name(x)
         for x in re.split(r"\s*/\s*", value or "")
         if _norm_person_name(x)
     ]
     return " / ".join(parts)
+
+
+def _player_first_surname(value: str) -> str:
+    """
+    Stable identity for FIP/ranking name variants.
+
+    Examples:
+      Claudia Fernandez Sanchez -> fernandez
+      Claudia Fernandez         -> fernandez
+      Gemma Triay Pons          -> triay
+      Gemma Triay               -> triay
+    """
+    parts = _norm_person_name(value).split()
+    if len(parts) >= 2:
+        return parts[1]
+    return parts[0] if parts else ""
+
+
+def _pair_signature(value: str) -> tuple[str, ...]:
+    """
+    Compare a pair by the two first surnames, ignoring player order and
+    extra civil surnames. This is much more robust than full-string equality.
+    """
+    players = [
+        x.strip()
+        for x in re.split(r"\s*/\s*", value or "")
+        if x.strip()
+    ]
+    surnames = [_player_first_surname(x) for x in players]
+    surnames = [x for x in surnames if x]
+    return tuple(sorted(surnames))
+
+
+def _same_pair(a: str, b: str) -> bool:
+    sa = _pair_signature(a)
+    sb = _pair_signature(b)
+    return bool(len(sa) == 2 and sa == sb)
 
 
 def _concrete_pair(value: str) -> bool:
@@ -2282,18 +2319,33 @@ def _derive_next_match_from_bracket(results: list, event: dict) -> dict | None:
     if len(prev_winners) < 2:
         return None
 
-    # Remove every pair that has already appeared in a completed current-round match.
-    used = set()
+    # Remove every pair that has already appeared in a completed current-round
+    # match. Compare by first surnames so FIP full-name variants still match.
+    used_pairs = []
     for item in current:
         for field in ("winner", "loser"):
             pair = str(item.get(field, "") or "").strip()
             if _concrete_pair(pair):
-                used.add(_pair_key(pair))
+                used_pairs.append(pair)
 
-    remaining = [p for p in prev_winners if _pair_key(p) not in used]
+    remaining = [
+        p for p in prev_winners
+        if not any(_same_pair(p, used) for used in used_pairs)
+    ]
+
+    print(
+        "  bracket derive:",
+        f"stage={stage}",
+        f"prev_winners={len(prev_winners)}",
+        f"current_done={len(current)}",
+        f"used={len(used_pairs)}",
+        f"remaining={len(remaining)}",
+        "remaining_pairs=" + " || ".join(remaining),
+    )
 
     # Best case: only two pairs remain -> the next match is unambiguous.
     if len(remaining) == 2:
+        print(f"  bracket next CONFIRMADO: {remaining[0]} vs {remaining[1]}")
         return {
             "round": stage,
             "pair1": remaining[0],
