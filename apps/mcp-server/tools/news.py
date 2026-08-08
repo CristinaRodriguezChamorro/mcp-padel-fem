@@ -9,9 +9,12 @@ import asyncio
 import aiohttp
 import json
 import datetime
+import time
+import unicodedata
 from groq import Groq
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
+from tools.live_data import get_womens_ranking_names
 
 RSS_FEEDS = [
     "https://e00-marca.uecdn.es/rss/padel.xml",
@@ -21,20 +24,6 @@ RSS_FEEDS = [
     "https://www.setpadelmagazine.es/feed/",
 ]
 
-JUGADORAS = [
-    "triay", "brea", "josemaría", "josemaria", "bea gonzález", "bea gonzalez",
-    "ari sánchez", "ari sanchez", "ustero", "marta ortega", "martina calvo",
-    "salazar", "majo navarro", "claudia fernández", "claudia fernandez",
-    "sofía araújo", "sofia araujo", "tamara icardo", "icardo",
-    "ariana sánchez", "ariana sanchez", "paula josemaría", "paula josemaria",
-    "gemma triay", "delfina brea",
-]
-
-MASCULINOS = [
-    "galán", "galan", "chingotto", "coello", "tapia", "lebrón", "lebron",
-    "augsburger", "paquito", "yanguas", "nieto", "goñi", "tello", "arce",
-    "di nenno", "stupaczuk", "libaak", "franco guerrero",
-]
 
 BASURA = [
     "horarios", "dónde ver", "donde ver", "cómo ver", "como ver",
@@ -47,25 +36,93 @@ FILTRO_FEMENINO = (
     "femenino", "femenina", "femeninos", "femeninas", "mujeres",
 )
 
+# Cache local: el ranking no necesita consultarse en cada refresh de noticias.
+_ranking_names_cache = {"ts": 0.0, "aliases": set()}
+RANKING_NAMES_TTL = 6 * 60 * 60
 
-def es_noticia_femenina(titulo: str, texto: str = "") -> bool:
-    """Filtro femenino compartiendo los términos usados en En juego."""
-    t = f"{titulo} {texto}".lower()
 
-    # Nombre de jugadora conocida = señal femenina fuerte.
-    if any(j in t for j in JUGADORAS):
-        return True
+def _normalizar(texto: str) -> str:
+    texto = unicodedata.normalize("NFKD", texto or "")
+    texto = "".join(c for c in texto if not unicodedata.combining(c))
+    texto = texto.casefold()
+    return re.sub(r"[^a-z0-9]+", " ", texto).strip()
 
-    # female / women / woman / femenino / femenina / mujeres.
-    if any(f in t for f in FILTRO_FEMENINO):
-        return True
 
+def _ranking_aliases(names: list[str]) -> set[str]:
+    """
+    Genera aliases dinámicos desde el ranking:
+    - nombre completo
+    - apellido final
+
+    El apellido permite detectar titulares deportivos del tipo
+    "Triay y Brea ganan...", sin mantener una lista manual.
+    """
+    full_names = []
+    surnames = []
+
+    for name in names:
+        norm = _normalizar(name)
+        if not norm:
+            continue
+
+        full_names.append(norm)
+        parts = norm.split()
+        if len(parts) >= 2 and len(parts[-1]) >= 4:
+            surnames.append(parts[-1])
+
+    # Un apellido solo se usa si no es ambiguo dentro del propio ranking.
+    counts = {}
+    for surname in surnames:
+        counts[surname] = counts.get(surname, 0) + 1
+
+    unique_surnames = {s for s, count in counts.items() if count == 1}
+    return set(full_names) | unique_surnames
+
+
+async def get_dynamic_ranking_aliases() -> set[str]:
+    now = time.time()
+    if (
+        _ranking_names_cache["aliases"]
+        and (now - _ranking_names_cache["ts"]) < RANKING_NAMES_TTL
+    ):
+        return _ranking_names_cache["aliases"]
+
+    try:
+        names = await get_womens_ranking_names(limit=200)
+        aliases = _ranking_aliases(names)
+        _ranking_names_cache["ts"] = now
+        _ranking_names_cache["aliases"] = aliases
+        print(f"Filtro noticias: {len(aliases)} aliases dinámicos desde ranking femenino")
+        return aliases
+    except Exception as exc:
+        print(f"  ranking filter error: {exc}")
+        return _ranking_names_cache["aliases"]
+
+
+def es_noticia_femenina(
+    titulo: str,
+    texto: str,
+    ranking_aliases: set[str],
+) -> bool:
+    """
+    Filtro determinista:
+    1) términos explícitos de competición femenina;
+    2) nombres/apellidos obtenidos dinámicamente del ranking femenino.
+
+    Groq NO decide si una noticia es femenina.
+    """
     if any(b in titulo.lower() for b in BASURA):
         return False
 
-    # Referencia únicamente masculina: descartar.
-    if any(m in t for m in MASCULINOS):
-        return False
+    contenido = _normalizar(f"{titulo} {texto}")
+
+    female_terms = {_normalizar(term) for term in FILTRO_FEMENINO}
+    if any(term in contenido for term in female_terms):
+        return True
+
+    padded = f" {contenido} "
+    if any(f" {alias} " in padded for alias in ranking_aliases if alias):
+        return True
 
     return False
 
@@ -104,6 +161,7 @@ async def scrape(session: aiohttp.ClientSession, url: str) -> str:
 
 
 async def generar_noticia(client: Groq, sem: asyncio.Semaphore, articulos: list) -> dict | None:
+    """Groq/Llama resume y homogeneiza noticias YA clasificadas como femeninas."""
     texto_articulos = ""
     for i, art in enumerate(articulos[:3], 1):
         texto_articulos += f"\n--- Artículo {i} ---\nTítulo: {art['titulo']}\nContenido: {art['texto'][:1200]}\n"
@@ -218,8 +276,16 @@ async def get_latest_news() -> dict:
 
     print(f"RSS: {len(raw)} artículos")
 
-    femeninos = [art for art in raw if es_noticia_femenina(art["titulo"])]
-    print(f"Filtro: {len(femeninos)} noticias femeninas")
+    ranking_aliases = await get_dynamic_ranking_aliases()
+    femeninos = [
+        art for art in raw
+        if es_noticia_femenina(
+            art["titulo"],
+            art.get("texto", ""),
+            ranking_aliases,
+        )
+    ]
+    print(f"Filtro dinámico ranking + términos: {len(femeninos)} noticias femeninas")
     for art in femeninos:
         print(f"  ✓ {art['titulo'][:70]}")
 

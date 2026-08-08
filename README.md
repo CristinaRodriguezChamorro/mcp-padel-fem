@@ -28,7 +28,7 @@ Frontend      MCP Server
 HTML/CSS/JS   FastMCP
 ```
 
-La arquitectura separa la **obtención de datos**, su **procesamiento** y la **forma de consumirlos**. El LLM se utiliza como capa de extracción/normalización cuando la fuente no ofrece datos estructurados; no sustituye a la fuente original.
+La arquitectura separa la **obtención de datos**, su **procesamiento** y la **forma de consumirlos**. El LLM se utiliza para resumir o normalizar contenido no estructurado; las decisiones deterministas, como identificar jugadoras mediante el ranking femenino, se resuelven con datos y código.
 
 ## 🔴 En juego
 
@@ -50,9 +50,24 @@ Los resultados se incorporan a medida que terminan los partidos, sin esperar a q
 
 ## 📰 Noticias
 
-Las noticias se obtienen desde diferentes **feeds RSS** y pasan por un filtro específico de pádel femenino basado en términos y nombres de jugadoras.
+El filtro de noticias **no depende de una lista de jugadoras hardcodeada**.
 
-Cuando es necesario, **Groq** ayuda a transformar contenido no estructurado en información homogénea para la API.
+Primero se obtiene el **ranking femenino actualizado** y se extraen dinámicamente los nombres y apellidos de las jugadoras. Esa información se usa junto con términos como `women`, `female` o `femenino` para filtrar los feeds RSS.
+
+```text
+Ranking femenino → nombres de jugadoras
+                         │
+RSS → filtro femenino ───┘
+          │
+          ▼
+      Groq + Llama
+  resumen / normalización
+          │
+          ▼
+       /api/news
+```
+
+**Groq no decide si una noticia es femenina.** Se utiliza como API de inferencia para ejecutar Llama y resumir/estructurar contenido que ya ha pasado el filtro.
 
 ## 🔌 MCP
 
@@ -73,7 +88,7 @@ Cliente IA → MCP → Tools → datos de pádel femenino
 | **aiohttp + asyncio** | Peticiones asíncronas |
 | **BeautifulSoup + feedparser** | HTML y RSS |
 | **pypdf** | Documentos oficiales FIP |
-| **Groq / LLM** | Extracción y normalización |
+| **Groq API + Llama** | Inferencia LLM para resumen y normalización |
 | **HTML + CSS + JavaScript** | Frontend |
 | **Docker + Railway** | Contenedorización y despliegue |
 

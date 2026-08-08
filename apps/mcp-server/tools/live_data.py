@@ -38,6 +38,54 @@ async def _fetch(url: str) -> str:
         return ""
 
 
+
+async def get_womens_ranking_names(limit: int = 200) -> list[str]:
+    """
+    Devuelve nombres del ranking femenino para alimentar otros pipelines,
+    especialmente el filtro de Noticias.
+
+    Se obtiene dinámicamente de la misma fuente de ranking y NO modifica
+    el top-10 que se pinta en la interfaz.
+    """
+    html = await _fetch("https://padelspeak.com/en/padel-world-ranking-women/")
+    if not html:
+        print("  ranking names: fuente no disponible")
+        return [p["name"] for p in _fallback_ranking()]
+
+    soup = BeautifulSoup(html, "html.parser")
+    table = soup.find("table")
+    if not table:
+        print("  ranking names: tabla no encontrada")
+        return [p["name"] for p in _fallback_ranking()]
+
+    names = []
+    seen = set()
+    for row in table.find_all("tr")[1:]:
+        cols = row.find_all(["td", "th"])
+        if len(cols) < 2:
+            continue
+
+        name = re.sub(r"\s+", " ", cols[1].get_text(" ", strip=True)).strip()
+        if not name:
+            continue
+
+        key = name.casefold()
+        if key in seen:
+            continue
+
+        seen.add(key)
+        names.append(name)
+
+        if len(names) >= limit:
+            break
+
+    if not names:
+        return [p["name"] for p in _fallback_ranking()]
+
+    print(f"  ranking names: {len(names)} jugadoras disponibles para filtros")
+    return names
+
+
 async def get_ranking_live() -> list:
     html = await _fetch("https://padelspeak.com/en/padel-world-ranking-women/")
     if not html:
