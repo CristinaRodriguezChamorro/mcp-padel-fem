@@ -989,34 +989,6 @@ async function loadEnJuego(){
       .map(x=>`<span class="live-watch-chip">📺 ${x}</span>`)
       .join('');
 
-    let nextHtml='';
-    const topMatch=d.current_match||d.next_match;
-    if(topMatch){
-      const n=topMatch;
-      const todayMadrid=new Intl.DateTimeFormat('en-CA',{
-        timeZone:'Europe/Madrid',year:'numeric',month:'2-digit',day:'2-digit'
-      }).format(new Date());
-      const matchDate=(n.date||'').trim();
-      const whenText=(n.when||'').trim().toLowerCase();
-      const isToday=matchDate===todayMadrid || whenText.startsWith('hoy');
-      const isLive=n.status==='live';
-      const showDirecto=isLive||isToday;
-      nextHtml=`<div class="next-match">
-        <div class="next-label">${showDirecto?'🔴 EN DIRECTO':'Próximo partido'}</div>
-        <div class="next-round">${n.round||'Próximo partido'}</div>
-        <div class="next-versus">
-          <div class="next-team">${n.pair1||''}</div>
-          <div class="next-vs">vs</div>
-          <div class="next-team right">${n.pair2||''}</div>
-        </div>
-        ${isLive&&n.score?`<div class="next-live-score">${n.score}</div>`:''}
-        <div class="next-when">🕒 ${n.when||'Horario por confirmar'}</div>
-        ${(!isLive&&isToday)
-          ? `<div class="next-status-detail">Partido de hoy. El marcador aparecerá en cuanto FIP publique datos del encuentro.</div>`
-          : (n.status_detail?`<div class="next-status-detail">${n.status_detail}</div>`:'')}
-      </div>`;
-    }
-
     const groups={};
     (d.results||[]).forEach(r=>{
       const round=r.round||'Partidos';
@@ -1067,10 +1039,9 @@ async function loadEnJuego(){
         ${watch||'<span class="live-watch-chip">Por confirmar</span>'}
       </div>
 
-      ${nextHtml}
 
       <div class="results-title">
-        <span>Resultados femeninos</span>
+        <span>Partidos finalizados</span>
         <span class="results-source">${(d.results||[]).length} partidos · Datos oficiales FIP</span>
       </div>
 

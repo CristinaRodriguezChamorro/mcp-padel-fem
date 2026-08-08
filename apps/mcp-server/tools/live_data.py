@@ -1676,7 +1676,7 @@ async def _browser_fip_flat_results_fallback(event: dict) -> list:
                   return out;
                 }
                 """,
-                ranking_norm,
+                [_norm_person_name(x.get("display","")) for x in ranking_profiles],
             )
 
             await browser.close()
@@ -3162,7 +3162,7 @@ async def _extract_current_womens_match(event: dict) -> dict | None:
                   return {text:c.text,players:ordered,scores:c.scores};
                 }
                 """,
-                ranking_norm,
+                [_norm_person_name(x.get("display","")) for x in ranking_profiles],
             )
 
             await browser.close()
@@ -3229,16 +3229,10 @@ async def _extract_current_womens_match(event: dict) -> dict | None:
 
 async def get_tournament_now(gender: str = "female") -> dict:
     """
-    Stable En juego pipeline.
+    Results-only En juego.
 
-    Source of truth:
-      1. v39 completed-results parser (proven stable).
-      2. FIP Live Score only if it explicitly confirms a live women's match.
-      3. Official Order of Play when it yields a concrete next match.
-      4. Deterministic bracket inference from completed results.
-
-    We no longer depend on the fragile Order-of-Play card/iframe DOM for the
-    basic top card, so En juego remains useful even when FIP changes that UI.
+    The page now shows only completed women's matches.
+    No Live Score probe, no next-match inference, no Order of Play dependency.
     """
     today_str = date.today().strftime("%d/%m/%Y")
     event = await _get_official_live_event()
@@ -3259,17 +3253,13 @@ async def get_tournament_now(gender: str = "female") -> dict:
             "source_url": FIP_PREMIER_CALENDAR_URL.format(year=date.today().year),
         }
 
-    female = gender in {"female", "women", "woman"}
-
     parts = await asyncio.gather(
         _get_watch_official(),
         _extract_official_results(event, gender),
-        _extract_next_womens_match(event) if female else asyncio.sleep(0, result=None),
-        _extract_current_womens_match(event) if female else asyncio.sleep(0, result=None),
         return_exceptions=True,
     )
 
-    watch, results, oop_next, current_match = parts
+    watch, results = parts
 
     if isinstance(watch, Exception):
         print(f"  live watch error: {watch}")
@@ -3279,59 +3269,8 @@ async def get_tournament_now(gender: str = "female") -> dict:
         print(f"  live results error: {results}")
         results = []
 
-    if isinstance(oop_next, Exception):
-        print(f"  live next-match error: {oop_next}")
-        oop_next = None
-
-    if isinstance(current_match, Exception):
-        print(f"  current live-match error: {current_match}")
-        current_match = None
-
-    # IMPORTANT: Order of Play can be stale. If FIP still proposes a match that
-    # already exists in completed results, discard it BEFORE round annotation.
-    if isinstance(oop_next, dict) and _match_already_completed(results or [], oop_next):
-        print(
-            "  next-match stale OOP descartado:",
-            f"{oop_next.get('pair1','')} vs {oop_next.get('pair2','')}",
-        )
-        oop_next = None
-
-    # First label all v39 results using today's stage.
-    results = _annotate_result_rounds(results or [], oop_next, event)
-    results = _repair_current_round_from_previous(results, event)
-
-    # Build a deterministic next match from the actual completed bracket.
-    bracket_next = _derive_next_match_from_bracket(results, event)
-
-    # Prefer OOP only when it has REAL pairs AND it is not already completed.
-    next_match = None
-    if isinstance(oop_next, dict):
-        p1 = str(oop_next.get("pair1", "") or "")
-        p2 = str(oop_next.get("pair2", "") or "")
-        if (
-            _concrete_pair(p1)
-            and _concrete_pair(p2)
-            and not _match_already_completed(results, oop_next)
-        ):
-            next_match = oop_next
-
-    if (
-        not next_match
-        and bracket_next
-        and not _match_already_completed(results, bracket_next)
-    ):
-        next_match = bracket_next
-
-    if not next_match:
-        next_match = _fallback_next_match(results, None, event)
-
-    # Final safety net: a completed match must NEVER occupy Próximo partido.
-    if _match_already_completed(results, next_match):
-        print(
-            "  next-match safety: partido ya finalizado eliminado:",
-            f"{(next_match or {}).get('pair1','')} vs {(next_match or {}).get('pair2','')}",
-        )
-        next_match = _fallback_next_match(results, None, event)
+    # Label rounds using only event stage; no OOP dependency.
+    results = _annotate_result_rounds(results or [], None, event)
 
     normalized_results = []
     for result in (results or []):
@@ -3339,38 +3278,13 @@ async def get_tournament_now(gender: str = "female") -> dict:
         if normalized:
             normalized_results.append(normalized)
 
-    normalized_next = _normalize_next_match(next_match)
-    normalized_current = current_match if isinstance(current_match, dict) else None
-
-    # Extra UX detail: if the pair is known from the bracket but FIP hasn't
-    # published an exact time, explain why it is still useful.
-    if normalized_next and isinstance(next_match, dict) and next_match.get("derived_from_bracket"):
-        normalized_next["status_detail"] = (
-            "Cruce calculado a partir del cuadro oficial FIP. "
-            "La hora exacta se actualizará cuando FIP la publique."
-        )
-
-    _LIVE_DEBUG_STATE["stable_top_card"] = {
-        "mode": "live" if normalized_current else ("next" if normalized_next else "none"),
-        "next_source": (next_match or {}).get("source", ""),
-        "stage_today": _stage_from_event(event),
-        "completed_current_round": len([
-            x for x in (results or [])
-            if x.get("round") == _stage_from_event(event)
-        ]),
-        "current_pair1": (normalized_current or {}).get("pair1", ""),
-        "current_pair2": (normalized_current or {}).get("pair2", ""),
-        "next_pair1": (normalized_next or {}).get("pair1", ""),
-        "next_pair2": (normalized_next or {}).get("pair2", ""),
-    }
+    _LIVE_DEBUG_STATE["mode"] = "results-only"
+    _LIVE_DEBUG_STATE["results_count"] = len(normalized_results)
 
     print(
-        "  live stable:",
-        f"stage={_stage_from_event(event)}",
+        "  live results-only:",
         f"results={len(normalized_results)}",
-        f"current={'yes' if normalized_current else 'no'}",
-        f"next={(normalized_next or {}).get('pair1','')} vs {(normalized_next or {}).get('pair2','')}",
-        f"source={(next_match or {}).get('source','')}",
+        f"stage={_stage_from_event(event)}",
     )
 
     return {
@@ -3380,8 +3294,8 @@ async def get_tournament_now(gender: str = "female") -> dict:
         "dates": event["dates"],
         "watch": watch or [],
         "results": normalized_results,
-        "next_match": normalized_next,
-        "current_match": normalized_current,
+        "next_match": None,
+        "current_match": None,
         "updated": today_str,
         "gender": gender,
         "source": "FIP · Premier Padel",
