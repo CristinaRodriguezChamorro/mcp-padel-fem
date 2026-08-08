@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<!-- build: en-juego-v3-news-safe-2026-08-08 -->
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pádel Femenino Español 🎾</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+:root {
+  --pink: #ff4d8d; --orange: #ff8c42; --dark: #0f0f1a;
+  --card: rgba(255,255,255,0.05); --border: rgba(255,255,255,0.08);
+  --text: #d8d8d8; --muted: #777;
+}
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: var(--dark); color: var(--text); min-height: 100vh; }
+
+nav {
+  position:fixed; top:0; left:0; right:0; z-index:100;
+  background:rgba(15,15,26,0.92); backdrop-filter:blur(18px);
+  border-bottom:1px solid var(--border); padding:14px 32px;
+  display:flex; align-items:center; justify-content:space-between;
+}
+.logo { font-size:1.1em; font-weight:900; background:linear-gradient(135deg,var(--pink),var(--orange)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; letter-spacing:-.3px; }
+.tabs { display:flex; gap:6px; }
+.tab { background:none; border:none; color:var(--muted); font-size:.84em; font-weight:600; padding:7px 16px; border-radius:20px; cursor:pointer; transition:all .2s; }
+.tab:hover { color:#fff; background:var(--border); }
+.tab.active { background:linear-gradient(135deg,var(--pink),var(--orange)); color:#fff; }
+
+.hero-wrap { position:relative; width:100%; height:460px; overflow:hidden; margin-top:53px; }
+.slide { position:absolute; inset:0; background-size:cover; background-position:center top; opacity:0; transition:opacity 1.6s ease-in-out; }
+.slide.active { opacity:1; animation:kb 10s ease-in-out forwards; }
+@keyframes kb { from{transform:scale(1) translateY(0)} to{transform:scale(1.06) translateY(-8px)} }
+.hero-overlay {
+  position:absolute; inset:0; z-index:1;
+  background:linear-gradient(to bottom,rgba(15,15,26,.15) 0%,rgba(15,15,26,.3) 40%,rgba(15,15,26,.75) 70%,rgba(15,15,26,1) 100%);
+}
+.hero-overlay::after {
+  content:''; position:absolute; inset:0;
+  background:linear-gradient(to right,rgba(15,15,26,.5) 0%,transparent 40%,transparent 70%,rgba(15,15,26,.3) 100%);
+}
+.hero-content {
+  position:absolute; inset:0; z-index:2;
+  display:flex; flex-direction:column; align-items:flex-start; justify-content:flex-end;
+  padding:0 40px 48px; gap:6px;
+}
+.hero-live-pill {
+  display:inline-flex; align-items:center; gap:6px;
+  background:rgba(255,77,141,.15); border:1px solid rgba(255,77,141,.35);
+  color:var(--pink); padding:4px 12px; border-radius:20px;
+  font-size:.72em; font-weight:700; letter-spacing:.5px; margin-bottom:4px;
+}
+.live-dot { width:6px; height:6px; border-radius:50%; background:var(--pink); animation:pulse 1.4s ease-in-out infinite; flex-shrink:0; }
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.5;transform:scale(.8)} }
+.hero-content h1 { font-size:2.8em; font-weight:900; color:#fff; line-height:1.1; text-shadow:0 2px 24px rgba(0,0,0,.6); max-width:640px; }
+.hero-content h1 span { background:linear-gradient(135deg,var(--pink),var(--orange)); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+.hero-subtitle { color:rgba(255,255,255,.55); font-size:.9em; }
+.hero-meta { display:flex; align-items:center; gap:12px; margin-top:6px; }
+.date-badge { display:inline-block; background:rgba(255,255,255,.08); backdrop-filter:blur(8px); border:1px solid rgba(255,255,255,.15); color:var(--orange); padding:5px 16px; border-radius:20px; font-size:.76em; font-weight:600; }
+.slide-dots { position:absolute; bottom:18px; right:24px; z-index:3; display:flex; gap:5px; }
+.dot { width:5px; height:5px; border-radius:50%; background:rgba(255,255,255,.25); cursor:pointer; transition:all .3s; }
+.dot.active { background:var(--pink); width:18px; border-radius:3px; }
+.slide-cap { position:absolute; top:16px; right:20px; z-index:3; font-size:.65em; color:rgba(255,255,255,.3); font-style:italic; background:rgba(0,0,0,.25); backdrop-filter:blur(4px); padding:3px 10px; border-radius:8px; }
+
+.container { max-width:980px; margin:0 auto; padding:32px 32px 80px; }
+.section { display:none; } .section.active { display:block; }
+.section-head { padding:32px 0 22px; }
+.section-title { font-size:1.5em; font-weight:900; color:#fff; }
+.section-sub { font-size:.85em; color:var(--muted); margin-top:4px; }
+
+/* ── NOTICIAS ── */
+.news-grid { display:flex; flex-direction:column; gap:16px; }
+
+/* Destacada — igual que antes */
+.news-featured {
+  border-radius:18px; overflow:hidden; position:relative;
+  background:linear-gradient(135deg,rgba(255,77,141,.12),rgba(255,140,66,.06));
+  border:1px solid rgba(255,77,141,.3);
+  animation:fadeUp .4s ease-out backwards; transition:all .25s;
+}
+.news-featured::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:linear-gradient(90deg,var(--pink),var(--orange)); }
+.news-featured:hover { background:linear-gradient(135deg,rgba(255,77,141,.17),rgba(255,140,66,.09)); transform:translateY(-2px); box-shadow:0 14px 48px rgba(0,0,0,.45); }
+.news-featured-body { padding:32px 36px 28px; display:flex; flex-direction:column; gap:16px; }
+.featured-tag { display:inline-flex; align-items:center; gap:6px; font-size:.68em; font-weight:800; text-transform:uppercase; letter-spacing:1.2px; color:var(--orange); }
+.news-featured-body .titular { font-size:1.65em; font-weight:900; color:#fff; line-height:1.2; letter-spacing:-.4px; }
+.news-featured-body .divider { height:1px; background:rgba(255,255,255,.08); }
+.news-featured-body .resumen { font-size:.97em; line-height:1.82; color:rgba(255,255,255,.72); }
+
+/* Secundarias — más alargadas */
+.news-card {
+  background:var(--card); border:1px solid var(--border);
+  border-radius:14px;
+  /* más padding vertical para que tengan más cuerpo */
+  padding:26px 32px 26px 34px;
+  display:flex; gap:20px; align-items:flex-start;
+  position:relative; overflow:hidden;
+  animation:fadeUp .4s ease-out backwards; transition:all .2s;
+}
+.news-card::before {
+  content:''; position:absolute; left:0; top:0; bottom:0; width:3px;
+  background:linear-gradient(to bottom,var(--pink),var(--orange));
+}
+.news-card:hover { background:rgba(255,255,255,.08); transform:translateX(4px); }
+.news-card-content { flex:1; display:flex; flex-direction:column; gap:10px; }
+.news-card .card-num { font-size:2.5em; font-weight:900; color:rgba(255,255,255,.05); line-height:1; flex-shrink:0; margin-top:4px; min-width:50px; text-align:right; }
+.news-card .card-tag { font-size:.61em; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:var(--pink); }
+/* titular secundaria más grande */
+.news-card .titular { font-size:1.18em; font-weight:800; color:#fff; line-height:1.38; }
+/* resumen secundaria más visible y con más line-height */
+.news-card .resumen { font-size:.94em; line-height:1.82; color:var(--text); }
+
+.card-fuentes { margin-top:10px; padding-top:12px; border-top:1px solid var(--border); }
+.fuentes-label { font-size:.58em; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-bottom:5px; }
+.fuente-item { display:flex; gap:8px; font-size:.75em; line-height:1.5; align-items:baseline; }
+.fuente-domain { color:var(--pink); font-weight:700; flex-shrink:0; }
+.fuente-titulo { color:var(--muted); text-decoration:none; transition:color .2s; }
+.fuente-titulo:hover { color:#fff; }
+
+.ranking-list { display:flex; flex-direction:column; gap:8px; margin-top:4px; }
+.rank-row { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:14px 20px; display:flex; align-items:center; gap:16px; animation:fadeUp .3s ease-out backwards; transition:background .2s; }
+.rank-row:hover { background:rgba(255,255,255,.08); }
+.rank-pos { font-size:1.2em; font-weight:900; width:30px; text-align:center; flex-shrink:0; }
+.rank-pos.gold{color:#ffd700} .rank-pos.silver{color:#c0c0c0} .rank-pos.bronze{color:#cd7f32} .rank-pos.other{color:var(--muted)}
+.rank-info { flex:1; } .rank-name { font-weight:700; color:#fff; font-size:.97em; } .rank-pair { font-size:.78em; color:var(--muted); margin-top:2px; }
+.rank-flag { font-size:1.15em; flex-shrink:0; } .rank-pts { font-size:.84em; font-weight:700; color:var(--orange); flex-shrink:0; }
+
+.torneos-list { display:flex; flex-direction:column; gap:12px; margin-top:4px; }
+.torneo-card { background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden; animation:fadeUp .3s ease-out backwards; transition:background .2s; }
+.torneo-card:hover { background:rgba(255,255,255,.07); }
+.torneo-card.live { border-color:rgba(255,77,141,.4); }
+.torneo-top { display:flex; align-items:center; gap:18px; padding:18px 24px 16px; }
+.torneo-date { text-align:center; flex-shrink:0; width:50px; }
+.torneo-day { font-size:1.5em; font-weight:900; color:var(--orange); line-height:1; }
+.torneo-month { font-size:.65em; color:var(--muted); text-transform:uppercase; letter-spacing:1px; margin-top:1px; }
+.torneo-info { flex:1; }
+.torneo-name { font-weight:800; color:#fff; font-size:.99em; display:flex; align-items:center; flex-wrap:wrap; gap:6px; }
+.torneo-place { font-size:.8em; color:var(--muted); margin-top:3px; }
+.badge { font-size:.67em; font-weight:700; padding:3px 10px; border-radius:20px; flex-shrink:0; }
+.badge.major{background:#ffd700;color:#000}
+.badge.p1{background:rgba(255,140,66,.2);color:var(--orange);border:1px solid var(--orange)}
+.badge.p2{background:rgba(255,140,66,.1);color:var(--orange);border:1px solid rgba(255,140,66,.4)}
+.badge.fip{background:rgba(255,255,255,.08);color:var(--muted);border:1px solid var(--border)}
+.torneo-tv-bar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; padding:11px 24px; background:rgba(255,255,255,.03); border-top:1px solid var(--border); }
+.tv-label { font-size:.6em; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1.2px; flex-shrink:0; }
+.tv-chips { display:flex; gap:6px; flex-wrap:wrap; }
+.tv-chip { display:inline-flex; align-items:center; gap:5px; font-size:.76em; font-weight:600; padding:3px 11px; border-radius:20px; border:1px solid var(--border); background:rgba(255,255,255,.05); color:var(--text); }
+.tv-chip.redbull  { border-color:rgba(220,40,40,.4);  color:#e82828; background:rgba(220,40,40,.08); }
+.tv-chip.movistar { border-color:rgba(0,160,255,.4);   color:#00a0ff; background:rgba(0,160,255,.08); }
+.tv-chip.youtube  { border-color:rgba(255,80,80,.4);   color:#ff5050; background:rgba(255,80,80,.08); }
+.tv-chip.twitch   { border-color:rgba(145,70,255,.4);  color:#9146ff; background:rgba(145,70,255,.08); }
+.tv-chip.dazn     { border-color:rgba(0,200,100,.4);   color:#00c864; background:rgba(0,200,100,.08); }
+.tv-chip.free     { border-color:rgba(255,200,0,.4);   color:#ffc800; background:rgba(255,200,0,.08); }
+.live-badge { display:inline-flex; align-items:center; gap:5px; font-size:.68em; font-weight:700; color:var(--pink); background:rgba(255,77,141,.1); border:1px solid rgba(255,77,141,.3); padding:2px 9px; border-radius:20px; }
+
+.sponsors-list { display:flex; flex-direction:column; gap:14px; margin-top:4px; }
+.sponsor-card { background:var(--card); border:1px solid var(--border); border-radius:14px; overflow:hidden; animation:fadeUp .35s ease-out backwards; transition:background .2s; }
+.sponsor-card:hover { background:rgba(255,255,255,.07); }
+.sponsor-header { display:flex; align-items:center; gap:16px; padding:18px 24px 16px; border-bottom:1px solid var(--border); }
+.sponsor-avatar { width:50px; height:50px; border-radius:50%; background:linear-gradient(135deg,var(--pink),var(--orange)); display:flex; align-items:center; justify-content:center; font-size:1.5em; flex-shrink:0; overflow:hidden; }
+.sponsor-avatar img { width:100%; height:100%; object-fit:cover; object-position:top center; }
+.sponsor-meta { flex:1; }
+.sponsor-name { font-size:1.02em; font-weight:800; color:#fff; }
+.sponsor-pair { font-size:.78em; color:var(--muted); margin-top:2px; }
+.sponsor-flag { font-size:1.35em; }
+.sponsor-rank-badge { font-size:.66em; font-weight:700; padding:3px 10px; border-radius:20px; background:linear-gradient(135deg,var(--pink),var(--orange)); color:#fff; }
+.sponsor-body { padding:16px 24px 20px; display:flex; flex-direction:column; gap:12px; }
+.sponsor-category { display:flex; flex-direction:column; gap:6px; }
+.category-label { font-size:.6em; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:1.2px; }
+.brand-chips { display:flex; flex-wrap:wrap; gap:6px; }
+.chip { display:inline-flex; align-items:center; gap:5px; font-size:.79em; font-weight:600; padding:4px 12px; border-radius:20px; border:1px solid var(--border); background:rgba(255,255,255,.04); color:var(--text); transition:all .2s; }
+.chip:hover { background:rgba(255,255,255,.1); color:#fff; }
+.chip.bullpadel { border-color:rgba(255,77,141,.4); color:var(--pink); background:rgba(255,77,141,.08); }
+.chip.head      { border-color:rgba(0,160,230,.4); color:#00a0e6; background:rgba(0,160,230,.08); }
+.chip.nox       { border-color:rgba(255,180,0,.4); color:#ffb400; background:rgba(255,180,0,.08); }
+.chip.adidas    { border-color:rgba(120,220,100,.4); color:#78dc64; background:rgba(120,220,100,.08); }
+.chip.k-swiss   { border-color:rgba(80,160,255,.4); color:#50a0ff; background:rgba(80,160,255,.08); }
+.chip.asics     { border-color:rgba(0,210,150,.4); color:#00d296; background:rgba(0,210,150,.08); }
+.chip.varlion   { border-color:rgba(255,80,120,.4); color:#ff5078; background:rgba(255,80,120,.08); }
+.chip.vibora    { border-color:rgba(180,100,255,.4); color:#b464ff; background:rgba(180,100,255,.08); }
+.chip.generic   { border-color:var(--border); color:var(--text); }
+.sponsor-note { font-size:.83em; line-height:1.65; color:var(--muted); padding-top:10px; border-top:1px solid var(--border); font-style:italic; }
+
+.empty-msg { text-align:center; padding:50px 20px; color:var(--muted); font-size:.95em; background:var(--card); border-radius:14px; border:1px solid var(--border); }
+.loading { text-align:center; padding:60px 20px; color:var(--muted); }
+.spinner { font-size:2em; display:block; margin-bottom:12px; animation:spin 1.2s linear infinite; }
+@keyframes fadeUp { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
+@keyframes spin { to{transform:rotate(360deg)} }
+
+@media(max-width:700px){
+  .hero-wrap{height:380px} .hero-content{padding:0 20px 38px} .hero-content h1{font-size:2em}
+  nav{padding:12px 16px} .tab{font-size:.72em;padding:6px 10px}
+  .container{padding:24px 16px 80px}
+  .news-featured-body{padding:22px 20px 18px}
+  .news-featured-body .titular{font-size:1.3em}
+  .news-card{padding:20px 20px 20px 22px}
+  .news-card .card-num{display:none}
+  .sponsor-header{gap:12px} .sponsor-avatar{width:42px;height:42px;font-size:1.2em}
+  .torneo-top{padding:14px 16px 12px} .torneo-tv-bar{padding:10px 16px}
+}
+
+/* ── EN JUEGO ── */
+.live-tournament{display:flex;flex-direction:column;gap:14px}
+.live-summary{padding:18px 20px;display:grid;grid-template-columns:1fr auto;gap:18px;align-items:center;background:linear-gradient(135deg,#171928,#111521);border:1px solid #34384a;border-radius:14px}
+.live-kicker{font-size:.66em;font-weight:900;text-transform:uppercase;letter-spacing:1.3px;color:var(--pink);margin-bottom:6px}
+.live-name{font-size:1.38em;font-weight:950;color:#fff;letter-spacing:-.02em}
+.live-place{font-size:.84em;color:#b9bac4;margin-top:6px}
+.live-dates{font-size:.78em;color:#d5d5dc;font-weight:700;white-space:nowrap}
+.live-watch{margin-top:-4px;padding:0 4px;display:flex;gap:9px;align-items:center;flex-wrap:wrap}
+.live-watch-label{font-size:.66em;font-weight:900;color:#9b9ca7;text-transform:uppercase;letter-spacing:1px}
+.live-watch-chip{background:#181b27;border:1px solid #34384a;border-radius:999px;padding:6px 12px;font-size:.76em;color:#fff}
+.next-match{padding:17px 20px;border:1px solid #a25cff;background:linear-gradient(135deg,rgba(133,72,210,.12),rgba(30,26,48,.35));border-radius:13px;position:relative}
+.next-label{font-size:.69em;font-weight:950;letter-spacing:1.1px;text-transform:uppercase;color:#c77dff;margin-bottom:9px}
+.next-round{font-size:.82em;font-weight:850;color:#c77dff;margin-bottom:8px}
+.next-pairs{font-size:1em;font-weight:950;color:#fff;line-height:1.4}
+.next-when{font-size:.79em;color:#b6b6c0;margin-top:9px}
+.results-title{padding:5px 0 0;font-size:.78em;text-transform:uppercase;letter-spacing:.7px;font-weight:950;color:#fff}
+.round-group{padding:0;border:1px solid #34384a;background:linear-gradient(180deg,#151925,#111520);border-radius:13px;overflow:hidden}
+.round-heading{font-size:.74em;color:#c77dff;font-weight:950;text-transform:uppercase;letter-spacing:.8px;margin:0;padding:12px 16px 8px}
+.round-group .result-row{margin:0;border-top:1px solid #2d3140}
+.round-group .result-row:first-of-type{border-top:0}
+.result-row{background:transparent;border:0;border-radius:0;padding:14px 16px}
+.result-pairs{display:grid;grid-template-columns:minmax(220px,1.6fr) minmax(150px,.8fr) auto;gap:18px;align-items:center}
+.result-names{min-width:0}
+.result-winner{font-size:.91em;color:#fff;font-weight:950}
+.result-loser{font-size:.82em;color:#9fa1ad;margin-top:4px}
+.result-score{font-size:.96em;color:#c77dff;font-weight:950;white-space:nowrap;margin:0;letter-spacing:.7px}
+.result-date{font-size:.72em;color:#9fa1ad;white-space:nowrap;text-align:right}
+.live-empty{padding:34px 28px;text-align:center;color:var(--muted);background:#141722;border:1px solid #303442;border-radius:13px}
+@media(max-width:650px){.tabs{overflow-x:auto;max-width:68vw}.tab{white-space:nowrap;padding:7px 12px}.live-summary{grid-template-columns:1fr}.live-dates{padding-top:0}.result-pairs{grid-template-columns:1fr auto;gap:10px}.result-date{grid-column:1/-1;text-align:left}.live-watch,.live-summary{padding-left:16px;padding-right:16px}}
+</style>
+</head>
+<body>
+<nav>
+  <div class="logo">🎾 Pádel Femenino Español</div>
+  <div class="tabs">
+    <button class="tab active" onclick="show('noticias',this)">Noticias</button>
+    <button class="tab" onclick="show('enjuego',this)">En juego</button>
+    <button class="tab" onclick="show('ranking',this)">Ranking</button>
+    <button class="tab" onclick="show('torneos',this)">Torneos</button>
+    <button class="tab" onclick="show('sponsors',this)">Sponsors</button>
+  </div>
+</nav>
+
+<div class="hero-wrap" id="hero">
+  <div id="slides"></div>
+  <div class="hero-overlay"></div>
+  <div class="hero-content">
+    <div class="hero-live-pill"><div class="live-dot"></div>Premier Padel 2026</div>
+    <h1>Lo que está pasando<br>en el <span>pádel femenino español</span> 🔥</h1>
+    <p class="hero-subtitle">Resumen diario del circuito femenino profesional</p>
+    <div class="hero-meta"><div class="date-badge" id="fecha"></div></div>
+  </div>
+  <div class="slide-cap" id="slide-cap"></div>
+  <div class="slide-dots" id="dots"></div>
+</div>
+
+<div class="container">
+  <div id="noticias" class="section active">
+    <div class="section-head">
+      <div class="section-title">Noticias 📰</div>
+      <div class="section-sub">Lo último del pádel femenino español</div>
+    </div>
+    <div class="news-grid" id="news-grid">
+      <div class="loading"><span class="spinner">🎾</span>Cargando noticias...</div>
+    </div>
+  </div>
+  <div id="enjuego" class="section">
+    <div class="section-head">
+      <div class="section-title">En juego 🔴</div>
+      <div class="section-sub">Torneo actual · dónde verlo · resultados femeninos finalizados</div>
+    </div>
+    <div id="live-content"><div class="loading"><span class="spinner">🎾</span>Cargando torneo...</div></div>
+  </div>
+  <div id="ranking" class="section">
+    <div class="section-head">
+      <div class="section-title">Ranking FIP Femenino 🏆</div>
+      <div class="section-sub" id="ranking-sub">Cargando...</div>
+    </div>
+    <div class="ranking-list" id="ranking-list"><div class="loading"><span class="spinner">🎾</span></div></div>
+  </div>
+  <div id="torneos" class="section">
+    <div class="section-head">
+      <div class="section-title">Próximos torneos 📅</div>
+      <div class="section-sub">Calendario Premier Padel 2026 · Dónde ver cada partido</div>
+    </div>
+    <div class="torneos-list" id="torneos-list"><div class="loading"><span class="spinner">🎾</span></div></div>
+  </div>
+  <div id="sponsors" class="section">
+    <div class="section-head">
+      <div class="section-title">Sponsors & marcas 👑</div>
+      <div class="section-sub">Pala, ropa y calzado de las mejores del circuito femenino español</div>
+    </div>
+    <div class="sponsors-list" id="sponsors-list"></div>
+  </div>
+</div>
+
+<script>
+const PLAYERS=[{title:"Ari_Sánchez",cap:"Ari Sánchez"},{title:"Gemma_Triay",cap:"Gemma Triay"},{title:"Marta_Ortega_Gallego",cap:"Marta Ortega"},{title:"Alejandra_Salazar",cap:"Alejandra Salazar"}];
+let cur=0,timer;
+async function getWikiPhoto(title){const url=`https://es.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&format=json&pithumbsize=1200&origin=*`;try{const r=await fetch(url);const d=await r.json();const page=Object.values(d.query.pages)[0];return page?.thumbnail?.source||null;}catch{return null;}}
+async function buildSlideshow(){const wrap=document.getElementById('slides'),dots=document.getElementById('dots');PLAYERS.forEach((p,i)=>{const d=document.createElement('div');d.className='slide'+(i===0?' active':'');d.id=`slide-${i}`;d.style.background='linear-gradient(135deg,#200020,#0f0f1a)';wrap.appendChild(d);const dot=document.createElement('div');dot.className='dot'+(i===0?' active':'');dot.onclick=()=>goTo(i);dots.appendChild(dot);});updateCap(0);timer=setInterval(()=>goTo((cur+1)%PLAYERS.length),5500);const photos=await Promise.all(PLAYERS.map(p=>getWikiPhoto(p.title)));photos.forEach((url,i)=>{const s=document.getElementById(`slide-${i}`);if(url){s.style.backgroundImage=`url('${url}')`;s.style.backgroundSize='cover';s.style.backgroundPosition='center top';}});}
+function updateCap(n){document.getElementById('slide-cap').textContent=PLAYERS[n].cap;}
+function goTo(n){document.querySelectorAll('.slide')[cur].classList.remove('active');document.querySelectorAll('.dot')[cur].classList.remove('active');cur=n;document.querySelectorAll('.slide')[cur].classList.add('active');document.querySelectorAll('.dot')[cur].classList.add('active');updateCap(n);}
+const heroEl=document.getElementById('hero');
+heroEl.addEventListener('mouseenter',()=>clearInterval(timer));
+heroEl.addEventListener('mouseleave',()=>{timer=setInterval(()=>goTo((cur+1)%PLAYERS.length),5500);});
+
+function show(id,btn){document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));document.getElementById(id).classList.add('active');btn.classList.add('active');heroEl.style.display=id==='noticias'?'block':'none';}
+
+const hoy=new Date().toLocaleDateString('es-ES',{weekday:'long',year:'numeric',month:'long',day:'numeric'});
+document.getElementById('fecha').textContent=hoy.charAt(0).toUpperCase()+hoy.slice(1);
+
+function renderFuentes(fuentes){if(!fuentes?.length)return'';return`<div class="card-fuentes"><div class="fuentes-label">Fuentes</div>${fuentes.map(f=>`<div class="fuente-item"><span class="fuente-domain">${f.domain}</span><a href="${f.url}" target="_blank" class="fuente-titulo">${f.titulo}</a></div>`).join('')}</div>`;}
+
+async function loadNews(){
+  try{
+    const resp=await fetch('/api/news'); if(!resp.ok) throw new Error(`HTTP ${resp.status}`); const data=await resp.json();
+    const items=data.resumen_diario||[];
+    if(!items.length){document.getElementById('news-grid').innerHTML='<div class="empty-msg">No hay noticias ahora mismo.<br>Vuelve más tarde 🎾</div>';return;}
+    const[featured,...rest]=items;
+    const featuredHtml=`<div class="news-featured" style="animation-delay:0s"><div class="news-featured-body"><div class="featured-tag">🔥 Destacado</div><div class="titular">${featured.titular}</div><div class="divider"></div><div class="resumen">${featured.resumen}</div>${renderFuentes(featured.fuentes)}</div></div>`;
+    const restHtml=rest.map((item,i)=>`<div class="news-card" style="animation-delay:${(i+1)*.07}s"><div class="card-num">${String(i+2).padStart(2,'0')}</div><div class="news-card-content"><div class="card-tag">📰 Noticia</div><div class="titular">${item.titular}</div><div class="resumen">${item.resumen}</div>${renderFuentes(item.fuentes)}</div></div>`).join('');
+    document.getElementById('news-grid').innerHTML=featuredHtml+restHtml;
+  }catch(e){document.getElementById('news-grid').innerHTML=`<div class="empty-msg">Error: ${e.message}</div>`;}
+}
+
+async function loadRanking(){try{const data=await fetch('/api/ranking').then(r=>r.json());const colors=['gold','gold','silver','silver','bronze','other','other','other','other','other'];document.getElementById('ranking-sub').textContent=`Top 10 mundial · ${new Date().toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'})}`;document.getElementById('ranking-list').innerHTML=data.map((p,i)=>`<div class="rank-row" style="animation-delay:${i*.06}s"><div class="rank-pos ${colors[i]||'other'}">${p.pos}</div><div class="rank-info"><div class="rank-name">${p.name}</div><div class="rank-pair">${p.pair||''}</div></div><div class="rank-flag">${p.flag||'🌍'}</div><div class="rank-pts">${p.pts} pts</div></div>`).join('');}catch(e){document.getElementById('ranking-list').innerHTML='<div class="empty-msg">No se pudo cargar el ranking</div>';}}
+
+const TV_BY_BADGE={major:[{name:'Red Bull TV',cls:'redbull',icon:'🐂'},{name:'Movistar+',cls:'movistar',icon:'📡'}],p1:[{name:'Red Bull TV',cls:'redbull',icon:'🐂'},{name:'Movistar+',cls:'movistar',icon:'📡'}],p2:[{name:'Movistar+',cls:'movistar',icon:'📡'},{name:'YouTube',cls:'youtube',icon:'▶️'}],fip:[{name:'YouTube',cls:'youtube',icon:'▶️'}]};
+function tvPlatforms(tvString,badge){if(tvString&&tvString.trim().length>0){const parts=tvString.split(/[·,&+\/]/).map(s=>s.trim()).filter(Boolean);if(parts.length>0)return parts.map(p=>{const pl=p.toLowerCase();let cls='generic',icon='📺';if(pl.includes('red bull')){cls='redbull';icon='🐂';}else if(pl.includes('movistar')){cls='movistar';icon='📡';}else if(pl.includes('youtube')){cls='youtube';icon='▶️';}else if(pl.includes('twitch')){cls='twitch';icon='🟣';}else if(pl.includes('dazn')){cls='dazn';icon='🟢';}else if(pl.includes('gratis')||pl.includes('free')){cls='free';icon='🆓';}return{name:p,cls,icon};});}return TV_BY_BADGE[badge]||TV_BY_BADGE['fip'];}
+async function loadTorneos(){try{const data=await fetch('/api/calendar').then(r=>r.json());document.getElementById('torneos-list').innerHTML=data.map((t,i)=>{const platforms=tvPlatforms(t.tv,t.badge);const tvChipsHtml=platforms.map(p=>`<span class="tv-chip ${p.cls}">${p.icon} ${p.name}</span>`).join('');const liveBadge=t.live?`<span class="live-badge"><span class="live-dot"></span>En juego</span>`:'';return`<div class="torneo-card${t.live?' live':''}" style="animation-delay:${i*.07}s"><div class="torneo-top"><div class="torneo-date"><div class="torneo-day">${(t.day||'').split(/[-–]/)[0]}</div><div class="torneo-month">${t.month||''}</div></div><div class="torneo-info"><div class="torneo-name">${t.name} ${liveBadge}</div><div class="torneo-place">${t.place||''}</div></div><div class="badge ${t.badge||'fip'}">${t.badgeText||''}</div></div><div class="torneo-tv-bar"><div class="tv-label">📺 Ver en</div><div class="tv-chips">${tvChipsHtml}</div></div></div>`;}).join('');}catch(e){document.getElementById('torneos-list').innerHTML='<div class="empty-msg">No se pudo cargar el calendario</div>';}}
+
+async function loadEnJuego(){
+  const el=document.getElementById('live-content');
+  try{
+    const d=await fetch('/api/live?gender=women').then(r=>{
+      if(!r.ok) throw new Error(`HTTP ${r.status}`);
+      return r.json();
+    });
+    if(!d.active){
+      const msg=d.error
+        ? 'No se pudo actualizar la información de En juego. El resto de la web sigue disponible.'
+        : 'Ahora mismo no hay ningún torneo Premier Padel en juego.';
+      el.innerHTML=`<div class="live-empty">${msg}</div>`;
+      return;
+    }
+
+    const watch=(d.watch||[]).map(x=>`<span class="live-watch-chip">📺 ${x}</span>`).join('');
+
+    let nextHtml='';
+    if(d.next_match){
+      const n=d.next_match;
+      nextHtml=`<div class="next-match">
+        <div class="next-label">Próximo partido</div>
+        <div class="next-round">${n.round||''}</div>
+        <div class="next-pairs">${n.pair1||''} <span style="color:var(--muted);font-weight:700">vs</span> ${n.pair2||''}</div>
+        <div class="next-when">${n.when||''}</div>
+      </div>`;
+    }
+
+    const groups={};
+    (d.results||[]).forEach(r=>{
+      const round=r.round||'Partidos';
+      if(!groups[round]) groups[round]=[];
+      groups[round].push(r);
+    });
+
+    const roundOrder=['Final','Semifinales','Cuartos de final','Octavos de final','Segunda ronda','Primera ronda','Clasificación','Partidos'];
+    const orderedRounds=[
+      ...roundOrder.filter(x=>groups[x]),
+      ...Object.keys(groups).filter(x=>!roundOrder.includes(x))
+    ];
+
+    const resultsHtml=orderedRounds.map(round=>{
+      const matches=groups[round].map(r=>`<div class="result-row">
+        <div class="result-pairs">
+          <div class="result-names">
+            <div class="result-winner">🏆 ${r.winner||''}</div>
+            <div class="result-loser">${r.loser||''}</div>
+          </div>
+          <div class="result-score">${r.score||''}</div>
+          <div class="result-date">${r.date ? '📅 '+r.date.split('-').reverse().join('/') : ''}</div>
+        </div>
+      </div>`).join('');
+      return `<div class="round-group"><div class="round-heading">${round}</div>${matches}</div>`;
+    }).join('');
+
+    el.innerHTML=`<div class="live-tournament">
+      <div class="live-summary">
+        <div>
+          <div class="live-kicker"><span class="live-dot" style="display:inline-block;margin-right:6px"></span>En juego</div>
+          <div class="live-name">${d.name||''}</div>
+          <div class="live-place">📍 ${d.place||''}</div>
+        </div>
+        <div class="live-dates">${d.dates||''}</div>
+      </div>
+      <div class="live-watch"><div class="live-watch-label">Dónde verlo</div>${watch||'<span class="live-watch-chip">Sin dato</span>'}</div>
+      ${nextHtml}
+      <div class="results-title">Resultados</div>
+      ${resultsHtml||'<div class="live-empty">Aún no hay resultados femeninos finalizados publicados.</div>'}
+    </div>`;
+  }catch(e){
+    el.innerHTML=`<div class="live-empty">No se pudo cargar la información en directo.<br><small>${e.message||''}</small></div>`;
+  }
+}
+
+const SPONSORS_DATA=[{name:"Gemma Triay",pair:"Pareja: Delfina Brea",flag:"🇪🇸",emoji:"👑",rank:"#1",wikiTitle:"Gemma_Triay",note:"La número 1 del mundo. Bullpadel construyó su pala más vendida en torno a ella. Contrato hasta 2027.",categories:[{label:"🏏 Pala",brands:[{name:"Bullpadel Elite W 2026",cls:"bullpadel"}]},{label:"👕 Ropa",brands:[{name:"Bullpadel",cls:"bullpadel"}]},{label:"👟 Calzado",brands:[{name:"Bullpadel Hack",cls:"bullpadel"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Delfina Brea",pair:"Pareja: Gemma Triay",flag:"🇦🇷",emoji:"⭐",rank:"#2",wikiTitle:"Delfina_Brea",note:"La argentina más dominante de la historia del circuito. Bullpadel la tiene como embajadora global.",categories:[{label:"🏏 Pala",brands:[{name:"Bullpadel Vertex 05 W 2026",cls:"bullpadel"}]},{label:"👕 Ropa",brands:[{name:"Bullpadel",cls:"bullpadel"}]},{label:"👟 Calzado",brands:[{name:"Bullpadel Hack",cls:"bullpadel"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Ari Sánchez",pair:"Pareja: Paula Josemaría",flag:"🇪🇸",emoji:"🔥",rank:"#3",wikiTitle:"Ari_Sánchez",note:"Fichaje estrella de Adidas en 2025. Su carisma la convierte en la cara más marketiniana del pádel femenino español.",categories:[{label:"🏏 Pala",brands:[{name:"Adidas Metalbone W 2026",cls:"adidas"}]},{label:"👕 Ropa",brands:[{name:"Adidas",cls:"adidas"}]},{label:"👟 Calzado",brands:[{name:"Adidas Adizero",cls:"adidas"}]},{label:"⌚ Otros",brands:[{name:"Garmin",cls:"generic"}]}]},{name:"Paula Josemaría",pair:"Pareja: Ari Sánchez",flag:"🇪🇸",emoji:"💥",rank:"#4",wikiTitle:"Paula_Josemaría",note:"La pegada más potente del circuito. Head la fichó hace años y sigue siendo una de sus apuestas más claras.",categories:[{label:"🏏 Pala",brands:[{name:"Head Delta Pro W 2026",cls:"head"}]},{label:"👕 Ropa",brands:[{name:"Head",cls:"head"}]},{label:"👟 Calzado",brands:[{name:"Head Sprint Pro",cls:"head"}]},{label:"🥤 Nutrición",brands:[{name:"HSN",cls:"generic"}]}]},{name:"Alejandra Salazar",pair:"Pareja: Lucía Sainz",flag:"🇪🇸",emoji:"🏆",rank:"#5",wikiTitle:"Alejandra_Salazar",note:"Leyenda viva del circuito. Adidas la ha renovado season tras season; uno de los contratos más longevos del pádel femenino español.",categories:[{label:"🏏 Pala",brands:[{name:"Adidas Adipower W 2026",cls:"adidas"}]},{label:"👕 Ropa",brands:[{name:"Adidas",cls:"adidas"}]},{label:"👟 Calzado",brands:[{name:"Adidas Adizero",cls:"adidas"}]},{label:"🎾 Pelotas",brands:[{name:"Adidas",cls:"adidas"}]}]},{name:"Lucía Sainz",pair:"Pareja: Alejandra Salazar",flag:"🇪🇸",emoji:"✨",rank:"#6",wikiTitle:"Lucía_Sainz",note:"Nox la apoya desde sus inicios. Una de las jugadoras más seguidas en redes; clave para la marca en Europa.",categories:[{label:"🏏 Pala",brands:[{name:"Nox ML10 Pro Cup W 2026",cls:"nox"}]},{label:"👕 Ropa",brands:[{name:"Nox",cls:"nox"}]},{label:"👟 Calzado",brands:[{name:"K-Swiss Ultrashot",cls:"k-swiss"}]},{label:"🧴 Recuperación",brands:[{name:"Pilexil",cls:"generic"}]}]},{name:"Marta Ortega",pair:"Pareja: Ariana Sánchez",flag:"🇪🇸",emoji:"🎯",rank:"#7",wikiTitle:"Marta_Ortega_Gallego",note:"Nox apostó fuerte por ella y le está saliendo de lujo. Marta es la imagen de la renovación de la marca.",categories:[{label:"🏏 Pala",brands:[{name:"Nox AT10 Luxury W 2026",cls:"nox"}]},{label:"👕 Ropa",brands:[{name:"Nox",cls:"nox"}]},{label:"👟 Calzado",brands:[{name:"K-Swiss Ultrashot",cls:"k-swiss"}]},{label:"⌚ Otros",brands:[{name:"Garmin",cls:"generic"}]}]},{name:"Ariana Sánchez",pair:"Pareja: Marta Ortega",flag:"🇪🇸",emoji:"🚀",rank:"#8",wikiTitle:"Ariana_Sánchez_Fallada",note:"Head la tiene muy bien atada. Su nueva pareja con Marta promete resultados y más visibilidad para la marca.",categories:[{label:"🏏 Pala",brands:[{name:"Head Graphene W 2026",cls:"head"}]},{label:"👕 Ropa",brands:[{name:"Head",cls:"head"}]},{label:"👟 Calzado",brands:[{name:"Head Sprint Pro",cls:"head"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Jessica Castello",pair:"Pareja: Tamara Icardo",flag:"🇪🇸",emoji:"🌟",rank:"Top 10",wikiTitle:"Jessica_Castello",note:"Vibora la ha hecho su bandera en el pádel femenino español. Muy activa en RRSS y con una comunidad fiel.",categories:[{label:"🏏 Pala",brands:[{name:"Vibora Yarara Edition W",cls:"vibora"}]},{label:"👕 Ropa",brands:[{name:"Vibora",cls:"vibora"}]},{label:"👟 Calzado",brands:[{name:"Asics Gel-Padel",cls:"asics"}]}]},{name:"Tamara Icardo",pair:"Pareja: Jessica Castello",flag:"🇪🇸",emoji:"💪",rank:"Top 10",wikiTitle:"Tamara_Icardo",note:"Varlion la acompaña desde que debutó en el circuito profesional. Imagen de la elegancia dentro de la pista.",categories:[{label:"🏏 Pala",brands:[{name:"Varlion LW Carbon W 2026",cls:"varlion"}]},{label:"👕 Ropa",brands:[{name:"Varlion",cls:"varlion"}]},{label:"👟 Calzado",brands:[{name:"Asics Gel-Padel",cls:"asics"}]},{label:"🥤 Nutrición",brands:[{name:"Powerade",cls:"generic"}]}]}];
+function renderSponsors(){const list=document.getElementById('sponsors-list');const fetchPhoto=async(title,idx)=>{if(!title)return;try{const url=`https://es.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&format=json&pithumbsize=400&origin=*`;const d=await(await fetch(url)).json();const src=Object.values(d.query.pages)[0]?.thumbnail?.source;if(src){const av=document.getElementById(`av-${idx}`);if(av)av.innerHTML=`<img src="${src}" alt="">`;}}catch{}};list.innerHTML=SPONSORS_DATA.map((p,i)=>`<div class="sponsor-card" style="animation-delay:${i*.07}s"><div class="sponsor-header"><div class="sponsor-avatar" id="av-${i}">${p.emoji}</div><div class="sponsor-meta"><div class="sponsor-name">${p.name}</div><div class="sponsor-pair">${p.pair}</div></div><div class="sponsor-flag">${p.flag}</div><div class="sponsor-rank-badge">${p.rank}</div></div><div class="sponsor-body">${p.categories.map(cat=>`<div class="sponsor-category"><div class="category-label">${cat.label}</div><div class="brand-chips">${cat.brands.map(b=>`<span class="chip ${b.cls}"><span style="font-size:.9em">▸</span>${b.name}</span>`).join('')}</div></div>`).join('')}<div class="sponsor-note">${p.note}</div></div></div>`).join('');SPONSORS_DATA.forEach((p,i)=>fetchPhoto(p.wikiTitle,i));}
+
+buildSlideshow();loadNews();loadEnJuego();loadRanking();loadTorneos();renderSponsors();
+</script>
+</body>
+</html>

@@ -1,37 +1,122 @@
-# 🎾 MCP Padel Fem
+# 🎾 MCP Pádel Femenino
 
-Proyecto personal centrado en la exploración de nuevas formas de interacción entre inteligencia artificial y herramientas externas en el contexto del pádel femenino.
+Proyecto personal para centralizar información del **pádel femenino profesional** y experimentar con **APIs, IA y Model Context Protocol (MCP)** sobre un caso de uso real.
 
----
+La aplicación reúne **noticias, ranking, calendario de torneos y seguimiento del torneo en juego**, y expone parte de esta información mediante un servidor MCP.
 
-## Descripción
+## 🏗️ Arquitectura
 
-Este proyecto nace como una exploración sobre cómo los sistemas basados en IA pueden interactuar con herramientas y fuentes de información en tiempo real, ampliando sus capacidades más allá de la simple generación de texto.
+```text
+FIP · RSS · fuentes web
+          │
+          ▼
+ Extracción de datos
+ aiohttp · BeautifulSoup
+ feedparser · pypdf
+          │
+          ▼
+ Filtrado y normalización
+          │
+          ├──► Groq / LLM
+          │    extracción de datos
+          │    no estructurados
+          ▼
+      FastAPI
+   ┌──────┴──────┐
+   ▼             ▼
+Frontend      MCP Server
+HTML/CSS/JS   FastMCP
+```
 
-En este caso, el foco está en el mundo del pádel femenino, con el objetivo de estructurar información relevante y potencialmente escalable hacia casos de uso como:
+La arquitectura separa la **obtención de datos**, su **procesamiento** y la **forma de consumirlos**. El LLM se utiliza para resumir o normalizar contenido no estructurado; las decisiones deterministas, como identificar jugadoras mediante el ranking femenino, se resuelven con datos y código.
 
-- Consultas de información deportiva
-- Gestión de datos dinámicos
-- Automatización de consultas mediante herramientas inteligentes
+## 🔴 En juego
 
----
+El backend detecta el torneo Premier Padel activo y consulta información oficial de **FIP**.
 
-## Objetivo
+Procesa **Results, Draws y Order of Play**, filtra el cuadro femenino (`female / women`), extrae resultados y los agrupa por ronda:
 
-Explorar el diseño de sistemas donde la inteligencia artificial pueda:
+```text
+SEMIFINALES
 
-- Acceder a herramientas externas
-- Recuperar información actualizada
-- Integrarse en flujos de trabajo reales
+Triay / Brea 🏆
+Josemaría / Sánchez
+6–3  6–4
+```
 
----
+También obtiene el **siguiente partido femenino** y convierte su hora local a **hora de España (`Europe/Madrid`)**.
 
-## Estado del proyecto
+Los resultados se incorporan a medida que terminan los partidos, sin esperar a que finalice el torneo.
 
-Fase inicial / experimental, en evolución continua.
+## 📰 Noticias
 
----
+El filtro de noticias **no depende de una lista de jugadoras hardcodeada**.
 
-## Autor
+Primero se obtiene el **ranking femenino actualizado** y se extraen dinámicamente los nombres y apellidos de las jugadoras. Esa información se usa junto con términos como `women`, `female` o `femenino` para filtrar los feeds RSS.
 
-Cristina Rodríguez Chamorro
+```text
+Ranking femenino → nombres de jugadoras
+                         │
+RSS → filtro femenino ───┘
+          │
+          ▼
+      Groq + Llama
+  resumen / normalización
+          │
+          ▼
+       /api/news
+```
+
+**Groq no decide si una noticia es femenina.** Se utiliza como API de inferencia para ejecutar Llama y resumir/estructurar contenido que ya ha pasado el filtro.
+
+## 🔌 MCP
+
+El proyecto incorpora **Model Context Protocol** mediante FastMCP.
+
+Esto permite que la lógica del proyecto no esté limitada a la web: un cliente de IA compatible con MCP puede descubrir y utilizar las tools expuestas por el servidor.
+
+```text
+Cliente IA → MCP → Tools → datos de pádel femenino
+```
+
+## 🧰 Stack
+
+| Tecnología | Uso |
+|---|---|
+| **Python + FastAPI** | Backend y API REST |
+| **FastMCP / MCP** | Tools para clientes de IA |
+| **aiohttp + asyncio** | Peticiones asíncronas |
+| **BeautifulSoup + feedparser** | HTML y RSS |
+| **pypdf** | Documentos oficiales FIP |
+| **Groq API + Llama** | Inferencia LLM para resumen y normalización |
+| **HTML + CSS + JavaScript** | Frontend |
+| **Docker + Railway** | Contenedorización y despliegue |
+
+## 📁 Estructura
+
+```text
+apps/mcp-server/
+├── server.py          # FastAPI y endpoints
+├── tools/
+│   ├── news.py        # Pipeline de noticias
+│   └── live_data.py   # Torneo, resultados y próximo partido
+├── static/
+│   └── index.html     # Frontend
+├── Dockerfile
+└── requirements.txt
+```
+
+Endpoints principales:
+
+```http
+GET /api/news
+GET /api/live?gender=women
+GET /api/ranking
+GET /api/tournaments
+```
+
+## 🎯 Objetivo técnico
+
+El proyecto explora cómo combinar **arquitectura de APIs + fuentes externas + procesamiento asíncrono + LLMs + MCP** manteniendo cada responsabilidad separada.
+
+La IA es una pieza de la arquitectura, no la arquitectura completa.
