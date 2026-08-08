@@ -711,16 +711,19 @@ async function loadRanking(){
 
     const img=new Image();
     img.alt=p.name;
-    img.loading='lazy';
+    img.decoding='async';
     img.onload=()=>{
-      box.replaceChildren(img);
       box.classList.add('has-photo');
     };
     img.onerror=()=>{
       box.classList.remove('has-photo');
       box.innerHTML=fallback(p.name);
     };
-    img.src=`/api/player-photo-image?name=${encodeURIComponent(p.name)}&v=61`;
+
+    // IMPORTANT: attach the <img> BEFORE setting src.
+    // A detached image with loading=lazy was never requesting the endpoint.
+    box.replaceChildren(img);
+    img.src=`/api/player-photo-image?name=${encodeURIComponent(p.name)}&v=64`;
   };
 
   try{
@@ -880,16 +883,18 @@ function renderSponsors(){
 
     const img=new Image();
     img.alt=p.name;
-    img.loading='lazy';
+    img.decoding='async';
     img.onload=()=>{
-      box.replaceChildren(img);
       box.classList.add('has-photo');
     };
     img.onerror=()=>{
       box.classList.remove('has-photo');
       box.innerHTML=fallback(p);
     };
-    img.src=`/api/player-photo-image?name=${encodeURIComponent(p.name)}&wiki_title=${encodeURIComponent(p.wikiTitle||'')}&v=61`;
+
+    // Attach first so the browser definitely performs the request.
+    box.replaceChildren(img);
+    img.src=`/api/player-photo-image?name=${encodeURIComponent(p.name)}&wiki_title=${encodeURIComponent(p.wikiTitle||'')}&v=64`;
   };
 
   list.innerHTML=SPONSORS_DATA.map((p,i)=>`
