@@ -933,32 +933,28 @@ def _norm_person_name(value: str) -> str:
 
 async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
     """
-    Abre FIP y localiza la vista femenina de Results de forma verificable.
+    FIP Results/Female extractor without Groq.
 
-    Problema observado en Railway:
-      female=False
-      snapshots=2
-      female_hits=0
+    v28 proved Chromium works but the visible Female control did not switch the DOM:
+      female=False, female_hits=0, inputs=3
 
-    Eso significa que Playwright abría FIP correctamente, pero nuestro click por
-    texto no activaba el control Female. FIP usa inputs/controles custom.
-
-    Solución v28:
-    - activa Results también por DOM/JS;
-    - intenta Female por texto, label, input vecino y eventos JS;
-    - si no funciona, prueba los inputs/radios de la zona uno por uno;
-    - NO da por bueno el click hasta detectar nombres del ranking femenino
-      en el DOM renderizado.
+    v29 does not depend on that visual switch. It:
+    1) captures XHR/fetch payloads triggered by every candidate gender control;
+    2) searches those payloads for women's-ranking names;
+    3) also searches HIDDEN DOM containers, because FIP can preload both genders
+       and hide one with CSS;
+    4) returns whichever source is positively verified as female.
     """
     diag = {
         "playwright": False,
-        "results_clicked": False,
         "female_clicked": False,
         "female_verified": False,
-        "female_hits": 0,
-        "snapshots": 0,
-        "input_candidates": 0,
-        "winning_input": "",
+        "visible_female_hits": 0,
+        "hidden_female_hits": 0,
+        "network_female_hits": 0,
+        "network_payloads": 0,
+        "inputs": 0,
+        "source_mode": "",
     }
 
     if async_playwright is None:
@@ -969,7 +965,6 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
     if not url:
         return "", diag
 
-    # Dynamic women's names are our verification oracle.
     try:
         ranking_names = await get_womens_ranking_names(limit=200)
     except Exception:
@@ -977,8 +972,16 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
 
     ranking_norm = [_norm_person_name(x) for x in ranking_names if x]
 
+    def count_hits(text: str) -> int:
+        norm = _norm_person_name(text)
+        padded = f" {norm} "
+        return len({
+            name for name in ranking_norm
+            if name and f" {name} " in padded
+        })
+
     browser = None
-    snapshots = []
+    network_payloads = []
 
     try:
         async with async_playwright() as p:
@@ -993,303 +996,258 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                 locale="en-US",
             )
 
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            await page.wait_for_timeout(1800)
-
-            async def body_text() -> str:
+            # Capture XHR/fetch from the start. We later keep only payloads verified
+            # by women's ranking names, so male bootstrap data is harmless.
+            async def on_response(response):
                 try:
-                    return await page.locator("body").inner_text(timeout=6000)
-                except Exception:
-                    return ""
-
-            async def female_hit_count() -> int:
-                body = _norm_person_name(await body_text())
-                # Count unique full ranked names visible in the rendered page.
-                hits = {name for name in ranking_norm if name and f" {name} " in f" {body} "}
-                return len(hits)
-
-            async def capture(tag: str):
-                body = await body_text()
-                if body and len(body) > 200:
-                    snapshots.append(f"\n=== {tag} ===\n{body}")
-                    diag["snapshots"] += 1
-
-            # --------------------------------------------------------------
-            # 1) Activate RESULTS robustly.
-            # --------------------------------------------------------------
-            try:
-                clicked = await page.evaluate(r"""
-                () => {
-                  const norm = s => (s || '').replace(/\s+/g,' ').trim().toLowerCase();
-                  const all = Array.from(document.querySelectorAll('a,button,[role="tab"],[role="button"],div,span'));
-                  const candidates = all.filter(el => norm(el.textContent) === 'results' || norm(el.textContent) === 'resultados');
-
-                  for (const el of candidates) {
-                    const target =
-                      el.closest('a,button,[role="tab"],[role="button"]') ||
-                      el;
-                    try {
-                      target.click();
-                      target.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}));
-                      return true;
-                    } catch(e) {}
-                  }
-                  return false;
-                }
-                """)
-                if clicked:
-                    diag["results_clicked"] = True
-                    await page.wait_for_timeout(1200)
-            except Exception:
-                pass
-
-            # URL/tab fallback as well.
-            if not diag["results_clicked"]:
-                try:
-                    results_url = url + ("&" if "?" in url else "?") + "tab=Results"
-                    await page.goto(results_url, wait_until="domcontentloaded", timeout=45000)
-                    await page.wait_for_timeout(1200)
+                    if response.request.resource_type not in {"xhr", "fetch"}:
+                        return
+                    ct = (response.headers.get("content-type") or "").lower()
+                    if not any(x in ct for x in ("json", "text", "html")):
+                        return
+                    body = await response.text()
+                    if body and 20 < len(body) < 500000:
+                        network_payloads.append(
+                            {"url": response.url, "body": body}
+                        )
                 except Exception:
                     pass
 
-            # --------------------------------------------------------------
-            # 2) Direct Female activation by text + nearby input.
-            # --------------------------------------------------------------
+            page.on("response", on_response)
+
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            await page.wait_for_timeout(1800)
+
+            # Activate Results with several strategies.
+            for label in ("Results", "Resultados"):
+                try:
+                    loc = page.get_by_text(label, exact=True).first
+                    if await loc.count():
+                        await loc.click(force=True, timeout=3000)
+                        await page.wait_for_timeout(900)
+                        break
+                except Exception:
+                    pass
+
             try:
-                direct = await page.evaluate(r"""
+                await page.evaluate(r"""
                 () => {
                   const norm = s => (s || '').replace(/\s+/g,' ').trim().toLowerCase();
-                  const labels = ['female','women','femenino','femenina'];
-                  const all = Array.from(document.querySelectorAll('*'));
-
-                  for (const el of all) {
-                    if (!labels.includes(norm(el.textContent))) continue;
-
-                    const attempts = [
-                      el,
-                      el.closest('label'),
-                      el.closest('button'),
-                      el.closest('[role="button"]'),
-                      el.parentElement,
-                    ].filter(Boolean);
-
-                    // Inputs inside/around the visual label.
-                    const parent = el.parentElement;
-                    if (parent) {
-                      attempts.push(parent.querySelector('input'));
-                      attempts.push(parent.previousElementSibling);
-                      attempts.push(parent.nextElementSibling);
-                    }
-
-                    for (const target of attempts.filter(Boolean)) {
+                  const els = Array.from(document.querySelectorAll('a,button,[role=tab],[role=button],li,div,span'));
+                  for (const el of els) {
+                    if (['results','resultados'].includes(norm(el.textContent))) {
                       try {
-                        if (target.tagName === 'INPUT') {
-                          target.click();
-                          target.checked = true;
-                          target.dispatchEvent(new Event('input', {bubbles:true}));
-                          target.dispatchEvent(new Event('change', {bubbles:true}));
-                        } else {
-                          target.click();
-                          target.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}));
-                        }
-                        return true;
+                        el.click();
+                        el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
                       } catch(e) {}
                     }
                   }
-                  return false;
                 }
                 """)
-                if direct:
-                    diag["female_clicked"] = True
-                    await page.wait_for_timeout(1500)
+                await page.wait_for_timeout(900)
             except Exception:
                 pass
 
-            hits = await female_hit_count()
-            diag["female_hits"] = hits
-            if hits >= 2:
-                diag["female_verified"] = True
+            # Visible body baseline.
+            try:
+                visible = await page.locator("body").inner_text(timeout=6000)
+            except Exception:
+                visible = ""
+            diag["visible_female_hits"] = count_hits(visible)
 
-            # --------------------------------------------------------------
-            # 3) Probe inputs if direct click did not actually load women.
-            # We don't guess which radio is Female: we click a candidate, wait,
-            # and verify against the women's ranking.
-            # --------------------------------------------------------------
-            if not diag["female_verified"]:
+            # ----------------------------------------------------------
+            # Hidden DOM inspection BEFORE touching the gender selector.
+            # innerText misses display:none; textContent does not.
+            # ----------------------------------------------------------
+            try:
+                hidden_candidates = await page.evaluate(r"""
+                () => {
+                  const out = [];
+                  const nodes = Array.from(document.querySelectorAll('body *'));
+                  for (const el of nodes) {
+                    const text = (el.textContent || '').replace(/\s+/g,' ').trim();
+                    if (text.length < 40 || text.length > 30000) continue;
+                    const style = getComputedStyle(el);
+                    const hidden =
+                      style.display === 'none' ||
+                      style.visibility === 'hidden' ||
+                      el.hidden ||
+                      el.getAttribute('aria-hidden') === 'true';
+                    if (hidden) out.push(text);
+                  }
+                  return [...new Set(out)].slice(0,300);
+                }
+                """)
+            except Exception:
+                hidden_candidates = []
+
+            best_hidden = ""
+            best_hidden_hits = 0
+            for text in hidden_candidates:
+                hits = count_hits(text)
+                if hits > best_hidden_hits:
+                    best_hidden_hits = hits
+                    best_hidden = text
+
+            diag["hidden_female_hits"] = best_hidden_hits
+
+            # ----------------------------------------------------------
+            # Probe every plausible input/control and collect network.
+            # ----------------------------------------------------------
+            try:
+                input_count = await page.locator("input").count()
+            except Exception:
+                input_count = 0
+            diag["inputs"] = input_count
+
+            # First click text/labels with force.
+            for label in ("Female", "Women", "Femenino", "Femenina"):
                 try:
-                    input_meta = await page.evaluate(r"""
-                    () => Array.from(document.querySelectorAll('input')).map((el, i) => ({
-                      i,
-                      type: el.type || '',
-                      name: el.name || '',
-                      value: el.value || '',
-                      id: el.id || '',
-                      checked: !!el.checked,
-                      aria: el.getAttribute('aria-label') || '',
-                      cls: el.className || ''
-                    }))
-                    """)
-                except Exception:
-                    input_meta = []
-
-                # First likely radios/checkboxes, but include all inputs because
-                # FIP sometimes uses custom hidden inputs.
-                candidates = [
-                    x for x in input_meta
-                    if x.get("type") in {"radio", "checkbox", "button"} or
-                       any(k in (str(x).lower()) for k in ("female","women","gender","sex"))
-                ]
-                if not candidates:
-                    candidates = input_meta[:12]
-
-                diag["input_candidates"] = len(candidates)
-
-                for meta in candidates[:12]:
-                    idx = meta["i"]
-                    try:
-                        await page.evaluate(r"""
-                        (idx) => {
-                          const el = document.querySelectorAll('input')[idx];
-                          if (!el) return false;
-                          try { el.click(); } catch(e) {}
-                          try { el.checked = true; } catch(e) {}
-                          el.dispatchEvent(new Event('input', {bubbles:true}));
-                          el.dispatchEvent(new Event('change', {bubbles:true}));
-                          el.dispatchEvent(new MouseEvent('click', {bubbles:true, cancelable:true}));
-                          return true;
-                        }
-                        """, idx)
-                        await page.wait_for_timeout(1200)
-
-                        hits = await female_hit_count()
-                        if hits > diag["female_hits"]:
-                            diag["female_hits"] = hits
-
-                        if hits >= 2:
+                    locs = page.get_by_text(label, exact=True)
+                    for i in range(await locs.count()):
+                        try:
+                            await locs.nth(i).click(force=True, timeout=1500)
+                            await page.wait_for_timeout(1000)
                             diag["female_clicked"] = True
-                            diag["female_verified"] = True
-                            diag["winning_input"] = (
-                                f"#{idx} type={meta.get('type')} "
-                                f"name={meta.get('name')} value={meta.get('value')} id={meta.get('id')}"
-                            )
-                            break
-                    except Exception:
-                        continue
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
 
-            # If we still cannot verify women, DO NOT feed the male DOM to parser.
-            if not diag["female_verified"]:
-                await capture("female-not-verified-debug")
-                print(
-                    "  FIP browser: NO se pudo activar Female",
-                    f"inputs={diag['input_candidates']}",
-                    f"female_hits={diag['female_hits']}",
-                )
-                await browser.close()
-                return "", diag
+            # Then probe each input and its associated label/siblings.
+            for idx in range(min(input_count, 15)):
+                try:
+                    await page.evaluate(r"""
+                    (idx) => {
+                      const el = document.querySelectorAll('input')[idx];
+                      if (!el) return;
+                      const targets = [
+                        el,
+                        el.closest('label'),
+                        el.parentElement,
+                        el.previousElementSibling,
+                        el.nextElementSibling
+                      ].filter(Boolean);
 
-            # --------------------------------------------------------------
-            # 4) Female verified. Capture current results and all date controls.
-            # --------------------------------------------------------------
-            await capture("female-verified-current")
+                      for (const t of targets) {
+                        try { t.click(); } catch(e) {}
+                        try {
+                          t.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                        } catch(e) {}
+                      }
 
-            # Date selects.
+                      try { el.checked = !el.checked; } catch(e) {}
+                      try { el.dispatchEvent(new Event('input',{bubbles:true})); } catch(e) {}
+                      try { el.dispatchEvent(new Event('change',{bubbles:true})); } catch(e) {}
+                    }
+                    """, idx)
+                    await page.wait_for_timeout(1000)
+                except Exception:
+                    continue
+
+            # Give asynchronous requests time to complete.
+            await page.wait_for_timeout(1200)
+
+            # Check visible DOM after probing.
             try:
-                selects = page.locator("select")
-                for si in range(await selects.count()):
-                    sel = selects.nth(si)
-                    opts = sel.locator("option")
-                    option_data = []
-
-                    for oi in range(await opts.count()):
-                        opt = opts.nth(oi)
-                        txt = re.sub(r"\s+", " ", (await opt.inner_text()).strip())
-                        val = await opt.get_attribute("value")
-                        if txt and re.search(
-                            r"(?:\bMon\b|\bTue\b|\bWed\b|\bThu\b|\bFri\b|\bSat\b|\bSun\b|"
-                            r"\bMonday\b|\bTuesday\b|\bWednesday\b|\bThursday\b|\bFriday\b|\bSaturday\b|\bSunday\b|"
-                            r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9})",
-                            txt, re.I
-                        ):
-                            option_data.append((val, txt))
-
-                    if 1 <= len(option_data) <= 14:
-                        for val, txt in option_data:
-                            try:
-                                if val:
-                                    await sel.select_option(value=val)
-                                else:
-                                    await sel.select_option(label=txt)
-                                await page.wait_for_timeout(900)
-                                # Verify we didn't accidentally revert gender.
-                                if await female_hit_count() >= 2:
-                                    await capture(f"female-date:{txt}")
-                            except Exception:
-                                pass
+                visible_after = await page.locator("body").inner_text(timeout=6000)
             except Exception:
-                pass
+                visible_after = ""
 
-            # Date chips/buttons.
+            visible_hits_after = count_hits(visible_after)
+            diag["visible_female_hits"] = max(
+                diag["visible_female_hits"], visible_hits_after
+            )
+
+            # Re-scan hidden DOM after controls were toggled.
             try:
-                candidates = page.locator("button, [role=button], [class*=date]")
-                seen = set()
-
-                for i in range(min(await candidates.count(), 100)):
-                    el = candidates.nth(i)
-                    try:
-                        txt = re.sub(r"\s+", " ", (await el.inner_text()).strip())
-                        if not txt or txt in seen:
-                            continue
-                        if not re.search(
-                            r"(?:\bMon\b|\bTue\b|\bWed\b|\bThu\b|\bFri\b|\bSat\b|\bSun\b|"
-                            r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9})",
-                            txt, re.I
-                        ):
-                            continue
-                        if not await el.is_visible():
-                            continue
-
-                        seen.add(txt)
-                        await el.click(timeout=1800)
-                        await page.wait_for_timeout(800)
-
-                        if await female_hit_count() >= 2:
-                            await capture(f"female-date-button:{txt}")
-                    except Exception:
-                        pass
+                all_text_candidates = await page.evaluate(r"""
+                () => {
+                  const out = [];
+                  const nodes = Array.from(document.querySelectorAll('body *'));
+                  for (const el of nodes) {
+                    const text = (el.textContent || '').replace(/\s+/g,' ').trim();
+                    if (text.length >= 40 && text.length <= 40000) out.push(text);
+                  }
+                  return [...new Set(out)].slice(0,600);
+                }
+                """)
             except Exception:
-                pass
+                all_text_candidates = []
+
+            best_dom = ""
+            best_dom_hits = 0
+            for text in all_text_candidates:
+                hits = count_hits(text)
+                if hits > best_dom_hits:
+                    best_dom_hits = hits
+                    best_dom = text
+
+            diag["hidden_female_hits"] = max(
+                diag["hidden_female_hits"], best_dom_hits
+            )
+
+            # Verify captured network responses.
+            best_network = ""
+            best_network_hits = 0
+            best_network_url = ""
+
+            for payload in network_payloads:
+                hits = count_hits(payload["body"])
+                if hits > best_network_hits:
+                    best_network_hits = hits
+                    best_network = payload["body"]
+                    best_network_url = payload["url"]
+
+            diag["network_payloads"] = len(network_payloads)
+            diag["network_female_hits"] = best_network_hits
+
+            # ----------------------------------------------------------
+            # Choose positively verified female source.
+            # Prefer network JSON/API, then full/hidden DOM, then visible DOM.
+            # ----------------------------------------------------------
+            source = ""
+
+            if best_network_hits >= 2:
+                source = f"=== FEMALE NETWORK {best_network_url} ===\n{best_network}"
+                diag["female_verified"] = True
+                diag["source_mode"] = "network"
+            elif best_dom_hits >= 2:
+                source = f"=== FEMALE DOM ===\n{best_dom}"
+                diag["female_verified"] = True
+                diag["source_mode"] = "hidden-or-full-dom"
+            elif visible_hits_after >= 2:
+                source = f"=== FEMALE VISIBLE ===\n{visible_after}"
+                diag["female_verified"] = True
+                diag["source_mode"] = "visible-dom"
+
+            if diag["female_verified"]:
+                diag["female_clicked"] = True
 
             await browser.close()
             browser = None
 
+            print(
+                "  FIP female probe:",
+                f"verified={diag['female_verified']}",
+                f"mode={diag['source_mode'] or '-'}",
+                f"visible_hits={diag['visible_female_hits']}",
+                f"hidden_hits={diag['hidden_female_hits']}",
+                f"network_hits={diag['network_female_hits']}",
+                f"xhr={diag['network_payloads']}",
+                f"inputs={diag['inputs']}",
+            )
+
+            return source[:350000], diag
+
     except Exception as exc:
-        print(f"  FIP browser extraction error: {type(exc).__name__}: {exc}")
+        print(f"  FIP female probe error: {type(exc).__name__}: {exc}")
         if browser is not None:
             try:
                 await browser.close()
             except Exception:
                 pass
         return "", diag
-
-    # Dedupe snapshots.
-    unique = []
-    seen = set()
-    for snap in snapshots:
-        key = re.sub(r"\s+", " ", snap)[:4000]
-        if key not in seen:
-            seen.add(key)
-            unique.append(snap)
-
-    print(
-        "  FIP browser:",
-        f"female={diag['female_clicked']}",
-        f"verified={diag['female_verified']}",
-        f"female_hits={diag['female_hits']}",
-        f"snapshots={len(unique)}",
-        f"winning_input={diag['winning_input'] or '-'}",
-    )
-
-    return "\n".join(unique)[:250000], diag
 
 
 async def _womens_ranking_validation_sets() -> tuple[set[str], set[str], bool]:
@@ -1380,22 +1338,14 @@ def _round_from_snapshot(snapshot: str, event: dict) -> str:
 
 async def _extract_official_results(event: dict, gender: str = "female") -> list:
     """
-    Resultados femeninos SIN Groq.
+    Results parser v29.
 
-    La web FIP renderiza un partido como:
-      Jugadora A
-      Jugadora B
-      ✓
-      6
-      6
-      Jugadora C
-      Jugadora D
-      3
-      4
+    Accepts verified female source from:
+      - XHR/fetch JSON/text,
+      - hidden/preloaded DOM,
+      - visible DOM.
 
-    Por tanto NO buscamos "6-3 6-4". Recorremos el texto renderizado,
-    detectamos las cuatro jugadoras mediante el ranking femenino y
-    reconstruimos los sets a partir de las celdas numéricas.
+    It never uses Groq.
     """
     gender = (gender or "female").strip().lower()
     if gender in {"women", "woman"}:
@@ -1406,20 +1356,14 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     if gender == "female":
         try:
-            result = await _browser_fip_womens_results_text(event)
-            if isinstance(result, tuple):
-                source, browser_diag = result
-            else:
-                source = result or ""
+            source, browser_diag = await _browser_fip_womens_results_text(event)
         except Exception as exc:
-            print(f"  live browser results error: {type(exc).__name__}: {exc}")
+            print(f"  live source error: {type(exc).__name__}: {exc}")
 
     if not source:
         _LIVE_DEBUG_STATE.update({
             "browser": browser_diag,
-            "parser": "ranking-stream-v27",
-            "snapshots_seen": 0,
-            "female_player_hits": 0,
+            "parser": "female-source-v29",
             "parsed_results": 0,
             "valid_results": 0,
             "source_chars": 0,
@@ -1429,150 +1373,145 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     ranking_full, ranking_surnames, _ = await _womens_ranking_validation_sets()
 
-    def match_player(line: str) -> str | None:
-        norm = _norm_person_name(line)
+    def match_player(text: str) -> str | None:
+        norm = _norm_person_name(text)
         if not norm:
             return None
-
-        # Strip seed / Q / WC / winner markers after normalization.
-        norm = re.sub(r"\b(?:q|wc|ll)\b", " ", norm)
-        norm = re.sub(r"\s+", " ", norm).strip()
-
-        # Exact match preferred.
         if norm in ranking_full:
             return norm
-
-        # FIP can append seed markers to same line.
         candidates = [name for name in ranking_full if name and name in norm]
-        if candidates:
-            return max(candidates, key=len)
+        return max(candidates, key=len) if candidates else None
 
-        return None
+    # ----------------------------------------------------------
+    # Convert network JSON to an ordered scalar stream.
+    # ----------------------------------------------------------
+    scalar_lines = []
 
-    def score_numbers(lines: list[str]) -> list[int]:
-        nums = []
-        for line in lines:
-            text = line.strip()
-            # Scores in FIP are standalone integers. Ignore seeds like "(1)".
-            if re.fullmatch(r"\d{1,2}", text):
-                value = int(text)
-                if 0 <= value <= 20:
-                    nums.append(value)
-        return nums
+    raw_payload = source.split("\n", 1)[1] if "\n" in source else source
 
-    # Browser extractor labels every body capture with === <tag> ===.
-    segments = re.split(r"\n===\s*([^=]+?)\s*===\n", source)
-    snapshots = []
-    if len(segments) >= 3:
-        for i in range(1, len(segments), 2):
-            tag = segments[i].strip()
-            body = segments[i + 1] if i + 1 < len(segments) else ""
-            # Matchblock fragments from v25 are not needed; full page snapshots are.
-            if "matchblock" not in tag.lower():
-                snapshots.append((tag, body))
+    if browser_diag.get("source_mode") == "network":
+        try:
+            obj = json.loads(raw_payload)
+
+            def walk(value):
+                if isinstance(value, dict):
+                    # Preserve insertion order from response.
+                    for k, v in value.items():
+                        # Keys can carry semantic hints like score/player/round.
+                        scalar_lines.append(str(k))
+                        walk(v)
+                elif isinstance(value, list):
+                    for item in value:
+                        walk(item)
+                elif value is not None:
+                    scalar_lines.append(str(value))
+
+            walk(obj)
+        except Exception:
+            # Network response may be HTML/text instead of JSON.
+            scalar_lines = raw_payload.splitlines()
     else:
-        snapshots = [("current", source)]
+        scalar_lines = raw_payload.splitlines()
 
-    parsed = []
-    total_hits = 0
+    lines = [re.sub(r"\s+", " ", str(x)).strip() for x in scalar_lines]
+    lines = [x for x in lines if x]
 
-    for tag, body in snapshots:
-        lines = [re.sub(r"\s+", " ", x).strip() for x in body.splitlines()]
-        lines = [x for x in lines if x]
+    round_aliases = [
+        (r"\bsemi[- ]?finals?\b|\bsf\b", "Semifinales"),
+        (r"\bquarter[- ]?finals?\b|\bqf\b", "Cuartos de final"),
+        (r"\bround of 16\b|\br16\b", "Octavos de final"),
+        (r"\b2nd round\b|\bsecond round\b|\br2\b", "Segunda ronda"),
+        (r"\b1st round\b|\bfirst round\b|\br1\b", "Primera ronda"),
+        (r"\bfinal\b", "Final"),
+        (r"\bqual", "Clasificación"),
+    ]
 
-        # Locate every line that is a known female-ranked player.
-        hits = []
-        for idx, line in enumerate(lines):
-            player = match_player(line)
-            if player:
-                # Same player can appear in a seed/duplicate adjacent DOM node.
-                if hits and hits[-1][0] == idx - 1 and hits[-1][1] == player:
-                    continue
+    # Identify player hits in stream.
+    hits = []
+    current_round = "Partidos"
+    round_at_index = {}
+
+    for idx, line in enumerate(lines):
+        low = line.lower()
+        for pat, label in round_aliases:
+            if re.search(pat, low):
+                current_round = label
+                break
+        round_at_index[idx] = current_round
+
+        player = match_player(line)
+        if player:
+            if not hits or not (hits[-1][1] == player and hits[-1][0] == idx - 1):
                 hits.append((idx, player))
 
-        total_hits += len(hits)
-        if len(hits) < 4:
+    # Numeric score cell helper.
+    def nums_between(a: int, b: int):
+        vals = []
+        for line in lines[a:b]:
+            # Standalone score cells only.
+            if re.fullmatch(r"\d{1,2}", line):
+                n = int(line)
+                if 0 <= n <= 20:
+                    vals.append(n)
+        return vals
+
+    parsed = []
+    pos = 0
+
+    while pos + 3 < len(hits):
+        i1, p1 = hits[pos]
+        i2, p2 = hits[pos + 1]
+        i3, p3 = hits[pos + 2]
+        i4, p4 = hits[pos + 3]
+        nxt = hits[pos + 4][0] if pos + 4 < len(hits) else len(lines)
+
+        a_scores = nums_between(i2 + 1, i3)
+        b_scores = nums_between(i4 + 1, nxt)
+
+        # JSON APIs often emit all set scores after the four players.
+        if min(len(a_scores), len(b_scores)) < 2:
+            combined = nums_between(i4 + 1, nxt)
+            if len(combined) in {4, 6}:
+                half = len(combined) // 2
+                a_scores = combined[:half]
+                b_scores = combined[half:]
+
+        count = min(len(a_scores), len(b_scores), 3)
+        if count < 2:
+            pos += 1
             continue
 
-        round_name = _round_from_snapshot(f"{tag}\n{body[:1200]}", event)
+        a_scores = a_scores[:count]
+        b_scores = b_scores[:count]
 
-        # A match is four consecutive female-player hits in rendered order.
-        # We advance by one quartet only when a valid score layout is found;
-        # otherwise slide forward to tolerate duplicate draw content.
-        pos = 0
-        while pos + 3 < len(hits):
-            a_i, a = hits[pos]
-            b_i, b = hits[pos + 1]
-            c_i, c = hits[pos + 2]
-            d_i, d = hits[pos + 3]
-            next_i = hits[pos + 4][0] if pos + 4 < len(hits) else len(lines)
+        a_sets = sum(1 for a,b in zip(a_scores,b_scores) if a>b)
+        b_sets = sum(1 for a,b in zip(a_scores,b_scores) if b>a)
 
-            # Pair A scores sit after its second player and before pair B begins.
-            a_scores = score_numbers(lines[b_i + 1:c_i])
+        if a_sets == b_sets:
+            pos += 1
+            continue
 
-            # Pair B scores sit after its second player and before next match.
-            b_scores = score_numbers(lines[d_i + 1:next_i])
+        rnd = round_at_index.get(i1, "Partidos")
+        pair_a = f"{p1.title()} / {p2.title()}"
+        pair_b = f"{p3.title()} / {p4.title()}"
 
-            # Winner marker location.
-            first_pair_text = " ".join(lines[a_i:c_i])
-            second_pair_text = " ".join(lines[c_i:next_i])
-            tick_a = "✓" in first_pair_text
-            tick_b = "✓" in second_pair_text
+        if a_sets > b_sets:
+            winner, loser = pair_a, pair_b
+            score = "  ".join(f"{a}-{b}" for a,b in zip(a_scores,b_scores))
+        else:
+            winner, loser = pair_b, pair_a
+            score = "  ".join(f"{b}-{a}" for a,b in zip(a_scores,b_scores))
 
-            # Completed match: each pair needs at least two set scores.
-            sets_count = min(len(a_scores), len(b_scores), 3)
+        parsed.append({
+            "round": rnd,
+            "winner": winner,
+            "loser": loser,
+            "score": score,
+            "date": "",
+        })
+        pos += 4
 
-            # Some FIP layouts put all score cells after all 4 names.
-            if sets_count < 2:
-                combined = score_numbers(lines[d_i + 1:next_i])
-                if len(combined) in {4, 6}:
-                    half = len(combined) // 2
-                    a_scores = combined[:half]
-                    b_scores = combined[half:]
-                    sets_count = min(len(a_scores), len(b_scores), 3)
-
-            if sets_count < 2:
-                pos += 1
-                continue
-
-            a_scores = a_scores[:sets_count]
-            b_scores = b_scores[:sets_count]
-
-            a_sets = sum(1 for x, y in zip(a_scores, b_scores) if x > y)
-            b_sets = sum(1 for x, y in zip(a_scores, b_scores) if y > x)
-
-            # Winner tick is authoritative when present; otherwise infer by sets.
-            if tick_a and not tick_b:
-                winner_side = "a"
-            elif tick_b and not tick_a:
-                winner_side = "b"
-            elif a_sets != b_sets:
-                winner_side = "a" if a_sets > b_sets else "b"
-            else:
-                pos += 1
-                continue
-
-            pair_a = f"{a.title()} / {b.title()}"
-            pair_b = f"{c.title()} / {d.title()}"
-
-            if winner_side == "a":
-                winner, loser = pair_a, pair_b
-                score = "  ".join(f"{x}-{y}" for x, y in zip(a_scores, b_scores))
-            else:
-                winner, loser = pair_b, pair_a
-                score = "  ".join(f"{y}-{x}" for x, y in zip(a_scores, b_scores))
-
-            parsed.append({
-                "round": round_name,
-                "winner": winner,
-                "loser": loser,
-                "score": score,
-                "date": "",
-            })
-
-            pos += 4
-
-    # Dedupe snapshots/days.
+    # Dedupe
     valid = []
     seen = set()
     for item in parsed:
@@ -1594,9 +1533,8 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     _LIVE_DEBUG_STATE.update({
         "browser": browser_diag,
-        "parser": "ranking-stream-v27",
-        "snapshots_seen": len(snapshots),
-        "female_player_hits": total_hits,
+        "parser": "female-source-v29",
+        "female_player_hits": len(hits),
         "parsed_results": len(parsed),
         "valid_results": len(valid),
         "ranking_players_seen": len(ranking_full),
@@ -1606,8 +1544,8 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     print(
         "  live parser:",
-        f"snapshots={len(snapshots)}",
-        f"female_hits={total_hits}",
+        f"source={browser_diag.get('source_mode') or '-'}",
+        f"female_hits={len(hits)}",
         f"parsed={len(parsed)}",
         f"valid={len(valid)}",
     )
