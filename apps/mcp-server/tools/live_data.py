@@ -1418,7 +1418,10 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
         "states_scanned": 0,
         "candidate_blocks": 0,
         "female_blocks": 0,
-        "source_mode": "full-draw-alias-v77",
+        "source_mode": "direct-fip-results-v105",
+        "results_url": "",
+        "results_body_chars": 0,
+        "results_rank_hits": 0,
     }
 
     if async_playwright is None:
@@ -1450,21 +1453,108 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
 
             page = await browser.new_page(
                 viewport={"width": 1600, "height": 2200},
-                locale="en-US",
+                locale="es-ES",
             )
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            await page.wait_for_timeout(1600)
 
-            # Results tab.
-            for label in ("Results", "Resultados"):
+            # ----------------------------------------------------------
+            # Abrir DIRECTAMENTE Resultados.
+            #
+            # FIP no siempre cambia el contenido al hacer click en la pestaña
+            # desde Playwright. La URL oficial sí acepta ?tab=Resultados.
+            # Probamos primero la versión ES y dejamos EN como fallback.
+            # ----------------------------------------------------------
+            parsed_url = urlparse(url)
+            path = parsed_url.path or ""
+
+            # Normalizar slug entre /events/ y /es/eventos/.
+            slug = ""
+            m_slug = re.search(r"/(?:events|eventos)/([^/]+)/?", path, re.I)
+            if m_slug:
+                slug = m_slug.group(1)
+
+            candidates = []
+            if slug:
+                candidates.extend([
+                    f"https://www.padelfip.com/es/eventos/{slug}/?tab=Resultados",
+                    f"https://www.padelfip.com/events/{slug}/?tab=Results",
+                ])
+
+            # Mantener también la URL original con ambas variantes de tab.
+            base_no_query = urlunparse(parsed_url._replace(query="", fragment=""))
+            candidates.extend([
+                _add_query(base_no_query, tab="Resultados"),
+                _add_query(base_no_query, tab="Results"),
+                url,
+            ])
+
+            seen_urls = set()
+            result_urls = []
+            for candidate in candidates:
+                if candidate and candidate not in seen_urls:
+                    seen_urls.add(candidate)
+                    result_urls.append(candidate)
+
+            chosen_url = ""
+            best_score = -1
+
+            for candidate in result_urls:
                 try:
-                    loc = page.get_by_text(label, exact=True).first
-                    if await loc.count():
-                        await loc.click(force=True, timeout=2500)
-                        await page.wait_for_timeout(900)
+                    await page.goto(candidate, wait_until="domcontentloaded", timeout=45000)
+                    await page.wait_for_timeout(2600)
+
+                    # Si FIP pinta la pestaña pero todavía no la activa, click secundario.
+                    for label in ("Resultados", "Results"):
+                        try:
+                            loc = page.get_by_text(label, exact=True).first
+                            if await loc.count() and await loc.is_visible():
+                                await loc.click(force=True, timeout=1800)
+                                await page.wait_for_timeout(1000)
+                                break
+                        except Exception:
+                            pass
+
+                    body = await page.locator("body").inner_text()
+                    body_norm = _norm_person_name(body)
+
+                    # Preferir una página que ya contenga varias jugadoras conocidas.
+                    rank_hits = sum(
+                        1 for profile in ranking_profiles
+                        if _norm_person_name(profile.get("display",""))
+                        and _norm_person_name(profile.get("display","")) in body_norm
+                    )
+
+                    # La propia pestaña de Resultados debe aportar bastante contenido.
+                    score = rank_hits * 100 + len(body)
+
+                    if score > best_score:
+                        best_score = score
+                        chosen_url = candidate
+                        diag["results_body_chars"] = len(body)
+                        diag["results_rank_hits"] = rank_hits
+
+                    # Si ya vemos varias jugadoras, no seguimos navegando y arriesgando
+                    # perder el estado bueno.
+                    if rank_hits >= 4:
+                        chosen_url = candidate
                         break
                 except Exception:
+                    continue
+
+            if chosen_url and page.url != chosen_url:
+                try:
+                    await page.goto(chosen_url, wait_until="domcontentloaded", timeout=45000)
+                    await page.wait_for_timeout(2600)
+                except Exception:
                     pass
+
+            diag["results_url"] = chosen_url or page.url
+
+            print(
+                "  FIP Results page:",
+                f"url={diag['results_url']}",
+                f"chars={diag['results_body_chars']}",
+                f"ranking_hits={diag['results_rank_hits']}",
+            )
 
             async def collect_state(tag: str):
                 diag["states_scanned"] += 1
@@ -1731,9 +1821,21 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                 except Exception:
                     pass
 
-            # Estado inicial (por si FIP precarga datos).
+            # Estado inicial.
             await collect_state("default")
             await collect_dates("default")
+
+            # Si la URL de Resultados ha cargado pero aún no hay bloques, FIP puede
+            # haber tardado en hidratar el componente. Un único reload antes de
+            # activar Female evita devolver 0 por una carga incompleta.
+            if not collected:
+                try:
+                    await page.reload(wait_until="domcontentloaded", timeout=45000)
+                    await page.wait_for_timeout(2600)
+                    await collect_state("reload")
+                    await collect_dates("reload")
+                except Exception:
+                    pass
 
             # ----------------------------------------------------------
             # Activación precisa de Female.
@@ -1846,6 +1948,8 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
         f"states={diag['states_scanned']}",
         f"candidates={diag['candidate_blocks']}",
         f"blocks={diag['female_blocks']}",
+        f"results_url={diag.get('results_url','')}",
+        f"rank_hits={diag.get('results_rank_hits',0)}",
     )
 
     return json.dumps({"blocks": unique, "diag": diag}, ensure_ascii=False), diag
