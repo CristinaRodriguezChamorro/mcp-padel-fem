@@ -875,6 +875,31 @@ nav {
   .rank-photo{width:56px;height:56px}
 }
 
+
+/* ── ¿SABÍAS QUE? ─────────────────────────────────────────────── */
+.sq-intro{
+  border:1px solid #30394a;border-radius:16px;padding:28px 30px;margin-bottom:16px;
+  background:radial-gradient(circle at 95% 10%,rgba(198,112,239,.15),transparent 28%),linear-gradient(135deg,#111827,#0c1420)
+}
+.sq-intro-kicker{color:#c77df3;text-transform:uppercase;letter-spacing:.12em;font-size:.72em;font-weight:950}
+.sq-intro-title{margin-top:7px;color:#fff;font-size:1.65em;line-height:1.1;font-weight:1000}
+.sq-intro-text{margin-top:10px;color:#c5c1ca;max-width:760px;line-height:1.55}
+.sq-intro-note{margin-top:14px;color:#777381;font-size:.76em;font-weight:650}
+.sq-filterbar{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 16px}
+.sq-filter{appearance:none;border:1px solid #343d4f;background:#111827;color:#bdb8c5;border-radius:999px;padding:8px 14px;font:inherit;font-size:.78em;font-weight:850;cursor:pointer}
+.sq-filter:hover,.sq-filter.active{color:#fff;border-color:#9e5fc9;background:#271533}
+.sq-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+.sq-card{min-width:0;border:1px solid #30394a;border-radius:14px;background:linear-gradient(145deg,#101826,#0d1521);padding:20px}
+.sq-card-featured{grid-column:1/-1;background:radial-gradient(circle at 90% 18%,rgba(212,128,255,.14),transparent 26%),linear-gradient(145deg,#14192a,#0d1521)}
+.sq-top{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:13px}
+.sq-type{display:inline-flex;align-items:center;gap:6px;color:#cf84f5;font-size:.72em;font-weight:950;text-transform:uppercase;letter-spacing:.07em}
+.sq-year{color:#777381;font-size:.72em;font-weight:750}
+.sq-title{color:#fff;font-size:1.15em;line-height:1.25;font-weight:950}
+.sq-body{margin-top:9px;color:#bdb9c4;line-height:1.55;font-size:.9em}
+.sq-source{display:flex;align-items:center;gap:7px;margin-top:16px;padding-top:12px;border-top:1px solid #283142;color:#777381;font-size:.72em;font-weight:650}
+.sq-source a{color:#b879dc;text-decoration:none}.sq-source a:hover{text-decoration:underline}
+@media(max-width:700px){.sq-grid{grid-template-columns:1fr}.sq-card-featured{grid-column:auto}.sq-intro{padding:20px 18px}.sq-intro-title{font-size:1.35em}}
+
 </style>
 </head>
 <body>
@@ -886,6 +911,7 @@ nav {
     <button class="tab" onclick="show('ranking',this)">Ranking</button>
     <button class="tab" onclick="show('torneos',this)">Torneos</button>
     <button class="tab" onclick="show('sponsors',this)">Sponsors</button>
+    <button class="tab" onclick="show('sabiasque',this)">¿Sabías que?</button>
   </div>
 </nav>
 
@@ -940,9 +966,66 @@ nav {
     </div>
     <div class="sponsors-list" id="sponsors-list"></div>
   </div>
+
+  <div id="sabiasque" class="section">
+    <div class="section-head">
+      <div class="section-title">¿Sabías que…? 💡</div>
+      <div class="section-sub">Reglas, historia y leyendas del pádel femenino</div>
+    </div>
+
+    <div class="sq-intro">
+      <div class="sq-intro-kicker">Cultura pádel</div>
+      <div class="sq-intro-title">Más allá del resultado</div>
+      <div class="sq-intro-text">Reglas oficiales, curiosidades históricas y protagonistas que han marcado el pádel femenino.</div>
+      <div class="sq-intro-note">Esta pestaña usa contenido guardado en la propia web y no hace llamadas nuevas a FIP al abrirse.</div>
+    </div>
+
+    <div class="sq-filterbar">
+      <button class="sq-filter active" onclick="filterSabiasQue('all',this)">Todo</button>
+      <button class="sq-filter" onclick="filterSabiasQue('reglas',this)">Reglas</button>
+      <button class="sq-filter" onclick="filterSabiasQue('historia',this)">Historia</button>
+      <button class="sq-filter" onclick="filterSabiasQue('leyendas',this)">Leyendas</button>
+    </div>
+
+    <div class="sq-grid" id="sq-grid"></div>
+  </div>
 </div>
 
 <script>
+
+const SABIAS_QUE_DATA=[
+  {type:"reglas",icon:"📘",year:"Reglamento",featured:true,title:"Las paredes forman parte del juego",body:"Tras botar en el campo correcto, la pelota puede tocar las paredes antes de ser devuelta. Esa interacción con cristal y pared es una de las grandes señas de identidad del pádel.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
+  {type:"reglas",icon:"🚪",year:"Reglamento",title:"Una pelota puede jugarse desde fuera de la pista",body:"Cuando la pista lo permite, una jugadora puede salir por la puerta para intentar devolver una pelota que ha botado correctamente y ha salido del recinto.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
+  {type:"reglas",icon:"🎾",year:"Reglamento",title:"El saque se ejecuta por debajo de la cintura",body:"El servicio se realiza tras botar la pelota y el impacto debe producirse a la altura de la cintura o por debajo.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
+  {type:"historia",icon:"🕰️",year:"Desde 1990",featured:true,title:"La historia del número 1 femenino se remonta décadas atrás",body:"La FIP mantiene un historial de las líderes del ranking femenino que permite seguir la evolución de las grandes generaciones del pádel.",source:"FIP · Ranking History",url:"https://www.padelfip.com/es/historial-de-clasificacion/"},
+  {type:"historia",icon:"👑",year:"Historia",title:"Carolina Navarro fue una referencia durante años",body:"El historial del ranking sitúa a Carolina Navarro repetidamente entre las grandes protagonistas de la élite femenina en distintas temporadas.",source:"FIP · Ranking History",url:"https://www.padelfip.com/es/historial-de-clasificacion/"},
+  {type:"leyendas",icon:"⭐",year:"Leyenda",title:"Carolina Navarro cerró su carrera profesional en Málaga",body:"La FIP presentó el Málaga P1 de 2025 como uno de los momentos de despedida de una de las grandes leyendas del pádel femenino.",source:"FIP · Málaga P1 2025",url:"https://www.padelfip.com/es/2025/07/dia2-navarro-a-octavos-la-leyenda-no-quiere-decir-adios/"},
+  {type:"historia",icon:"📊",year:"2026",title:"La FIP amplió sus estadísticas históricas",body:"En 2026 la web federativa incorporó nuevas herramientas para consultar títulos, finales e historia de los circuitos profesionales.",source:"FIP · Estadísticas 2026",url:"https://www.padelfip.com/es/2026/01/numeros-estadisticas-historia-de-los-circuitos-y-rankings-todas-las-nuevas-funcionalidades-del-sitio-web-de-la-fip-para-2026/"}
+];
+
+function renderSabiasQue(filter='all'){
+  const grid=document.getElementById('sq-grid');
+  if(!grid)return;
+  const items=SABIAS_QUE_DATA.filter(x=>filter==='all'||x.type===filter);
+  grid.innerHTML=items.map((x,i)=>`
+    <article class="sq-card ${x.featured?'sq-card-featured':''}">
+      <div class="sq-top">
+        <div class="sq-type">${x.icon} ${x.type==='reglas'?'Regla':x.type==='leyendas'?'Leyenda':'Historia'}</div>
+        <div class="sq-year">${x.year||''}</div>
+      </div>
+      <div class="sq-title">${x.title}</div>
+      <div class="sq-body">${x.body}</div>
+      <div class="sq-source">Fuente: <a href="${x.url}" target="_blank" rel="noopener">${x.source}</a></div>
+    </article>
+  `).join('');
+}
+
+function filterSabiasQue(filter,btn){
+  document.querySelectorAll('.sq-filter').forEach(x=>x.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  renderSabiasQue(filter);
+}
+
 const PLAYERS=[{title:"Ari_Sánchez",cap:"Ari Sánchez"},{title:"Gemma_Triay",cap:"Gemma Triay"},{title:"Marta_Ortega_Gallego",cap:"Marta Ortega"},{title:"Alejandra_Salazar",cap:"Alejandra Salazar"}];
 let cur=0,timer;
 async function getWikiPhoto(title){const url=`https://es.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(title)}&prop=pageimages&format=json&pithumbsize=1200&origin=*`;try{const r=await fetch(url);const d=await r.json();const page=Object.values(d.query.pages)[0];return page?.thumbnail?.source||null;}catch{return null;}}
@@ -960,14 +1043,23 @@ function show(id,btn){
   btn.classList.add('active');
   heroEl.style.display=id==='noticias'?'block':'none';
 
-  // EN JUEGO: cargar SIEMPRE al abrir la pestaña.
-  // Así no dependemos únicamente de la llamada inicial de la página.
+  // EN JUEGO:
+  // si ya tenemos datos recientes, los dejamos visibles inmediatamente
+  // y refrescamos sólo cuando el cache de cliente ha caducado.
   if(id==='enjuego'){
-    const live=document.getElementById('live-content');
-    if(live){
-      live.innerHTML='<div class="loading"><span class="spinner">🎾</span>Cargando torneo...</div>';
+    const now=Date.now();
+    const ttl=5*60*1000;
+    if(!window.__liveLastLoaded || (now-window.__liveLastLoaded)>ttl){
+      const live=document.getElementById('live-content');
+      if(live && !window.__liveHasRendered){
+        live.innerHTML='<div class="loading"><span class="spinner">🎾</span>Cargando torneo...</div>';
+      }
+      loadEnJuego();
     }
-    loadEnJuego();
+  }
+
+  if(id==='sabiasque'){
+    renderSabiasQue('all');
   }
 }
 
@@ -1181,6 +1273,9 @@ async function loadEnJuego(){
       ...extraRounds.map(round=>renderRoundGroup(round,false))
     ].join('');
 
+    window.__liveLastLoaded=Date.now();
+    window.__liveHasRendered=true;
+
     el.innerHTML=`<div class="live-tournament">
       <div class="live-summary">
         <div>
@@ -1338,7 +1433,8 @@ async function renderSponsors(){
   }
 }
 
-buildSlideshow();loadNews();loadEnJuego();loadRanking();loadTorneos();renderSponsors();
+buildSlideshow();loadNews();
+setTimeout(()=>{ if(!window.__liveHasRendered){ loadEnJuego(); } },1200);loadEnJuego();loadRanking();loadTorneos();renderSponsors();
 </script>
 </body>
 </html>
