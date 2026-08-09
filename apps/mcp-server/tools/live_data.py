@@ -1686,6 +1686,51 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                                 f"chars={len(body)}",
                                 f"preview={body[:220]!r}",
                             )
+
+                            # IMPORTANT v119:
+                            # get-result-data.php only returns metadata + the REAL
+                            # MatchScorer widget URL in `oopUrl`. Follow exactly that
+                            # URL; do not invent the widget path or tournament id.
+                            try:
+                                result_meta = json.loads(body)
+                            except Exception:
+                                result_meta = {}
+
+                            widget_url = str(result_meta.get("oopUrl", "") or "").strip()
+                            if widget_url:
+                                try:
+                                    widget_resp = await page.request.get(
+                                        widget_url,
+                                        headers={
+                                            "Referer": day_url,
+                                            "Accept": "text/html,application/xhtml+xml,application/json,text/plain,*/*",
+                                        },
+                                        timeout=25000,
+                                    )
+                                    widget_body = await widget_resp.text()
+                                    ajax_payloads.append({
+                                        "url": widget_url,
+                                        "method": "GET",
+                                        "resource_type": "results-widget",
+                                        "content_type": str(widget_resp.headers.get("content-type","") or ""),
+                                        "post_data": "",
+                                        "body": widget_body[:1500000],
+                                        "source_day": day_num,
+                                    })
+                                    print(
+                                        "  FIP RESULT WIDGET:",
+                                        f"day={day_num}/{total_day_int}",
+                                        f"status={widget_resp.status}",
+                                        f"chars={len(widget_body)}",
+                                        f"url={widget_url}",
+                                        f"preview={widget_body[:220]!r}",
+                                    )
+                                except Exception as exc:
+                                    print(
+                                        "  FIP RESULT WIDGET error:",
+                                        f"day={day_num}/{total_day_int}",
+                                        f"{type(exc).__name__}: {exc}",
+                                    )
                         except Exception as exc:
                             print(
                                 "  FIP RESULT DAY error:",
@@ -2380,6 +2425,9 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
             return vals[:12]
 
         for payload in payloads:
+            if str(payload.get("resource_type","")) == "results-widget":
+                continue
+
             body=str(payload.get("body","") or "")
             if not body:
                 continue
@@ -2591,6 +2639,135 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         return out
 
     # GET terminado. AHORA sí filtramos contra ranking100.
+    def _widget_blocks_after_get(payloads: list[dict]) -> list[dict]:
+        """
+        Parse the REAL MatchScorer `oopUrl` pages returned by FIP.
+
+        Capture already happened. Only now do we use ranking100.
+        We do not assume CSS classes or invent field names:
+        scan DOM leaves for ranking names + plausible score cells.
+        """
+        out=[]
+        seen=set()
+
+        def resolve_name(raw: str) -> str:
+            raw=re.sub(r"\s+"," ",str(raw or "")).strip()
+            if len(raw)<4 or len(raw)>120:
+                return ""
+            nr=_norm_person_name(raw)
+            if not nr:
+                return ""
+
+            # exact/full containment
+            matches=[]
+            for rn,display in ranking_display.items():
+                if nr==rn or nr in rn or rn in nr:
+                    matches.append((len(rn),display))
+            if matches:
+                return max(matches,key=lambda x:x[0])[1]
+
+            # safer partial fallback: require >=2 shared tokens
+            rt=set(nr.split())
+            partial=[]
+            for rn,display in ranking_display.items():
+                overlap=[t for t in (rt & set(rn.split())) if len(t)>=3]
+                if len(overlap)>=2:
+                    partial.append((sum(len(t) for t in overlap),display))
+            return max(partial,key=lambda x:x[0])[1] if partial else ""
+
+        for payload in payloads:
+            if str(payload.get("resource_type","")) != "results-widget":
+                continue
+
+            body=str(payload.get("body","") or "")
+            if not body:
+                continue
+
+            source_day=payload.get("source_day")
+            soup=BeautifulSoup(body,"html.parser")
+            root=soup.body or soup
+
+            candidates=[]
+
+            # Search containers from small to large. A real match candidate must
+            # contain exactly 4 distinct ranking100 players and >=4 score leaves.
+            for el in root.find_all(True):
+                text=re.sub(r"\s+"," ",el.get_text(" ",strip=True)).strip()
+                if not text or len(text)<15 or len(text)>5000:
+                    continue
+
+                leaves=[]
+                for node in el.find_all(True):
+                    if node.find(True):
+                        continue
+                    val=re.sub(r"\s+"," ",node.get_text(" ",strip=True)).strip()
+                    if val:
+                        leaves.append(val)
+
+                players=[]
+                pseen=set()
+                for leaf in leaves:
+                    resolved=resolve_name(leaf)
+                    if resolved and resolved.casefold() not in pseen:
+                        pseen.add(resolved.casefold())
+                        players.append(resolved)
+
+                if len(players)!=4:
+                    continue
+
+                scores=[]
+                for leaf in leaves:
+                    if re.fullmatch(r"\d{1,2}",leaf):
+                        n=int(leaf)
+                        if 0<=n<=20:
+                            scores.append(n)
+
+                if len(scores)<4 or len(scores)>12:
+                    continue
+
+                candidates.append((el,players,scores,text))
+
+            # Keep minimal containers so one match is not duplicated by parent nodes.
+            minimal=[]
+            for el,players,scores,text in candidates:
+                if any(
+                    other is not el and other in el.descendants
+                    for other,_,_,_ in candidates
+                ):
+                    continue
+                minimal.append((el,players,scores,text))
+
+            for _,players,scores,text in minimal:
+                key=(source_day,tuple(x.casefold() for x in players),tuple(scores))
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append({
+                    "tag":f"widget|day:{source_day}",
+                    "text":text[:3500],
+                    "players":players,
+                    "scores":scores,
+                    "pairing_mode":"widget-postfilter",
+                    "source":"results-widget",
+                    "source_day":source_day,
+                })
+
+        return out
+
+    widget_blocks=_widget_blocks_after_get(ajax_payloads)
+    if widget_blocks:
+        print(f"  WIDGET parse after GET: {len(widget_blocks)} partidos candidatos")
+        for preview in widget_blocks[:40]:
+            print(
+                "  widget card:",
+                f"day={preview.get('source_day')}",
+                f"{' / '.join(preview.get('players',[]))}",
+                f"scores={preview.get('scores',[])}",
+            )
+        blocks.extend(widget_blocks)
+    else:
+        print("  WIDGET parse after GET: 0 partidos candidatos")
+
     resultsbyday_blocks=_resultsbyday_blocks_after_get(ajax_payloads)
     if resultsbyday_blocks:
         print(f"  RESULTSBYDAY parse after GET: {len(resultsbyday_blocks)} partidos candidatos")
@@ -2951,7 +3128,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     _LIVE_DEBUG_STATE.update({
         "browser": capture_diag,
-        "parser": "resultsbyday-all-days-v118",
+        "parser": "follow-fip-oopurl-widget-v119",
         "raw_blocks": len(blocks),
         "raw_parsed_before_gender": raw_parsed_count,
         "female_after_filter": female_filtered_count,
