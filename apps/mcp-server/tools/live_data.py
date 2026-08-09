@@ -1395,25 +1395,32 @@ def _norm_person_name(value: str) -> str:
 
 async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
     """
-    EN JUEGO ONLY — v109
+    EN JUEGO ONLY — v111
 
-    CAPTURA SIN FILTRO DE GÉNERO.
+    CAPTURA LIMPIA DE RED.
 
-    1. Abre la ficha del torneo y Results/Resultados.
-    2. Recorre todos los estados/días disponibles.
-    3. Detecta bloques de partido por estructura visual + marcador.
-    4. Devuelve TODOS los partidos brutos.
-    5. El filtro femenino se aplica DESPUÉS en Python contra las 100 jugadoras.
+    No usa género.
+    No activa Female.
+    No usa ranking para decidir qué traer.
 
-    Esta función NO usa el ranking femenino para decidir qué bloque existe.
+    Primero abre Resultados y captura:
+      - responses XHR/fetch
+      - JSON
+      - HTML/texto dinámico relevante
+
+    Después el parser Python decidirá qué partidos son femeninos.
     """
     diag = {
         "playwright": False,
         "states_scanned": 0,
-        "candidate_blocks": 0,
-        "raw_blocks": 0,
+        "network_responses": 0,
+        "network_payloads": 0,
+        "network_bytes": 0,
+        "dom_candidates": 0,
+        "dom_blocks": 0,
         "state_tags": [],
-        "source_mode": "raw-results-no-gender-v109",
+        "source_mode": "clean-network-first-v111",
+        "network_urls": [],
     }
 
     if async_playwright is None:
@@ -1424,7 +1431,9 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
         return "", diag
 
     browser = None
-    collected = []
+    dom_blocks = []
+    network_payloads = []
+    pending_tasks = []
 
     try:
         async with async_playwright() as p:
@@ -1438,21 +1447,70 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                 viewport={"width": 1800, "height": 2600},
                 locale="en-US",
             )
+
+            async def capture_response(resp):
+                try:
+                    diag["network_responses"] += 1
+                    rurl = str(resp.url or "")
+                    headers = await resp.all_headers()
+                    ctype = str(headers.get("content-type", "")).lower()
+
+                    # Capturamos respuestas textuales/JSON de FIP sin aplicar género.
+                    if not (
+                        "json" in ctype
+                        or "text/" in ctype
+                        or "javascript" in ctype
+                        or "html" in ctype
+                    ):
+                        return
+
+                    body = await resp.text()
+                    if not body or len(body) < 20:
+                        return
+
+                    # No restringimos a URLs con "female/women".
+                    # Sólo evitamos assets obvios.
+                    low_url = rurl.lower()
+                    if re.search(r"\.(css|svg|png|jpg|jpeg|gif|webp|woff2?|ttf)(?:\?|$)", low_url):
+                        return
+
+                    payload = {
+                        "url": rurl,
+                        "content_type": ctype,
+                        "body": body[:500000],
+                    }
+                    network_payloads.append(payload)
+                    diag["network_payloads"] += 1
+                    diag["network_bytes"] += len(payload["body"])
+                    if len(diag["network_urls"]) < 30:
+                        diag["network_urls"].append(rurl)
+                except Exception:
+                    pass
+
+            def on_response(resp):
+                try:
+                    task = asyncio.create_task(capture_response(resp))
+                    pending_tasks.append(task)
+                except Exception:
+                    pass
+
+            page.on("response", on_response)
+
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
             await page.wait_for_timeout(1800)
 
-            # Results tab. No gender interaction here.
+            # Abrir Resultados, sin tocar género.
             for label in ("Results", "Resultados"):
                 try:
                     loc = page.get_by_text(label, exact=True).first
                     if await loc.count() and await loc.is_visible():
                         await loc.click(force=True, timeout=2500)
-                        await page.wait_for_timeout(1200)
+                        await page.wait_for_timeout(1800)
                         break
                 except Exception:
                     pass
 
-            async def collect_state(tag: str):
+            async def collect_dom_state(tag: str):
                 diag["states_scanned"] += 1
                 diag["state_tags"].append(tag)
 
@@ -1460,112 +1518,74 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                     state = await page.evaluate(
                         r"""
                         ({tag}) => {
-                          const clean = s => (s || '').replace(/\s+/g,' ').trim();
-
-                          const visible = el => {
-                            const st = getComputedStyle(el);
-                            const r = el.getBoundingClientRect();
-                            return st.display !== 'none' &&
-                                   st.visibility !== 'hidden' &&
-                                   r.width > 0 && r.height > 0;
+                          const clean=s=>(s||'').replace(/\s+/g,' ').trim();
+                          const visible=el=>{
+                            const st=getComputedStyle(el);
+                            const r=el.getBoundingClientRect();
+                            return st.display!=='none' &&
+                                   st.visibility!=='hidden' &&
+                                   r.width>0 && r.height>0;
                           };
+                          const all=Array.from(document.querySelectorAll('body *')).filter(visible);
 
-                          const all = Array.from(document.querySelectorAll('body *'))
-                            .filter(visible);
-
-                          const leafData = el => Array.from(el.querySelectorAll('*'))
-                            .filter(x => x.children.length === 0 && visible(x))
-                            .map(x => {
-                              const r = x.getBoundingClientRect();
+                          const leaves=el=>Array.from(el.querySelectorAll('*'))
+                            .filter(x=>x.children.length===0 && visible(x))
+                            .map(x=>{
+                              const r=x.getBoundingClientRect();
                               return {
-                                text: clean(x.textContent),
-                                x: r.left + r.width / 2,
-                                y: r.top + r.height / 2
+                                text:clean(x.textContent),
+                                x:r.left+r.width/2,
+                                y:r.top+r.height/2
                               };
                             })
-                            .filter(x => x.text);
+                            .filter(x=>x.text);
 
-                          const isScore = t => /^\d{1,2}$/.test(t) && Number(t) >= 0 && Number(t) <= 20;
+                          const isScore=t=>/^\d{1,2}$/.test(t) && Number(t)>=0 && Number(t)<=20;
 
-                          const isNameLike = t => {
-                            if (!t || t.length < 3 || t.length > 90) return false;
-                            if (!/[A-Za-zÀ-ÿ]/.test(t)) return false;
-                            if (isScore(t)) return false;
-                            if (/^\d{1,2}[\/-]\d{1,2}(?:[\/-]\d{2,4})?$/.test(t)) return false;
-                            if (/^(results?|resultados|female|women|woman|male|men|final|semi.?final|quarter.?final|round|court|live|finished|completed|score|date|time)$/i.test(t)) return false;
-                            return true;
-                          };
+                          const candidates=[];
+                          for(const el of all){
+                            const text=clean(el.innerText);
+                            if(!text || text.length<15 || text.length>3500)continue;
 
-                          const candidates = [];
-
-                          for (const el of all) {
-                            const text = clean(el.innerText);
-                            if (!text || text.length < 18 || text.length > 3000) continue;
-
-                            const leaves = leafData(el);
-                            const scoreLeaves = leaves.filter(x => isScore(x.text));
-                            if (scoreLeaves.length < 4 || scoreLeaves.length > 12) continue;
-
-                            const nameLeaves = leaves.filter(x => isNameLike(x.text));
-                            if (nameLeaves.length < 4) continue;
+                            const ls=leaves(el);
+                            const scores=ls.filter(x=>isScore(x.text));
+                            if(scores.length<4 || scores.length>14)continue;
 
                             candidates.push({
                               el,
                               tag,
                               text,
-                              leaves,
-                              scoreLeaves,
-                              nameLeaves,
-                              area: el.getBoundingClientRect().width * el.getBoundingClientRect().height
+                              leaves:ls,
+                              scores:scores.map(x=>Number(x.text))
                             });
                           }
 
-                          // Keep the smallest DOM container for each real match.
-                          const minimal = candidates.filter(c =>
-                            !candidates.some(o => o !== c && c.el.contains(o.el))
+                          const minimal=candidates.filter(c=>
+                            !candidates.some(o=>o!==c && c.el.contains(o.el))
                           );
 
-                          const blocks = [];
-                          const seen = new Set();
-
-                          for (const c of minimal) {
-                            const scores = c.scoreLeaves
-                              .sort((a,b) => a.y-b.y || a.x-b.x)
-                              .map(x => Number(x.text));
-
-                            const names = c.nameLeaves
-                              .sort((a,b) => a.y-b.y || a.x-b.x)
-                              .map(x => ({text:x.text, x:x.x, y:x.y}));
-
-                            const key = clean(c.text).slice(0,260) + '::' + scores.join(',');
-                            if (seen.has(key)) continue;
-                            seen.add(key);
-
-                            blocks.push({
-                              tag: c.tag,
-                              text: c.text.slice(0,2400),
-                              raw_names: names,
-                              scores,
-                              pairing_mode: 'raw-no-gender'
-                            });
-                          }
-
                           return {
-                            candidateCount: candidates.length,
-                            blocks
+                            candidateCount:candidates.length,
+                            blocks:minimal.map(c=>({
+                              tag:c.tag,
+                              text:c.text.slice(0,3000),
+                              raw_leaves:c.leaves,
+                              scores:c.scores,
+                              source:'dom'
+                            }))
                           };
                         }
                         """,
                         {"tag": tag},
                     )
 
-                    diag["candidate_blocks"] += int(state.get("candidateCount", 0) or 0)
-                    collected.extend(state.get("blocks", []) or [])
+                    diag["dom_candidates"] += int(state.get("candidateCount", 0) or 0)
+                    dom_blocks.extend(state.get("blocks", []) or [])
                 except Exception as exc:
-                    print(f"  raw results collect error {tag}: {type(exc).__name__}: {exc}")
+                    print(f"  raw DOM collect error {tag}: {type(exc).__name__}: {exc}")
 
             async def collect_dates(prefix: str):
-                # Selects.
+                # Selects con fechas.
                 try:
                     selects = page.locator("select")
                     for si in range(await selects.count()):
@@ -1594,65 +1614,65 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                         if not looks_date:
                             continue
 
-                        for oi, label in enumerate(labels):
+                        for oi,label in enumerate(labels):
                             if not label:
                                 continue
                             try:
-                                value = await opts.nth(oi).get_attribute("value")
+                                value=await opts.nth(oi).get_attribute("value")
                                 if value is not None:
                                     await sel.select_option(value=value)
                                 else:
                                     await sel.select_option(label=label)
-                                await page.wait_for_timeout(750)
-                                await collect_state(f"{prefix}|date:{label}")
+                                await page.wait_for_timeout(900)
+                                await collect_dom_state(f"{prefix}|date:{label}")
                             except Exception:
                                 pass
                 except Exception:
                     pass
 
-                # Buttons/chips.
+                # Botones/chips de fecha.
                 try:
-                    buttons = page.locator("button, [role=button], [role=tab], [class*=date], [class*=day]")
-                    seen_labels = set()
-
-                    for bi in range(min(await buttons.count(), 220)):
-                        el = buttons.nth(bi)
+                    buttons=page.locator("button,[role=button],[role=tab],[class*=date],[class*=day]")
+                    seen_labels=set()
+                    for bi in range(min(await buttons.count(),220)):
+                        el=buttons.nth(bi)
                         try:
-                            label = re.sub(r"\s+", " ", (await el.inner_text()).strip())
+                            label=re.sub(r"\s+"," ",(await el.inner_text()).strip())
                             if not label or label in seen_labels:
                                 continue
-
                             if not re.search(
                                 r"(?:\bMon\b|\bTue\b|\bWed\b|\bThu\b|\bFri\b|\bSat\b|\bSun\b|"
                                 r"\bMonday\b|\bTuesday\b|\bWednesday\b|\bThursday\b|\bFriday\b|\bSaturday\b|\bSunday\b|"
                                 r"\d{1,2}[/-]\d{1,2}|"
                                 r"\d{1,2}\s+[A-Za-z]{3,9}|"
                                 r"[A-Za-z]{3,9}\s+\d{1,2})",
-                                label, re.I
+                                label,re.I
                             ):
                                 continue
-
                             if not await el.is_visible():
                                 continue
-
                             seen_labels.add(label)
-                            await el.click(force=True, timeout=1800)
-                            await page.wait_for_timeout(750)
-                            await collect_state(f"{prefix}|date:{label}")
+                            await el.click(force=True,timeout=1800)
+                            await page.wait_for_timeout(900)
+                            await collect_dom_state(f"{prefix}|date:{label}")
                         except Exception:
                             pass
                 except Exception:
                     pass
 
-            # IMPORTANT: all data first. No Female click.
-            await collect_state("all-results")
+            # GET/CAPTURA LIMPIA: todos los datos antes de filtrar.
+            await collect_dom_state("all-results")
             await collect_dates("all-results")
+            await page.wait_for_timeout(1500)
+
+            if pending_tasks:
+                await asyncio.gather(*pending_tasks, return_exceptions=True)
 
             await browser.close()
-            browser = None
+            browser=None
 
     except Exception as exc:
-        print(f"  FIP raw capture error: {type(exc).__name__}: {exc}")
+        print(f"  FIP clean capture error: {type(exc).__name__}: {exc}")
         if browser is not None:
             try:
                 await browser.close()
@@ -1660,31 +1680,48 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                 pass
         return "", diag
 
-    # Dedupe raw blocks from all days/states.
-    unique = []
-    seen = set()
-
-    for block in collected:
-        key = (
-            str(block.get("text", ""))[:300],
-            tuple(block.get("scores", [])),
-        )
-        if key in seen:
+    # Dedupe DOM blocks.
+    unique_dom=[]
+    seen_dom=set()
+    for block in dom_blocks:
+        key=(str(block.get("text",""))[:350],tuple(block.get("scores",[])))
+        if key in seen_dom:
             continue
-        seen.add(key)
-        unique.append(block)
+        seen_dom.add(key)
+        unique_dom.append(block)
 
-    diag["raw_blocks"] = len(unique)
+    # Dedupe network payloads by URL+body prefix.
+    unique_net=[]
+    seen_net=set()
+    for payload in network_payloads:
+        key=(payload.get("url",""),str(payload.get("body",""))[:500])
+        if key in seen_net:
+            continue
+        seen_net.add(key)
+        unique_net.append(payload)
+
+    diag["dom_blocks"]=len(unique_dom)
+    diag["network_payloads"]=len(unique_net)
 
     print(
-        "  FIP raw results:",
+        "  FIP CLEAN GET:",
+        f"network_responses={diag['network_responses']}",
+        f"network_payloads={diag['network_payloads']}",
+        f"network_bytes={diag['network_bytes']}",
+        f"dom_candidates={diag['dom_candidates']}",
+        f"dom_blocks={diag['dom_blocks']}",
         f"states={diag['states_scanned']}",
-        f"candidates={diag['candidate_blocks']}",
-        f"raw_blocks={diag['raw_blocks']}",
-        f"days={diag.get('state_tags', [])[:30]}",
+    )
+    print(
+        "  FIP CLEAN URLs:",
+        diag.get("network_urls",[])[:12],
     )
 
-    return json.dumps({"blocks": unique, "diag": diag}, ensure_ascii=False), diag
+    return json.dumps({
+        "blocks": unique_dom,
+        "network_payloads": unique_net,
+        "diag": diag,
+    }, ensure_ascii=False), diag
 
 
 async def _browser_fip_flat_results_fallback(event: dict) -> list:
@@ -1884,11 +1921,14 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         source, capture_diag = "", {}
 
     try:
-        blocks = json.loads(source).get("blocks", []) if source else []
+        source_obj = json.loads(source) if source else {}
     except Exception:
-        blocks = []
+        source_obj = {}
 
-    if not blocks:
+    blocks = list(source_obj.get("blocks", []) or [])
+    network_payloads = list(source_obj.get("network_payloads", []) or [])
+
+    if not blocks and not network_payloads:
         for attempt in range(1, 3):
             print(f"  live results: v39 devolvió 0 bloques; reintento {attempt}/2")
             await asyncio.sleep(1.2 * attempt)
@@ -1905,8 +1945,8 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
                 print(f"  live retry {attempt}: recuperados {len(blocks)} bloques")
                 break
 
-    if not blocks:
-        print("  live results: reintentos v39 sin datos; activando flat fallback")
+    if not blocks and not network_payloads:
+        print("  live results: GET limpio sin datos; activando flat fallback")
         blocks = await _browser_fip_flat_results_fallback(event)
 
     # EN JUEGO: la frontera de género es el ranking femenino de 100 jugadoras.
@@ -1934,6 +1974,159 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         for name in _ranking_display_names
         if name
     }
+
+    def _network_blocks_after_get(payloads: list[dict]) -> list[dict]:
+        """
+        Ya hemos hecho el GET limpio.
+
+        Ahora sí usamos ranking100 para localizar fragmentos de respuesta que
+        contienen 4 jugadoras y marcador. Esto NO condiciona la descarga;
+        sólo interpreta los datos que ya tenemos.
+        """
+        out = []
+        seen = set()
+
+        def walk(obj, source_url: str, depth: int = 0):
+            if depth > 10:
+                return
+
+            if isinstance(obj, dict):
+                # Analizar cada objeto como posible partido.
+                try:
+                    blob = json.dumps(obj, ensure_ascii=False)
+                except Exception:
+                    blob = str(obj)
+
+                _consider_blob(blob, source_url, obj)
+                for value in obj.values():
+                    walk(value, source_url, depth + 1)
+
+            elif isinstance(obj, list):
+                # La lista completa puede representar una tarjeta/partido.
+                try:
+                    blob = json.dumps(obj, ensure_ascii=False)
+                except Exception:
+                    blob = str(obj)
+
+                _consider_blob(blob, source_url, obj)
+                for value in obj:
+                    walk(value, source_url, depth + 1)
+
+            elif isinstance(obj, str):
+                if len(obj) >= 20:
+                    _consider_blob(obj, source_url, None)
+
+        def _consider_blob(blob: str, source_url: str, original):
+            norm_blob = f" {_norm_person_name(blob)} "
+
+            hits = []
+            for norm_name, display in ranking_display.items():
+                if not norm_name:
+                    continue
+
+                # Full name.
+                token = f" {norm_name} "
+                if token in norm_blob:
+                    hits.append((norm_blob.index(token), display))
+                    continue
+
+                # First surname.
+                parts = norm_name.split()
+                if len(parts) >= 2 and len(parts[1]) >= 4:
+                    surname = parts[1]
+                    stoken = f" {surname} "
+                    if stoken in norm_blob:
+                        hits.append((norm_blob.index(stoken), display))
+
+            players = []
+            seen_players = set()
+            for pos, display in sorted(hits, key=lambda x: x[0]):
+                key = display.casefold()
+                if key in seen_players:
+                    continue
+                seen_players.add(key)
+                players.append(display)
+
+            if len(players) != 4:
+                return
+
+            # Scores: prefer numeric leaves from JSON, fallback regex.
+            scores = []
+
+            def collect_numbers(obj):
+                if isinstance(obj, dict):
+                    for k,v in obj.items():
+                        kl = str(k).lower()
+                        if isinstance(v, (int,float)) and any(
+                            term in kl for term in ("score","set","games","result")
+                        ):
+                            iv = int(v)
+                            if 0 <= iv <= 20:
+                                scores.append(iv)
+                        else:
+                            collect_numbers(v)
+                elif isinstance(obj, list):
+                    for v in obj:
+                        collect_numbers(v)
+
+            if original is not None:
+                collect_numbers(original)
+
+            if len(scores) < 4:
+                nums = [
+                    int(x)
+                    for x in re.findall(r'(?<!\d)(\d{1,2})(?!\d)', blob)
+                    if 0 <= int(x) <= 20
+                ]
+                scores = nums[:12]
+
+            if len(scores) < 4:
+                return
+
+            key = (tuple(players), tuple(scores[:12]))
+            if key in seen:
+                return
+            seen.add(key)
+
+            out.append({
+                "tag": f"network:{source_url}",
+                "text": blob[:3000],
+                "players": players,
+                "scores": scores[:12],
+                "pairing_mode": "network-after-get",
+                "source": "network",
+            })
+
+        for payload in payloads:
+            body = str(payload.get("body","") or "")
+            url = str(payload.get("url","") or "")
+            if not body:
+                continue
+
+            parsed = None
+            try:
+                parsed = json.loads(body)
+            except Exception:
+                parsed = None
+
+            if parsed is not None:
+                walk(parsed, url)
+            else:
+                # HTML/text already fetched; split into manageable chunks.
+                soup = BeautifulSoup(body, "html.parser")
+                text = _clean_text(soup) if "<" in body and ">" in body else body
+                chunks = re.split(r'(?<=\})\s*(?=\{)|\n{2,}', text)
+                for chunk in chunks:
+                    if 20 <= len(chunk) <= 12000:
+                        _consider_blob(chunk, url, None)
+
+        return out
+
+    # GET ya completado. Ahora interpretamos las respuestas de red.
+    network_blocks = _network_blocks_after_get(network_payloads)
+    if network_blocks:
+        print(f"  network parse after GET: {len(network_blocks)} bloques candidatos")
+        blocks.extend(network_blocks)
 
     month_map = {
         "jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,
@@ -2219,7 +2412,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     _LIVE_DEBUG_STATE.update({
         "browser": capture_diag,
-        "parser": "raw-results-then-ranking100-v109",
+        "parser": "clean-network-get-then-ranking100-v111",
         "raw_blocks": len(blocks),
         "raw_parsed_before_gender": raw_parsed_count,
         "female_after_filter": female_filtered_count,
@@ -2236,7 +2429,8 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     print(
         "  live results filter:",
-        f"raw_blocks={len(blocks)}",
+        f"dom_plus_network_blocks={len(blocks)}",
+        f"network_payloads={len(network_payloads)}",
         f"raw_parsed={raw_parsed_count}",
         f"female_after_ranking100={female_filtered_count}",
         f"ranking100={len(ranking_full)}",
