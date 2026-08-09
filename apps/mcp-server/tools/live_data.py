@@ -1791,6 +1791,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
             except Exception:
                 pass
 
+        # 8 Aug / 8 AUGUST
         m = re.search(r"\b(\d{1,2})\s+([A-Za-z]{3,12})\b", raw)
         if m:
             d = int(m.group(1))
@@ -1800,7 +1801,60 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
                     return date(year, mo, d).isoformat()
                 except Exception:
                     pass
+
+        # AUG 8 / AUGUST 8 — format used by FIP date chips.
+        m = re.search(r"\b([A-Za-z]{3,12})\s+(\d{1,2})\b", raw)
+        if m:
+            mo = month_map.get(m.group(1).lower()[:3])
+            d = int(m.group(2))
+            if mo:
+                try:
+                    return date(year, mo, d).isoformat()
+                except Exception:
+                    pass
+
         return ""
+
+    def round_from_official_date(match_date: str) -> str:
+        """
+        Main-draw round from the selected FIP date chip.
+
+        Premier Padel's closing sequence is:
+          event end date     -> Final
+          end - 1 day        -> Semifinales
+          end - 2 days       -> Cuartos de final
+          end - 3 days       -> Octavos de final
+
+        Unlike the old logic, this uses the actual date state selected on FIP,
+        not the number/order of scraped matches.
+        """
+        if not match_date:
+            return ""
+
+        end_dt = _event_end_date_from_dates(event)
+        if not end_dt:
+            return ""
+
+        try:
+            md = date.fromisoformat(match_date)
+        except Exception:
+            return ""
+
+        delta = (end_dt - md).days
+        if delta == 0:
+            return "Final"
+        if delta == 1:
+            return "Semifinales"
+        if delta == 2:
+            return "Cuartos de final"
+        if delta == 3:
+            return "Octavos de final"
+        if delta == 4:
+            return "Segunda ronda"
+        if delta >= 5:
+            return "Primera ronda"
+        return ""
+
 
     def infer_round(context: str, match_date: str = "") -> str:
         """
@@ -1895,11 +1949,25 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
             str(block.get("text","")) + " " +
             str(block.get("tag",""))
         )
-        rnd = explicit_round or infer_round(context, match_date)
+
+        date_round = round_from_official_date(match_date)
+
+        # Production priority:
+        # 1) selected FIP date chip (most reliable for this main draw)
+        # 2) explicit local card text
+        # 3) unknown -> Partidos
+        rnd = date_round or infer_round(context, match_date)
+
+        if date_round:
+            round_source = "fip-date"
+        elif rnd != "Partidos":
+            round_source = "fip-text"
+        else:
+            round_source = "unknown"
 
         parsed.append({
             "round": rnd,
-            "round_source": "fip-dom" if explicit_round else ("fip-text" if rnd != "Partidos" else "unknown"),
+            "round_source": round_source,
             "winner": winner,
             "loser": loser,
             "score": "  ".join(f"{a}-{b}" for a,b in display),
@@ -1934,7 +2002,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     _LIVE_DEBUG_STATE.update({
         "browser": capture_diag,
-        "parser": "full-draw-explicit-round-v82",
+        "parser": "full-draw-fip-date-round-v84",
         "raw_blocks": len(blocks),
         "parsed_results": len(parsed),
         "valid_results": len(valid),
@@ -1982,46 +2050,70 @@ def _round_pair_signature(pair: str) -> tuple[str, ...]:
 
 def _validate_explicit_rounds(results: list) -> list:
     """
-    Production guard for impossible knockout groups.
+    Production integrity guard for the knockout draw.
 
-    A pair can play at most once in Final/SF/QF/R16. If two results would place
-    the same pair twice in the same round, the conflicting result is moved to
-    "Partidos" instead of publishing an impossible bracket.
+    In women's singles-style knockout structure:
+      Final            -> max 1 match
+      Semifinales      -> max 2
+      Cuartos de final -> max 4
+      Octavos de final -> max 8
+
+    Also prevents the same pair from appearing twice in one knockout round.
+    Any conflicting/overflow item is kept, but moved to generic "Partidos"
+    instead of publishing an impossible bracket.
     """
-    knockout = {"Final", "Semifinales", "Cuartos de final", "Octavos de final"}
-    seen_by_round = {rnd: set() for rnd in knockout}
+    capacities = {
+        "Final": 1,
+        "Semifinales": 2,
+        "Cuartos de final": 4,
+        "Octavos de final": 8,
+    }
+
+    seen_by_round = {rnd: set() for rnd in capacities}
+    count_by_round = {rnd: 0 for rnd in capacities}
     out = []
 
     for item in results or []:
         row = dict(item)
         rnd = row.get("round") or "Partidos"
 
-        if rnd not in knockout:
+        if rnd not in capacities:
             out.append(row)
             continue
 
         w = _round_pair_signature(str(row.get("winner","")))
         l = _round_pair_signature(str(row.get("loser","")))
-        conflict = (
+
+        duplicate_pair = (
             (w and w in seen_by_round[rnd]) or
             (l and l in seen_by_round[rnd])
         )
+        overflow = count_by_round[rnd] >= capacities[rnd]
 
-        if conflict:
+        if duplicate_pair or overflow:
+            reason = "duplicate-pair" if duplicate_pair else "round-capacity"
             print(
                 "  ROUND CONFLICT:",
+                f"reason={reason}",
                 f"round={rnd}",
                 f"{row.get('winner','')} vs {row.get('loser','')}",
                 "-> movido a Partidos",
             )
             row["round"] = "Partidos"
-            row["round_source"] = "conflict-guard"
+            row["round_source"] = f"conflict-guard:{reason}"
         else:
-            if w: seen_by_round[rnd].add(w)
-            if l: seen_by_round[rnd].add(l)
+            count_by_round[rnd] += 1
+            if w:
+                seen_by_round[rnd].add(w)
+            if l:
+                seen_by_round[rnd].add(l)
 
         out.append(row)
 
+    print(
+        "  round counts:",
+        " ".join(f"{rnd}={count_by_round[rnd]}" for rnd in capacities),
+    )
     return out
 
 
