@@ -1395,32 +1395,27 @@ def _norm_person_name(value: str) -> str:
 
 async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
     """
-    EN JUEGO ONLY — v111
+    EN JUEGO ONLY — v112
 
-    CAPTURA LIMPIA DE RED.
+    CAPTURA PRIMERO, FILTRA DESPUÉS.
 
-    No usa género.
-    No activa Female.
-    No usa ranking para decidir qué traer.
+    Esta función NO usa el ranking.
+    Esta función NO decide qué partido es femenino.
 
-    Primero abre Resultados y captura:
-      - responses XHR/fetch
-      - JSON
-      - HTML/texto dinámico relevante
+    Captura snapshots completos de Results:
+      - estado inicial
+      - días/fechas disponibles
+      - Male y Female si FIP obliga a separar la vista
 
-    Después el parser Python decidirá qué partidos son femeninos.
+    Después Python recibe esos snapshots y aplica ranking100.
     """
     diag = {
         "playwright": False,
         "states_scanned": 0,
-        "network_responses": 0,
-        "network_payloads": 0,
-        "network_bytes": 0,
-        "dom_candidates": 0,
-        "dom_blocks": 0,
+        "snapshots": 0,
+        "snapshot_chars": 0,
         "state_tags": [],
-        "source_mode": "clean-network-first-v111",
-        "network_urls": [],
+        "source_mode": "html-snapshots-first-v112",
     }
 
     if async_playwright is None:
@@ -1431,9 +1426,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
         return "", diag
 
     browser = None
-    dom_blocks = []
-    network_payloads = []
-    pending_tasks = []
+    snapshots = []
 
     try:
         async with async_playwright() as p:
@@ -1447,145 +1440,38 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                 viewport={"width": 1800, "height": 2600},
                 locale="en-US",
             )
-
-            async def capture_response(resp):
-                try:
-                    diag["network_responses"] += 1
-                    rurl = str(resp.url or "")
-                    headers = await resp.all_headers()
-                    ctype = str(headers.get("content-type", "")).lower()
-
-                    # Capturamos respuestas textuales/JSON de FIP sin aplicar género.
-                    if not (
-                        "json" in ctype
-                        or "text/" in ctype
-                        or "javascript" in ctype
-                        or "html" in ctype
-                    ):
-                        return
-
-                    body = await resp.text()
-                    if not body or len(body) < 20:
-                        return
-
-                    # No restringimos a URLs con "female/women".
-                    # Sólo evitamos assets obvios.
-                    low_url = rurl.lower()
-                    if re.search(r"\.(css|svg|png|jpg|jpeg|gif|webp|woff2?|ttf)(?:\?|$)", low_url):
-                        return
-
-                    payload = {
-                        "url": rurl,
-                        "content_type": ctype,
-                        "body": body[:500000],
-                    }
-                    network_payloads.append(payload)
-                    diag["network_payloads"] += 1
-                    diag["network_bytes"] += len(payload["body"])
-                    if len(diag["network_urls"]) < 30:
-                        diag["network_urls"].append(rurl)
-                except Exception:
-                    pass
-
-            def on_response(resp):
-                try:
-                    task = asyncio.create_task(capture_response(resp))
-                    pending_tasks.append(task)
-                except Exception:
-                    pass
-
-            page.on("response", on_response)
-
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            await page.wait_for_timeout(1800)
+            await page.wait_for_timeout(1600)
 
-            # Abrir Resultados, sin tocar género.
+            # Abrir Results/Resultados. Esto es navegación, no filtro.
             for label in ("Results", "Resultados"):
                 try:
                     loc = page.get_by_text(label, exact=True).first
                     if await loc.count() and await loc.is_visible():
                         await loc.click(force=True, timeout=2500)
-                        await page.wait_for_timeout(1800)
+                        await page.wait_for_timeout(1400)
                         break
                 except Exception:
                     pass
 
-            async def collect_dom_state(tag: str):
+            async def snapshot(tag: str):
                 diag["states_scanned"] += 1
                 diag["state_tags"].append(tag)
-
                 try:
-                    state = await page.evaluate(
-                        r"""
-                        ({tag}) => {
-                          const clean=s=>(s||'').replace(/\s+/g,' ').trim();
-                          const visible=el=>{
-                            const st=getComputedStyle(el);
-                            const r=el.getBoundingClientRect();
-                            return st.display!=='none' &&
-                                   st.visibility!=='hidden' &&
-                                   r.width>0 && r.height>0;
-                          };
-                          const all=Array.from(document.querySelectorAll('body *')).filter(visible);
-
-                          const leaves=el=>Array.from(el.querySelectorAll('*'))
-                            .filter(x=>x.children.length===0 && visible(x))
-                            .map(x=>{
-                              const r=x.getBoundingClientRect();
-                              return {
-                                text:clean(x.textContent),
-                                x:r.left+r.width/2,
-                                y:r.top+r.height/2
-                              };
-                            })
-                            .filter(x=>x.text);
-
-                          const isScore=t=>/^\d{1,2}$/.test(t) && Number(t)>=0 && Number(t)<=20;
-
-                          const candidates=[];
-                          for(const el of all){
-                            const text=clean(el.innerText);
-                            if(!text || text.length<15 || text.length>3500)continue;
-
-                            const ls=leaves(el);
-                            const scores=ls.filter(x=>isScore(x.text));
-                            if(scores.length<4 || scores.length>14)continue;
-
-                            candidates.push({
-                              el,
-                              tag,
-                              text,
-                              leaves:ls,
-                              scores:scores.map(x=>Number(x.text))
-                            });
-                          }
-
-                          const minimal=candidates.filter(c=>
-                            !candidates.some(o=>o!==c && c.el.contains(o.el))
-                          );
-
-                          return {
-                            candidateCount:candidates.length,
-                            blocks:minimal.map(c=>({
-                              tag:c.tag,
-                              text:c.text.slice(0,3000),
-                              raw_leaves:c.leaves,
-                              scores:c.scores,
-                              source:'dom'
-                            }))
-                          };
-                        }
-                        """,
-                        {"tag": tag},
-                    )
-
-                    diag["dom_candidates"] += int(state.get("candidateCount", 0) or 0)
-                    dom_blocks.extend(state.get("blocks", []) or [])
+                    html = await page.content()
+                    text = await page.locator("body").inner_text()
+                    snapshots.append({
+                        "tag": tag,
+                        "html": html[:900000],
+                        "text": text[:350000],
+                    })
+                    diag["snapshots"] += 1
+                    diag["snapshot_chars"] += len(html) + len(text)
                 except Exception as exc:
-                    print(f"  raw DOM collect error {tag}: {type(exc).__name__}: {exc}")
+                    print(f"  snapshot error {tag}: {type(exc).__name__}: {exc}")
 
-            async def collect_dates(prefix: str):
-                # Selects con fechas.
+            async def scan_dates(prefix: str):
+                # selects
                 try:
                     selects = page.locator("select")
                     for si in range(await selects.count()):
@@ -1595,10 +1481,10 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                         if not 2 <= count <= 20:
                             continue
 
-                        labels = []
+                        labels=[]
                         for oi in range(count):
                             try:
-                                labels.append(re.sub(r"\s+", " ", (await opts.nth(oi).inner_text()).strip()))
+                                labels.append(re.sub(r"\s+"," ",(await opts.nth(oi).inner_text()).strip()))
                             except Exception:
                                 labels.append("")
 
@@ -1608,9 +1494,8 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                             r"\d{1,2}[/-]\d{1,2}|"
                             r"\d{1,2}\s+[A-Za-z]{3,9}|"
                             r"[A-Za-z]{3,9}\s+\d{1,2})",
-                            lab, re.I
+                            lab,re.I
                         ) for lab in labels)
-
                         if not looks_date:
                             continue
 
@@ -1623,22 +1508,22 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                                     await sel.select_option(value=value)
                                 else:
                                     await sel.select_option(label=label)
-                                await page.wait_for_timeout(900)
-                                await collect_dom_state(f"{prefix}|date:{label}")
+                                await page.wait_for_timeout(850)
+                                await snapshot(f"{prefix}|date:{label}")
                             except Exception:
                                 pass
                 except Exception:
                     pass
 
-                # Botones/chips de fecha.
+                # date chips/buttons
                 try:
                     buttons=page.locator("button,[role=button],[role=tab],[class*=date],[class*=day]")
-                    seen_labels=set()
+                    seen=set()
                     for bi in range(min(await buttons.count(),220)):
                         el=buttons.nth(bi)
                         try:
                             label=re.sub(r"\s+"," ",(await el.inner_text()).strip())
-                            if not label or label in seen_labels:
+                            if not label or label in seen:
                                 continue
                             if not re.search(
                                 r"(?:\bMon\b|\bTue\b|\bWed\b|\bThu\b|\bFri\b|\bSat\b|\bSun\b|"
@@ -1651,28 +1536,38 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                                 continue
                             if not await el.is_visible():
                                 continue
-                            seen_labels.add(label)
+                            seen.add(label)
                             await el.click(force=True,timeout=1800)
-                            await page.wait_for_timeout(900)
-                            await collect_dom_state(f"{prefix}|date:{label}")
+                            await page.wait_for_timeout(850)
+                            await snapshot(f"{prefix}|date:{label}")
                         except Exception:
                             pass
                 except Exception:
                     pass
 
-            # GET/CAPTURA LIMPIA: todos los datos antes de filtrar.
-            await collect_dom_state("all-results")
-            await collect_dates("all-results")
-            await page.wait_for_timeout(1500)
+            # 1) GET / estado inicial completo.
+            await snapshot("all-default")
+            await scan_dates("all-default")
 
-            if pending_tasks:
-                await asyncio.gather(*pending_tasks, return_exceptions=True)
+            # 2) FIP separa internamente Male/Female. Para TRAER TODO,
+            # recorremos ambas vistas. No filtramos todavía.
+            for gender_label in ("Male", "Men", "Female", "Women", "Masculino", "Femenino"):
+                try:
+                    loc=page.get_by_text(gender_label, exact=True).first
+                    if not (await loc.count()) or not await loc.is_visible():
+                        continue
+                    await loc.click(force=True,timeout=2200)
+                    await page.wait_for_timeout(1200)
+                    await snapshot(f"view:{gender_label}")
+                    await scan_dates(f"view:{gender_label}")
+                except Exception:
+                    pass
 
             await browser.close()
             browser=None
 
     except Exception as exc:
-        print(f"  FIP clean capture error: {type(exc).__name__}: {exc}")
+        print(f"  FIP snapshot capture error: {type(exc).__name__}: {exc}")
         if browser is not None:
             try:
                 await browser.close()
@@ -1680,46 +1575,28 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                 pass
         return "", diag
 
-    # Dedupe DOM blocks.
-    unique_dom=[]
-    seen_dom=set()
-    for block in dom_blocks:
-        key=(str(block.get("text",""))[:350],tuple(block.get("scores",[])))
-        if key in seen_dom:
+    # Dedupe snapshots by tag + text fingerprint.
+    unique=[]
+    seen=set()
+    for snap in snapshots:
+        key=(snap.get("tag",""), str(snap.get("text",""))[:600])
+        if key in seen:
             continue
-        seen_dom.add(key)
-        unique_dom.append(block)
+        seen.add(key)
+        unique.append(snap)
 
-    # Dedupe network payloads by URL+body prefix.
-    unique_net=[]
-    seen_net=set()
-    for payload in network_payloads:
-        key=(payload.get("url",""),str(payload.get("body",""))[:500])
-        if key in seen_net:
-            continue
-        seen_net.add(key)
-        unique_net.append(payload)
-
-    diag["dom_blocks"]=len(unique_dom)
-    diag["network_payloads"]=len(unique_net)
+    diag["snapshots"]=len(unique)
 
     print(
-        "  FIP CLEAN GET:",
-        f"network_responses={diag['network_responses']}",
-        f"network_payloads={diag['network_payloads']}",
-        f"network_bytes={diag['network_bytes']}",
-        f"dom_candidates={diag['dom_candidates']}",
-        f"dom_blocks={diag['dom_blocks']}",
+        "  FIP SNAPSHOTS:",
         f"states={diag['states_scanned']}",
-    )
-    print(
-        "  FIP CLEAN URLs:",
-        diag.get("network_urls",[])[:12],
+        f"snapshots={diag['snapshots']}",
+        f"chars={diag['snapshot_chars']}",
+        f"tags={diag.get('state_tags',[])[:30]}",
     )
 
     return json.dumps({
-        "blocks": unique_dom,
-        "network_payloads": unique_net,
+        "snapshots": unique,
         "diag": diag,
     }, ensure_ascii=False), diag
 
@@ -1925,28 +1802,29 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
     except Exception:
         source_obj = {}
 
-    blocks = list(source_obj.get("blocks", []) or [])
-    network_payloads = list(source_obj.get("network_payloads", []) or [])
+    snapshots = list(source_obj.get("snapshots", []) or [])
+    blocks = []
 
-    if not blocks and not network_payloads:
+    if not snapshots:
         for attempt in range(1, 3):
             print(f"  live results: v39 devolvió 0 bloques; reintento {attempt}/2")
             await asyncio.sleep(1.2 * attempt)
             try:
                 retry_source, retry_diag = await _browser_fip_womens_results_text(event)
-                retry_blocks = json.loads(retry_source).get("blocks", []) if retry_source else []
+                retry_obj = json.loads(retry_source) if retry_source else {}
+                retry_snapshots = retry_obj.get("snapshots", []) or []
             except Exception as exc:
                 print(f"  live retry {attempt} error: {type(exc).__name__}: {exc}")
                 retry_blocks = []
 
-            if retry_blocks:
-                blocks = retry_blocks
+            if retry_snapshots:
+                snapshots = retry_snapshots
                 capture_diag = retry_diag
-                print(f"  live retry {attempt}: recuperados {len(blocks)} bloques")
+                print(f"  live retry {attempt}: recuperados {len(snapshots)} snapshots")
                 break
 
-    if not blocks and not network_payloads:
-        print("  live results: GET limpio sin datos; activando flat fallback")
+    if not snapshots:
+        print("  live results: sin snapshots; activando flat fallback")
         blocks = await _browser_fip_flat_results_fallback(event)
 
     # EN JUEGO: la frontera de género es el ranking femenino de 100 jugadoras.
@@ -1975,158 +1853,115 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         if name
     }
 
-    def _network_blocks_after_get(payloads: list[dict]) -> list[dict]:
+    def _snapshot_blocks_after_get(snaps: list[dict]) -> list[dict]:
         """
-        Ya hemos hecho el GET limpio.
+        Los snapshots YA están descargados.
+        Aquí empieza el filtrado/interpretación con ranking100.
 
-        Ahora sí usamos ranking100 para localizar fragmentos de respuesta que
-        contienen 4 jugadoras y marcador. Esto NO condiciona la descarga;
-        sólo interpreta los datos que ya tenemos.
+        Busca el contenedor HTML mínimo que contenga exactamente cuatro
+        jugadoras del ranking + un marcador plausible.
         """
-        out = []
-        seen = set()
+        out=[]
+        seen=set()
 
-        def walk(obj, source_url: str, depth: int = 0):
-            if depth > 10:
-                return
-
-            if isinstance(obj, dict):
-                # Analizar cada objeto como posible partido.
-                try:
-                    blob = json.dumps(obj, ensure_ascii=False)
-                except Exception:
-                    blob = str(obj)
-
-                _consider_blob(blob, source_url, obj)
-                for value in obj.values():
-                    walk(value, source_url, depth + 1)
-
-            elif isinstance(obj, list):
-                # La lista completa puede representar una tarjeta/partido.
-                try:
-                    blob = json.dumps(obj, ensure_ascii=False)
-                except Exception:
-                    blob = str(obj)
-
-                _consider_blob(blob, source_url, obj)
-                for value in obj:
-                    walk(value, source_url, depth + 1)
-
-            elif isinstance(obj, str):
-                if len(obj) >= 20:
-                    _consider_blob(obj, source_url, None)
-
-        def _consider_blob(blob: str, source_url: str, original):
-            norm_blob = f" {_norm_person_name(blob)} "
-
-            hits = []
-            for norm_name, display in ranking_display.items():
-                if not norm_name:
-                    continue
-
-                # Full name.
-                token = f" {norm_name} "
-                if token in norm_blob:
-                    hits.append((norm_blob.index(token), display))
-                    continue
-
-                # First surname.
-                parts = norm_name.split()
-                if len(parts) >= 2 and len(parts[1]) >= 4:
-                    surname = parts[1]
-                    stoken = f" {surname} "
-                    if stoken in norm_blob:
-                        hits.append((norm_blob.index(stoken), display))
-
-            players = []
-            seen_players = set()
-            for pos, display in sorted(hits, key=lambda x: x[0]):
-                key = display.casefold()
-                if key in seen_players:
-                    continue
-                seen_players.add(key)
-                players.append(display)
-
-            if len(players) != 4:
-                return
-
-            # Scores: prefer numeric leaves from JSON, fallback regex.
-            scores = []
-
-            def collect_numbers(obj):
-                if isinstance(obj, dict):
-                    for k,v in obj.items():
-                        kl = str(k).lower()
-                        if isinstance(v, (int,float)) and any(
-                            term in kl for term in ("score","set","games","result")
-                        ):
-                            iv = int(v)
-                            if 0 <= iv <= 20:
-                                scores.append(iv)
-                        else:
-                            collect_numbers(v)
-                elif isinstance(obj, list):
-                    for v in obj:
-                        collect_numbers(v)
-
-            if original is not None:
-                collect_numbers(original)
-
-            if len(scores) < 4:
-                nums = [
-                    int(x)
-                    for x in re.findall(r'(?<!\d)(\d{1,2})(?!\d)', blob)
-                    if 0 <= int(x) <= 20
-                ]
-                scores = nums[:12]
-
-            if len(scores) < 4:
-                return
-
-            key = (tuple(players), tuple(scores[:12]))
-            if key in seen:
-                return
-            seen.add(key)
-
-            out.append({
-                "tag": f"network:{source_url}",
-                "text": blob[:3000],
-                "players": players,
-                "scores": scores[:12],
-                "pairing_mode": "network-after-get",
-                "source": "network",
-            })
-
-        for payload in payloads:
-            body = str(payload.get("body","") or "")
-            url = str(payload.get("url","") or "")
-            if not body:
+        for snap in snaps:
+            html=str(snap.get("html","") or "")
+            tag=str(snap.get("tag","") or "")
+            if not html:
                 continue
 
-            parsed = None
-            try:
-                parsed = json.loads(body)
-            except Exception:
-                parsed = None
+            soup=BeautifulSoup(html,"html.parser")
 
-            if parsed is not None:
-                walk(parsed, url)
-            else:
-                # HTML/text already fetched; split into manageable chunks.
-                soup = BeautifulSoup(body, "html.parser")
-                text = _clean_text(soup) if "<" in body and ">" in body else body
-                chunks = re.split(r'(?<=\})\s*(?=\{)|\n{2,}', text)
-                for chunk in chunks:
-                    if 20 <= len(chunk) <= 12000:
-                        _consider_blob(chunk, url, None)
+            candidates=[]
+            for el in soup.find_all(True):
+                text=re.sub(r"\s+"," ",el.get_text(" ",strip=True)).strip()
+                if not text or len(text)<20 or len(text)>2600:
+                    continue
+
+                norm_text=f" {_norm_person_name(text)} "
+
+                hits=[]
+                for norm_name,display in ranking_display.items():
+                    if not norm_name:
+                        continue
+
+                    token=f" {norm_name} "
+                    if token in norm_text:
+                        hits.append((norm_text.index(token),len(norm_name),display))
+                        continue
+
+                    parts=norm_name.split()
+                    if len(parts)>=2 and len(parts[1])>=4:
+                        surname=parts[1]
+                        stoken=f" {surname} "
+                        if stoken in norm_text:
+                            hits.append((norm_text.index(stoken),len(surname),display))
+
+                resolved=[]
+                seen_players=set()
+                for pos,length,display in sorted(hits,key=lambda x:(x[0],-x[1])):
+                    k=display.casefold()
+                    if k in seen_players:
+                        continue
+                    seen_players.add(k)
+                    resolved.append(display)
+
+                if len(resolved)!=4:
+                    continue
+
+                # Numeric leaves only.
+                scores=[]
+                for leaf in el.find_all(True):
+                    if leaf.find(True):
+                        continue
+                    t=re.sub(r"\s+"," ",leaf.get_text(" ",strip=True)).strip()
+                    if re.fullmatch(r"\d{1,2}",t):
+                        n=int(t)
+                        if 0<=n<=20:
+                            scores.append(n)
+
+                if len(scores)<4 or len(scores)>12:
+                    continue
+
+                candidates.append((el,resolved,scores,text))
+
+            # Keep smallest candidate containers.
+            minimal=[]
+            for el,players,scores,text in candidates:
+                contains_smaller=False
+                for other,_,_,_ in candidates:
+                    if other is el:
+                        continue
+                    try:
+                        if other in el.descendants:
+                            contains_smaller=True
+                            break
+                    except Exception:
+                        pass
+                if not contains_smaller:
+                    minimal.append((el,players,scores,text))
+
+            for _,players,scores,text in minimal:
+                key=(tuple(players),tuple(scores))
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append({
+                    "tag":tag,
+                    "text":text[:2600],
+                    "players":players,
+                    "scores":scores,
+                    "pairing_mode":"snapshot-postfilter",
+                    "source":"snapshot",
+                })
 
         return out
 
-    # GET ya completado. Ahora interpretamos las respuestas de red.
-    network_blocks = _network_blocks_after_get(network_payloads)
-    if network_blocks:
-        print(f"  network parse after GET: {len(network_blocks)} bloques candidatos")
-        blocks.extend(network_blocks)
+    # GET terminado. AHORA sí filtramos contra ranking100.
+    snapshot_blocks=_snapshot_blocks_after_get(snapshots)
+    if snapshot_blocks:
+        print(f"  snapshot parse after GET: {len(snapshot_blocks)} bloques candidatos")
+        blocks.extend(snapshot_blocks)
 
     month_map = {
         "jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,
@@ -2412,7 +2247,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     _LIVE_DEBUG_STATE.update({
         "browser": capture_diag,
-        "parser": "clean-network-get-then-ranking100-v111",
+        "parser": "snapshots-first-ranking100-v112",
         "raw_blocks": len(blocks),
         "raw_parsed_before_gender": raw_parsed_count,
         "female_after_filter": female_filtered_count,
@@ -2429,8 +2264,8 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     print(
         "  live results filter:",
-        f"dom_plus_network_blocks={len(blocks)}",
-        f"network_payloads={len(network_payloads)}",
+        f"snapshot_blocks={len(blocks)}",
+        f"snapshots={len(snapshots)}",
         f"raw_parsed={raw_parsed_count}",
         f"female_after_ranking100={female_filtered_count}",
         f"ranking100={len(ranking_full)}",
