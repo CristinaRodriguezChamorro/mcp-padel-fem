@@ -1829,12 +1829,50 @@ async def _browser_fip_womens_draw_blocks(event: dict) -> tuple[list[dict], dict
                         r"""
                         () => {
                           const clean=s=>(s||'').replace(/\s+/g,' ').trim().toLowerCase();
-                          const nodes=Array.from(document.querySelectorAll('label,button,[role=button],[role=tab]'));
-                          const el=nodes.find(x=>['female','women','femenino','femenina'].includes(clean(x.innerText||x.textContent)));
-                          if(!el)return false;
-                          el.click();
-                          el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                          return true;
+                          const all=Array.from(document.querySelectorAll('body *'));
+
+                          // Find the exact Female/Women text node.
+                          const node=all.find(el=>{
+                            const own=clean(el.innerText||el.textContent);
+                            return ['female','women','femenino','femenina'].includes(own);
+                          });
+                          if(!node)return false;
+
+                          // Proven strategy from v39: walk ancestors and click/check
+                          // the input structurally associated with the Female label.
+                          let cur=node;
+                          for(let up=0; up<7 && cur; up++,cur=cur.parentElement){
+                            const inputs=[
+                              ...(cur.matches && cur.matches('input') ? [cur] : []),
+                              ...Array.from(cur.querySelectorAll ? cur.querySelectorAll('input') : [])
+                            ];
+
+                            // If the container has multiple radio inputs, prefer the one
+                            // whose nearby text contains female/women.
+                            for(const input of inputs){
+                              const parentText=clean(
+                                (input.parentElement && (input.parentElement.innerText||input.parentElement.textContent)) || ''
+                              );
+                              if(
+                                inputs.length===1 ||
+                                /\b(female|women|femenin)/.test(parentText)
+                              ){
+                                try{ input.click(); }catch(e){}
+                                try{ input.checked=true; }catch(e){}
+                                input.dispatchEvent(new Event('input',{bubbles:true}));
+                                input.dispatchEvent(new Event('change',{bubbles:true}));
+                                return true;
+                              }
+                            }
+                          }
+
+                          // Last resort: click the exact text node itself.
+                          try{
+                            node.click();
+                            node.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                            return true;
+                          }catch(e){}
+                          return false;
                         }
                         """
                     )
@@ -1842,7 +1880,69 @@ async def _browser_fip_womens_draw_blocks(event: dict) -> tuple[list[dict], dict
                 except Exception:
                     pass
 
-            await page.wait_for_timeout(900)
+            await page.wait_for_timeout(1400)
+
+            # Verify that the female draw is REALLY loaded, not merely that a click fired.
+            try:
+                body_probe = re.sub(
+                    r"\s+",
+                    " ",
+                    (await page.locator("body").inner_text()).strip()
+                )
+                body_norm = _norm_person_name(body_probe)
+                female_probe_names = [
+                    _norm_person_name(x.get("display",""))
+                    for x in profiles[:40]
+                    if x.get("display")
+                ]
+                female_hits = sum(
+                    1 for name in female_probe_names
+                    if name and name in body_norm
+                )
+                diag["female_player_hits"] = female_hits
+
+                # If the click fired but no ranked women appear, force a second structural toggle.
+                if female_hits < 2:
+                    forced = await page.evaluate(
+                        r"""
+                        () => {
+                          const clean=s=>(s||'').replace(/\s+/g,' ').trim().toLowerCase();
+                          const inputs=Array.from(document.querySelectorAll('input'));
+                          for(const input of inputs){
+                            let cur=input.parentElement;
+                            let txt='';
+                            for(let up=0; up<4 && cur; up++,cur=cur.parentElement){
+                              txt += ' ' + clean(cur.innerText||cur.textContent);
+                            }
+                            if(/\b(female|women|femenin)/.test(txt)){
+                              try{input.click();}catch(e){}
+                              try{input.checked=true;}catch(e){}
+                              input.dispatchEvent(new Event('input',{bubbles:true}));
+                              input.dispatchEvent(new Event('change',{bubbles:true}));
+                              return true;
+                            }
+                          }
+                          return false;
+                        }
+                        """
+                    )
+                    if forced:
+                        await page.wait_for_timeout(1400)
+                        diag["female_activated"] = True
+
+                        body_probe = re.sub(
+                            r"\s+",
+                            " ",
+                            (await page.locator("body").inner_text()).strip()
+                        )
+                        body_norm = _norm_person_name(body_probe)
+                        female_hits = sum(
+                            1 for name in female_probe_names
+                            if name and name in body_norm
+                        )
+                        diag["female_player_hits"] = female_hits
+            except Exception:
+                diag["female_player_hits"] = 0
 
             # Activate Main draw if a Qualify/Main selector exists.
             try:
@@ -2027,6 +2127,7 @@ async def _browser_fip_womens_draw_blocks(event: dict) -> tuple[list[dict], dict
             print(
                 "  FIP draw:",
                 f"female={diag['female_activated']}",
+                f"female_hits={diag.get('female_player_hits',0)}",
                 f"main={diag['main_activated']}",
                 f"headings={[x.get('round') for x in diag['headings']]}",
                 f"candidates={diag['candidates']}",
