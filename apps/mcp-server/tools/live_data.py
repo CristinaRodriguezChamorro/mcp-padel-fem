@@ -1130,13 +1130,29 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                           const clean = s => (s || '').replace(/\s+/g,' ').trim();
                           const all = Array.from(document.querySelectorAll('body *'));
 
-                          const leafNodes = el => Array.from(el.querySelectorAll('*'))
-                            .filter(x => x.children.length === 0);
+                          const visible = el => {
+                            const st = getComputedStyle(el);
+                            const r = el.getBoundingClientRect();
+                            return st.display !== 'none' &&
+                                   st.visibility !== 'hidden' &&
+                                   r.width > 0 && r.height > 0;
+                          };
 
-                          const scoreValues = el => leafNodes(el)
-                            .map(x => clean(x.textContent))
-                            .filter(x => /^\d{1,2}$/.test(x))
-                            .map(Number)
+                          const leafNodes = el => Array.from(el.querySelectorAll('*'))
+                            .filter(x => x.children.length === 0 && visible(x));
+
+                          const leafData = el => leafNodes(el).map(x => {
+                            const r = x.getBoundingClientRect();
+                            return {
+                              text: clean(x.textContent),
+                              x: r.left + r.width / 2,
+                              y: r.top + r.height / 2
+                            };
+                          }).filter(x => x.text);
+
+                          const scoreValues = leaves => leaves
+                            .filter(x => /^\d{1,2}$/.test(x.text))
+                            .map(x => Number(x.text))
                             .filter(n => n >= 0 && n <= 20);
 
                           const profileMatchIn = textValue => {
@@ -1165,24 +1181,61 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                             return hits;
                           };
 
+                          // Important production fix:
+                          // identify each player from her OWN visible leaf and preserve
+                          // the real screen position. Previously the four names were
+                          // ordered by their position in the container's flattened text,
+                          // which can interleave the two pairs and create false teams.
+                          const playerHitsFromLeaves = leaves => {
+                            const hits = [];
+                            for (const leaf of leaves) {
+                              const matches = profileMatchIn(leaf.text);
+                              if (!matches.length) continue;
+
+                              // Prefer the longest accepted alias for this leaf.
+                              const best = [...matches].sort(
+                                (a,b) => (b.alias || '').length - (a.alias || '').length
+                              )[0];
+
+                              if (!hits.some(h => h.canonical === best.canonical)) {
+                                hits.push({
+                                  ...best,
+                                  x: leaf.x,
+                                  y: leaf.y,
+                                  leafText: leaf.text
+                                });
+                              }
+                            }
+                            return hits;
+                          };
+
                           const candidates = [];
 
                           for (const el of all) {
                             const text = clean(el.innerText);
                             if (!text || text.length < 25 || text.length > 2200) continue;
 
-                            const players = profileMatchIn(text);
-                            const unique = [];
-                            const seenCanon = new Set();
-                            for (const p of players.sort((a,b)=>a.index-b.index)) {
-                              if (!seenCanon.has(p.canonical)) {
-                                seenCanon.add(p.canonical);
-                                unique.push(p);
+                            const leaves = leafData(el);
+                            const players = playerHitsFromLeaves(leaves);
+
+                            // Fallback only for detection if FIP wraps a player name in
+                            // a non-leaf node. Pair ordering below still prefers geometry.
+                            let unique = players;
+                            if (unique.length !== 4) {
+                              const textPlayers = profileMatchIn(text);
+                              const seenCanon = new Set();
+                              unique = [];
+                              for (const p of textPlayers.sort((a,b)=>a.index-b.index)) {
+                                if (!seenCanon.has(p.canonical)) {
+                                  seenCanon.add(p.canonical);
+                                  unique.push(p);
+                                }
                               }
                             }
+
                             if (unique.length !== 4) continue;
 
-                            const scores = scoreValues(el);
+                            const scores = scoreValues(leaves);
                             if (scores.length < 4 || scores.length > 12) continue;
 
                             candidates.push({
@@ -1190,7 +1243,8 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                               tag,
                               text,
                               players: unique,
-                              scores
+                              scores,
+                              geometryPlayers: players
                             });
                           }
 
@@ -1202,11 +1256,28 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                           const seen = new Set();
 
                           for (const c of minimal) {
-                            // Order by actual appearance of any accepted alias.
-                            const ordered = [...c.players]
-                              .sort((a,b)=>a.index-b.index)
-                              .map(x=>x.display);
+                            // Pair players by REAL card geometry:
+                            // top row/pair first, then bottom row/pair.
+                            // This prevents combinations of players who never played
+                            // together when FIP's flattened DOM text is interleaved.
+                            const positioned = (c.geometryPlayers || [])
+                              .filter(x => Number.isFinite(x.y) && Number.isFinite(x.x));
 
+                            let orderedPlayers;
+                            if (positioned.length === 4) {
+                              orderedPlayers = [...positioned]
+                                .sort((a,b) => {
+                                  const dy = a.y - b.y;
+                                  return Math.abs(dy) > 8 ? dy : a.x - b.x;
+                                });
+                            } else {
+                              // Conservative fallback: preserve previous behaviour only
+                              // if geometry is genuinely unavailable.
+                              orderedPlayers = [...c.players]
+                                .sort((a,b)=>a.index-b.index);
+                            }
+
+                            const ordered = orderedPlayers.map(x=>x.display);
                             if (ordered.length !== 4) continue;
 
                             const key = ordered.join('|') + '::' + c.scores.join(',');
@@ -1218,7 +1289,8 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                               text: c.text.slice(0,1600),
                               players: ordered,
                               scores: c.scores,
-                              aliases: c.players.map(x=>x.alias)
+                              aliases: c.players.map(x=>x.alias),
+                              pairing_mode: positioned.length === 4 ? 'geometry' : 'text-fallback'
                             });
                           }
 
@@ -1911,6 +1983,10 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         "parsed_results": len(parsed),
         "valid_results": len(valid),
         "result_dates": dates,
+        "pairing_modes": {
+            mode: sum(1 for b in blocks if b.get("pairing_mode") == mode)
+            for mode in {"geometry", "text-fallback"}
+        },
         "groq_used": False,
     })
 
