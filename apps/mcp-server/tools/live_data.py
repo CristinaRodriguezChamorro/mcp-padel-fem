@@ -9,28 +9,16 @@ import asyncio
 import aiohttp
 import os
 import re
-import time
 import json
-import io
-import unicodedata
-from datetime import date, timedelta
-from zoneinfo import ZoneInfo
+from datetime import date
 from bs4 import BeautifulSoup
 from groq import Groq
-from pypdf import PdfReader
-try:
-    from playwright.async_api import async_playwright
-except Exception:
-    async_playwright = None
 
 COUNTRY_FLAGS = {
     "ESP": "🇪🇸", "ARG": "🇦🇷", "POR": "🇵🇹", "ITA": "🇮🇹",
     "BRA": "🇧🇷", "FRA": "🇫🇷", "BEL": "🇧🇪", "URU": "🇺🇾",
     "PAR": "🇵🇾", "CHI": "🇨🇱", "COL": "🇨🇴", "MEX": "🇲🇽",
 }
-
-
-_LAST_GOOD_LIVE_RESULTS = {"results": [], "ts": 0.0}
 
 
 async def _fetch(url: str) -> str:
@@ -45,54 +33,6 @@ async def _fetch(url: str) -> str:
     except Exception as e:
         print(f"  _fetch error {url}: {e}")
         return ""
-
-
-
-async def get_womens_ranking_names(limit: int = 200) -> list[str]:
-    """
-    Devuelve nombres del ranking femenino para alimentar otros pipelines,
-    especialmente el filtro de Noticias.
-
-    Se obtiene dinámicamente de la misma fuente de ranking y NO modifica
-    el top-10 que se pinta en la interfaz.
-    """
-    html = await _fetch("https://padelspeak.com/en/padel-world-ranking-women/")
-    if not html:
-        print("  ranking names: fuente no disponible")
-        return [p["name"] for p in _fallback_ranking()]
-
-    soup = BeautifulSoup(html, "html.parser")
-    table = soup.find("table")
-    if not table:
-        print("  ranking names: tabla no encontrada")
-        return [p["name"] for p in _fallback_ranking()]
-
-    names = []
-    seen = set()
-    for row in table.find_all("tr")[1:]:
-        cols = row.find_all(["td", "th"])
-        if len(cols) < 2:
-            continue
-
-        name = re.sub(r"\s+", " ", cols[1].get_text(" ", strip=True)).strip()
-        if not name:
-            continue
-
-        key = name.casefold()
-        if key in seen:
-            continue
-
-        seen.add(key)
-        names.append(name)
-
-        if len(names) >= limit:
-            break
-
-    if not names:
-        return [p["name"] for p in _fallback_ranking()]
-
-    print(f"  ranking names: {len(names)} jugadoras disponibles para filtros")
-    return names
 
 
 async def get_ranking_live() -> list:
@@ -124,47 +64,9 @@ async def get_ranking_live() -> list:
                 continue
 
             pos = int(pos_text)
-            # Keep the complete player name from the ranking source.
-            # Truncating to 3 tokens produced broken names such as
-            # "Alejandra Alonso De", which also made photo resolution fail.
-            name = re.sub(r"\s+", " ", name_text).strip()
+            name_parts = name_text.split()
+            name = " ".join(name_parts[:3]) if len(name_parts) > 2 else name_text
             flag = COUNTRY_FLAGS.get(country_text, "🌍")
-
-            # Try to get the player's image from the SAME PadelSpeak ranking row.
-            # This avoids matching names against external image sources.
-            photo = ""
-            try:
-                img = row.find("img")
-                if img:
-                    candidates = [
-                        img.get("data-src"),
-                        img.get("data-lazy-src"),
-                        img.get("data-original"),
-                        img.get("src"),
-                    ]
-                    # srcset often contains the highest quality image at the end.
-                    srcset = img.get("srcset") or img.get("data-srcset")
-                    if srcset:
-                        parts = [x.strip().split(" ")[0] for x in srcset.split(",") if x.strip()]
-                        if parts:
-                            candidates.insert(0, parts[-1])
-
-                    photo = next(
-                        (
-                            x for x in candidates
-                            if x and not str(x).startswith("data:")
-                            and "placeholder" not in str(x).lower()
-                            and "logo" not in str(x).lower()
-                        ),
-                        ""
-                    )
-
-                    if photo.startswith("//"):
-                        photo = "https:" + photo
-                    elif photo.startswith("/"):
-                        photo = "https://padelspeak.com" + photo
-            except Exception:
-                photo = ""
 
             try:
                 pts_num = int(re.sub(r'[^\d]', '', pts_text))
@@ -172,16 +74,9 @@ async def get_ranking_live() -> list:
             except Exception:
                 pts = pts_text
 
-            ranking.append({
-                "pos": pos,
-                "name": name,
-                "pair": "",
-                "flag": flag,
-                "pts": pts,
-                "photo": photo,
-            })
+            ranking.append({"pos": pos, "name": name, "pair": "", "flag": flag, "pts": pts})
 
-            if len(ranking) >= 20:
+            if len(ranking) >= 10:
                 break
 
         except Exception as e:
@@ -193,8 +88,7 @@ async def get_ranking_live() -> list:
         return _fallback_ranking()
 
     _add_pairs(ranking)
-    photos = sum(1 for p in ranking if p.get("photo"))
-    print(f"  ranking: {len(ranking)} jugadoras obtenidas de padelspeak.com · fotos={photos}")
+    print(f"  ranking: {len(ranking)} jugadoras obtenidas de padelspeak.com")
     return ranking
 
 
@@ -249,169 +143,55 @@ def _is_live(day_str: str, month_str: str) -> bool:
         return False
 
 
-def _calendar_end_date(t: dict) -> date | None:
-    MONTHS = {
-        "Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,
-        "Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12,
-    }
-    try:
-        month = MONTHS.get(str(t.get("month",""))[:3].title())
-        if not month:
-            return None
-        nums = [int(x) for x in re.findall(r"\d+", str(t.get("day","")))]
-        if not nums:
-            return None
-        end_day = nums[-1]
-        return date(date.today().year, month, end_day)
-    except Exception:
-        return None
-
-
 async def get_calendar_live() -> list:
-    """
-    Calendario SIN Groq.
-    Intenta parsear directamente padelspeak.com y cae al calendario local si la
-    estructura externa cambia.
-    """
+    client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
+
     html = await _fetch("https://padelspeak.com/en/premier-padel-calendar/")
-    torneos = []
-
+    raw_text = ""
     if html:
-        try:
-            soup = BeautifulSoup(html, "html.parser")
+        soup = BeautifulSoup(html, "html.parser")
+        for tag in soup.find_all(["script", "style", "nav", "footer"]):
+            tag.decompose()
+        raw_text = soup.get_text(separator=" ", strip=True)[:4000]
 
-            # 1) Tables
-            for table in soup.find_all("table"):
-                rows = table.find_all("tr")
-                for row in rows[1:]:
-                    cols = [re.sub(r"\s+", " ", c.get_text(" ", strip=True)).strip()
-                            for c in row.find_all(["td", "th"])]
-                    if len(cols) < 2:
-                        continue
-                    text = " | ".join(cols)
-                    if not re.search(r"\b(P1|P2|Major|Finals?|FIP)\b", text, re.I):
-                        continue
+    today_str = date.today().strftime("%d %b %Y")
 
-                    # Date/range
-                    dm = re.search(
-                        r"(\d{1,2})(?:\s*[-–]\s*(\d{1,2}))?\s+"
-                        r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)",
-                        text, re.I
-                    )
-                    if not dm:
-                        continue
-                    d1, d2, mon = dm.group(1), dm.group(2), dm.group(3).title()
-                    day = f"{d1}-{d2}" if d2 else d1
+    if raw_text:
+        prompt = f"""Datos del calendario Premier Padel 2026:
+{raw_text}
 
-                    # Tournament name = cell containing event class.
-                    name = next((c for c in cols if re.search(r"\b(P1|P2|Major|Finals?|FIP)\b", c, re.I)), "")
-                    place = cols[-1] if cols[-1] != name else ""
+Hoy es {today_str}. Extrae los próximos 6 torneos a partir de hoy.
+SOLO este JSON sin texto extra, y pon live:false en todos (lo calculo yo):
+[{{"day":"10-17","month":"May","name":"Buenos Aires P1","place":"Buenos Aires 🇦🇷","badge":"p1","badgeText":"P1","tv":"Red Bull TV · Movistar+","live":false}},...]
+badge: "major", "p1", "p2", "fip"."""
+    else:
+        prompt = f"""Próximos 6 torneos Premier Padel desde hoy {today_str}.
+SOLO JSON, live:false en todos:
+[{{"day":"10-17","month":"May","name":"Buenos Aires P1","place":"Buenos Aires 🇦🇷","badge":"p1","badgeText":"P1","tv":"Red Bull TV · Movistar+","live":false}},...]"""
 
-                    badge = "major" if "major" in name.lower() else ("p2" if "p2" in name.lower() else ("fip" if "fip" in name.lower() else "p1"))
-                    badge_text = "MAJOR" if badge == "major" else ("FIP" if badge == "fip" else badge.upper())
+    torneos = None
+    try:
+        resp = await asyncio.to_thread(lambda: client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            max_tokens=600,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}]
+        ))
+        raw = resp.choices[0].message.content.strip()
+        match = re.search(r'\[.*\]', raw, re.DOTALL)
+        if match:
+            torneos = json.loads(match.group())
+    except Exception as e:
+        print(f"  calendar Groq error: {e}")
 
-                    torneos.append({
-                        "day": day,
-                        "month": mon,
-                        "name": name,
-                        "place": place,
-                        "badge": badge,
-                        "badgeText": badge_text,
-                        "tv": "Red Bull TV · Movistar+",
-                        "live": False,
-                    })
-
-            # 2) Cards/articles fallback
-            if not torneos:
-                for node in soup.find_all(["article", "li", "div"]):
-                    text = re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip()
-                    if len(text) > 500 or not re.search(r"\b(P1|P2|Major|Finals?)\b", text, re.I):
-                        continue
-                    dm = re.search(
-                        r"(\d{1,2})(?:\s*[-–]\s*(\d{1,2}))?\s+"
-                        r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)",
-                        text, re.I
-                    )
-                    nm = re.search(r"([A-Za-zÀ-ÿ0-9 .'-]+?\b(?:P1|P2|Major|Finals?))", text, re.I)
-                    if not dm or not nm:
-                        continue
-                    d1, d2, mon = dm.group(1), dm.group(2), dm.group(3).title()
-                    name = re.sub(r"\s+", " ", nm.group(1)).strip()
-                    badge = "major" if "major" in name.lower() else ("p2" if "p2" in name.lower() else "p1")
-                    torneos.append({
-                        "day": f"{d1}-{d2}" if d2 else d1,
-                        "month": mon,
-                        "name": name,
-                        "place": "",
-                        "badge": badge,
-                        "badgeText": "MAJOR" if badge == "major" else badge.upper(),
-                        "tv": "Red Bull TV · Movistar+",
-                        "live": False,
-                    })
-        except Exception as exc:
-            print(f"  calendar parser error: {exc}")
-
-    # Deduplicate and keep future/current 6.
     if not torneos:
         torneos = _fallback_calendar()
-    else:
-        dedup = []
-        seen = set()
-        for t in torneos:
-            key = (t["name"].lower(), t["day"], t["month"])
-            if key not in seen:
-                seen.add(key)
-                dedup.append(t)
-        torneos = dedup
 
+    # Calcular live con fechas reales, ignorando lo que devuelva la IA
     for t in torneos:
         t["live"] = _is_live(t.get("day", ""), t.get("month", ""))
 
-    # Never show tournaments that already finished.
-    today = date.today()
-    filtered = []
-    for t in torneos:
-        end_dt = _calendar_end_date(t)
-        if end_dt is None:
-            # Keep only if we cannot determine the date and it is explicitly live.
-            if t.get("live"):
-                filtered.append(t)
-            continue
-        if end_dt >= today:
-            filtered.append(t)
-
-    # If the scraped source is unavailable/outdated, use a current official
-    # Premier Padel 2026 fallback from August onward.
-    if not filtered:
-        filtered = [
-            {"day":"3-9","month":"Aug","name":"London P1","place":"London 🇬🇧","badge":"p1","badgeText":"P1","tv":"Red Bull TV · Movistar+","live":_is_live("3-9","Aug")},
-            {"day":"31-6","month":"Aug","name":"Madrid P1","place":"Madrid 🇪🇸","badge":"p1","badgeText":"P1","tv":"Red Bull TV · Movistar+","live":False},
-            {"day":"7-13","month":"Sep","name":"Paris Major","place":"Paris 🇫🇷","badge":"major","badgeText":"MAJOR","tv":"Red Bull TV · Movistar+","live":False},
-            {"day":"28-4","month":"Sep","name":"Rotterdam P2","place":"Rotterdam 🇳🇱","badge":"p2","badgeText":"P2","tv":"Movistar+ · YouTube","live":False},
-            {"day":"5-11","month":"Oct","name":"Germany P2","place":"Germany 🇩🇪","badge":"p2","badgeText":"P2","tv":"Movistar+ · YouTube","live":False},
-            {"day":"12-18","month":"Oct","name":"Milano P1","place":"Milano 🇮🇹","badge":"p1","badgeText":"P1","tv":"Red Bull TV · Movistar+","live":False},
-            {"day":"26-31","month":"Oct","name":"Kuwait Major","place":"Kuwait 🇰🇼","badge":"major","badgeText":"MAJOR","tv":"Red Bull TV · Movistar+","live":False},
-            {"day":"8-15","month":"Nov","name":"Dubai P1","place":"Dubai 🇦🇪","badge":"p1","badgeText":"P1","tv":"Red Bull TV · Movistar+","live":False},
-            {"day":"23-29","month":"Nov","name":"Mexico Major","place":"Acapulco 🇲🇽","badge":"major","badgeText":"MAJOR","tv":"Red Bull TV · Movistar+","live":False},
-            {"day":"7-13","month":"Dec","name":"Premier Padel Finals","place":"Barcelona 🇪🇸","badge":"major","badgeText":"FINALS","tv":"Red Bull TV · Movistar+","live":False},
-        ]
-        filtered = [t for t in filtered if (_calendar_end_date(t) or today) >= today]
-
-    # Current tournament first, then future tournaments chronologically.
-    def sort_key(t):
-        end_dt = _calendar_end_date(t) or date.max
-        # approximate start date using first number in day range
-        try:
-            month_map={"Jan":1,"Feb":2,"Mar":3,"Apr":4,"May":5,"Jun":6,"Jul":7,"Aug":8,"Sep":9,"Oct":10,"Nov":11,"Dec":12}
-            month=month_map.get(str(t.get("month",""))[:3].title(),12)
-            start_day=int(re.findall(r"\d+",str(t.get("day","")))[0])
-            start_dt=date(today.year,month,start_day)
-        except Exception:
-            start_dt=end_dt
-        return (0 if t.get("live") else 1, start_dt)
-
-    filtered.sort(key=sort_key)
-    return filtered[:10]
+    return torneos
 
 
 def _fallback_ranking() -> list:
@@ -445,12 +225,9 @@ def _fallback_calendar() -> list:
 #   - Premier Padel (premierpadel.com): dónde verlo en España.
 
 from datetime import datetime
-from urllib.parse import urljoin, urlparse, parse_qsl, urlencode, urlunparse
-
-_LIVE_DEBUG_STATE = {}
+from urllib.parse import urljoin
 
 FIP_LIVE_URL = "https://www.padelfip.com/live/"
-FIP_PREMIER_CALENDAR_URL = "https://www.padelfip.com/calendar-premier-padel/?events-year={year}"
 PREMIER_WATCH_URL = "https://premierpadel.com/en/news/where-to-watch-dont-miss-any-of-the-action-at-any-tournament"
 
 
@@ -488,37 +265,27 @@ def _format_dates_es(start, end) -> str:
 
 
 async def _get_official_live_event() -> dict | None:
-    """
-    Localiza el Premier Padel activo HOY por FECHAS, no por la etiqueta "Live".
-    Esto es importante porque la portada/calendario de FIP puede tardar en cambiar
-    el estado visual de "Registration Closed" a "Live".
-    """
-    today = date.today()
-    calendar_url = FIP_PREMIER_CALENDAR_URL.format(year=today.year)
-    html = await _fetch(calendar_url)
-
-    # Fallback a la página de live si el calendario falla.
-    if not html:
-        html = await _fetch(FIP_LIVE_URL)
+    """Localiza en la página oficial FIP el Premier Padel que está activo hoy."""
+    html = await _fetch(FIP_LIVE_URL)
     if not html:
         return None
 
     soup = BeautifulSoup(html, "html.parser")
+    today = date.today()
     seen = set()
 
     for a in soup.find_all("a", href=True):
         href = a.get("href", "")
-        if "/events/" not in href and "/eventos/" not in href:
+        if "/event" not in href and "/evento" not in href:
             continue
-
-        event_url = urljoin(calendar_url, href)
+        event_url = urljoin(FIP_LIVE_URL, href)
         if event_url in seen:
             continue
         seen.add(event_url)
 
         node = a
         block = ""
-        for _ in range(8):
+        for _ in range(6):
             node = getattr(node, "parent", None)
             if not node:
                 break
@@ -531,7 +298,6 @@ async def _get_official_live_event() -> dict | None:
 
         if not _is_premier_name(block):
             continue
-
         dates = _parse_fip_dates(block)
         if not dates:
             continue
@@ -542,32 +308,19 @@ async def _get_official_live_event() -> dict | None:
         event_html = await _fetch(event_url)
         if not event_html:
             continue
-
         event_soup = BeautifulSoup(event_html, "html.parser")
         event_text = _clean_text(event_soup)
-
-        # El evento debe incluir cuadro femenino.
-        if not re.search(r"\b(Female|Women|Femenino|Mujeres)\b", event_text, re.I):
+        if "Female" not in event_text and "Femenino" not in event_text:
             continue
 
         h1 = event_soup.find("h1")
         name = _clean_text(h1) if h1 else ""
         if not name or not _is_premier_name(name):
-            # El texto del bloque suele empezar por el nombre del torneo.
-            m_name = re.search(
-                r"([A-ZÁÉÍÓÚÜÑ0-9 .'-]+(?:P1|P2|MAJOR|FINALS))",
-                block,
-                re.I,
-            )
-            name = m_name.group(1).strip() if m_name else "Premier Padel"
+            candidates = [x.strip() for x in re.split(r"\s{2,}|\n", block) if _is_premier_name(x)]
+            name = candidates[0][:80] if candidates else "Premier Padel"
 
         place = ""
-        # Primero intentamos extraer "Ciudad - País" del encabezado oficial.
-        m_place = re.search(
-            r"([A-Za-zÀ-ÿ .'-]+?\s*-\s*[A-Za-zÀ-ÿ .'-]+?)\s+"
-            r"\d{1,2}/\d{1,2}/\d{4}",
-            event_text,
-        )
+        m_place = re.search(r"([A-Za-zÀ-ÿ .'-]+\s*-\s*[A-Za-zÀ-ÿ .'-]+)\s*[|\n ]+\d{1,2}/\d{1,2}/\d{4}", event_text)
         if m_place:
             place = re.sub(r"\s+", " ", m_place.group(1)).strip()
 
@@ -578,7 +331,6 @@ async def _get_official_live_event() -> dict | None:
             "url": event_url,
             "html": event_html,
         }
-
     return None
 
 
@@ -599,1113 +351,100 @@ async def _get_watch_official() -> list[str]:
     return watch or ["Premier Padel YouTube", "Red Bull TV"]
 
 
-
-def _gender_aliases(gender: str) -> tuple[str, ...]:
-    gender = (gender or "female").strip().lower()
-    if gender == "male":
-        return ("male", "men", "masculino", "hombres")
-    return ("female", "women", "woman", "femenino", "femenina", "mujeres")
-
-
-def _add_query(url: str, **params) -> str:
-    parsed = urlparse(url)
-    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    query.update({k: str(v) for k, v in params.items()})
-    return urlunparse(parsed._replace(query=urlencode(query)))
-
-
-async def _get_gender_filtered_event_html(event: dict, gender: str = "female") -> str:
-    # Filtro usado SOLO por la pestaña En juego.
-    base_html = event.get("html", "")
-    base_url = event.get("url", "")
-    if not base_html or not base_url:
-        return base_html
-
-    aliases = _gender_aliases(gender)
-    soup = BeautifulSoup(base_html, "html.parser")
-    candidates = []
-
-    for el in soup.find_all(True):
-        for attr in ("href", "src", "data-url", "data-href", "data-src", "data-endpoint", "data-ajax-url", "action"):
-            value = el.get(attr)
-            if isinstance(value, str) and any(a in value.lower() for a in aliases):
-                candidates.append(urljoin(base_url, value))
-
-    canonical = "female" if gender != "male" else "male"
-    candidates.extend([
-        _add_query(base_url, gender=canonical),
-        _add_query(base_url, sex=canonical),
-        _add_query(base_url, category=canonical),
-        _add_query(base_url, division=canonical),
-    ])
-
-    base_host = urlparse(base_url).netloc.lower()
-    unique = []
-    seen = set()
-    for url in candidates:
-        if not url or url in seen:
-            continue
-        seen.add(url)
-        host = urlparse(url).netloc.lower()
-        if host and host != base_host:
-            continue
-        unique.append(url)
-
-    def score(html: str) -> int:
-        if not html:
-            return -1
-        text = _clean_text(BeautifulSoup(html, "html.parser")).lower()
-        gender_hits = sum(text.count(a) for a in aliases)
-        result_hits = sum(text.count(k) for k in ("result", "draw", "score", "round"))
-        return gender_hits + (result_hits * 3)
-
-    best_html = base_html
-    best_score = score(base_html)
-
-    for url in unique[:8]:
-        html = await _fetch(url)
-        sc = score(html)
-        if sc > best_score:
-            best_html = html
-            best_score = sc
-
-    return best_html
-
-
-ROUND_ORDER = {
-    "Final": 100,
-    "Semifinales": 90,
-    "Cuartos de final": 80,
-    "Octavos de final": 70,
-    "Segunda ronda": 60,
-    "Primera ronda": 50,
-    "Clasificación": 40,
-}
-
-PLACE_TIMEZONES = {
-    "london": "Europe/London",
-    "madrid": "Europe/Madrid",
-    "valencia": "Europe/Madrid",
-    "gijón": "Europe/Madrid",
-    "gijon": "Europe/Madrid",
-    "málaga": "Europe/Madrid",
-    "malaga": "Europe/Madrid",
-    "barcelona": "Europe/Madrid",
-    "roma": "Europe/Rome",
-    "rome": "Europe/Rome",
-    "paris": "Europe/Paris",
-    "bordeaux": "Europe/Paris",
-    "brussels": "Europe/Brussels",
-    "rotterdam": "Europe/Amsterdam",
-    "milano": "Europe/Rome",
-    "milan": "Europe/Rome",
-    "malmö": "Europe/Stockholm",
-    "malmo": "Europe/Stockholm",
-    "doha": "Asia/Qatar",
-    "dubai": "Asia/Dubai",
-    "riyadh": "Asia/Riyadh",
-    "asunción": "America/Asuncion",
-    "asuncion": "America/Asuncion",
-    "buenos aires": "America/Argentina/Buenos_Aires",
-    "miami": "America/New_York",
-    "new york": "America/New_York",
-}
-
-
-def _normalize_round(value: str) -> str:
-    raw = re.sub(r"\s+", " ", str(value or "")).strip()
-    low = raw.lower()
-    if not raw:
-        return "Partidos"
-    if re.search(r"\b(final|f)\b", low) and "semi" not in low and "quarter" not in low:
-        return "Final"
-    if "semi" in low or re.search(r"\bsf\b", low):
-        return "Semifinales"
-    if "quarter" in low or "cuarto" in low or re.search(r"\bqf\b", low):
-        return "Cuartos de final"
-    if "round of 16" in low or "r16" in low or "octav" in low:
-        return "Octavos de final"
-    if "2nd round" in low or "second round" in low or "segunda" in low or re.search(r"\br2\b", low):
-        return "Segunda ronda"
-    if "1st round" in low or "first round" in low or "primera" in low or re.search(r"\br1\b", low):
-        return "Primera ronda"
-    if "qual" in low or "clasif" in low:
-        return "Clasificación"
-    return raw[:60]
-
-
-def _event_timezone(place: str) -> str:
-    low = (place or "").lower()
-    for key, tz in PLACE_TIMEZONES.items():
-        if key in low:
-            return tz
-    return "Europe/Madrid"
-
-
-def _extract_pdf_text(data: bytes) -> str:
-    try:
-        reader = PdfReader(io.BytesIO(data))
-        return "\n".join((page.extract_text() or "") for page in reader.pages)
-    except Exception as exc:
-        print(f"  PDF extract error: {exc}")
-        return ""
-
-
-async def _fetch_bytes(url: str) -> bytes:
-    try:
-        async with aiohttp.ClientSession(
-            headers={"User-Agent": "Mozilla/5.0 (compatible; PadelFem/1.0)"}
-        ) as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=20)) as resp:
-                if resp.status != 200:
-                    return b""
-                return await resp.read()
-    except Exception as exc:
-        print(f"  fetch bytes error {url}: {exc}")
-        return b""
-
-
-def _official_document_urls(event: dict) -> dict:
-    """Extrae del HTML oficial enlaces de Results/Draw y Order of Play."""
-    soup = BeautifulSoup(event.get("html", ""), "html.parser")
-    base = event.get("url", "")
-    result_docs, oop_docs = [], []
-
-    for a in soup.find_all("a", href=True):
-        href = urljoin(base, a.get("href", ""))
-        text = _clean_text(a).lower()
-        low = href.lower()
-        if not href:
-            continue
-        if ("order of play" in text or "order-of-play" in low or "order_of_play" in low):
-            oop_docs.append(href)
-        if (
-            "result" in text or "result" in low or
-            "draw" in text or "main-draw" in low or "main_draw" in low
-        ):
-            result_docs.append(href)
-
-    # Hidden/dynamic attributes often contain the Female endpoint/PDF.
-    for el in soup.find_all(True):
-        blob = " ".join(
-            str(el.get(k, "")) for k in
-            ("data-url", "data-href", "data-pdf", "data-src", "data-endpoint", "href")
-        )
-        if not blob:
-            continue
-        for candidate in re.findall(r'https?://[^\s"\']+|/[^\s"\']+', blob):
-            url = urljoin(base, candidate)
-            low = url.lower()
-            if "order" in low and "play" in low:
-                oop_docs.append(url)
-            if any(k in low for k in ("result", "draw")):
-                result_docs.append(url)
-
-    return {
-        "results": list(dict.fromkeys(result_docs)),
-        "oop": list(dict.fromkeys(oop_docs)),
-    }
-
-
-async def _collect_official_result_text(event: dict, gender: str) -> str:
-    """
-    Reúne datos de Results/Draws desde la fuente oficial.
-    Prioriza documentos/URLs con female/women y conserva el HTML filtrado como fallback.
-    """
-    gender = "female" if gender in {"female", "women", "woman"} else gender
-    aliases = _gender_aliases(gender)
-    docs = _official_document_urls(event)["results"]
-
-    def priority(url: str) -> tuple:
-        low = url.lower()
-        has_gender = any(a in low for a in aliases)
-        is_pdf = low.endswith(".pdf") or ".pdf?" in low
-        return (has_gender, is_pdf)
-
-    docs = sorted(docs, key=priority, reverse=True)
-    chunks = []
-
-    for url in docs[:12]:
-        low = url.lower()
-        # Evitamos documentos explícitamente masculinos.
-        if gender == "female" and any(x in low for x in ("-men-", "_men_", "/men/", "male")) and not any(
-            x in low for x in ("women", "female")
-        ):
-            continue
-
-        if ".pdf" in low:
-            raw = await _fetch_bytes(url)
-            text = _extract_pdf_text(raw)
-        else:
-            html = await _fetch(url)
-            text = _clean_text(BeautifulSoup(html, "html.parser")) if html else ""
-
-        if text and len(text) > 150:
-            chunks.append(f"FUENTE {url}\n{text}")
-
-    filtered_html = await _get_gender_filtered_event_html(event, gender)
-    filtered_text = _clean_text(BeautifulSoup(filtered_html, "html.parser")) if filtered_html else ""
-    if filtered_text:
-        chunks.append("PÁGINA DEL EVENTO / RESULTS\n" + filtered_text)
-
-    return "\n\n".join(chunks)[:140000]
-
-
-async def _extract_next_womens_match(event: dict) -> dict | None:
-    """
-    Extrae el próximo partido femenino SIN LLM.
-    Usa Order of Play oficial (PDF/HTML) y parsing determinista.
-    """
-    docs = _official_document_urls(event)["oop"]
-    if not docs:
-        return None
-
-    source_parts = []
-    for url in docs[:8]:
-        try:
-            if ".pdf" in url.lower():
-                raw = await _fetch_bytes(url)
-                txt = _extract_pdf_text(raw)
-            else:
-                html = await _fetch(url)
-                txt = _clean_text(BeautifulSoup(html, "html.parser")) if html else ""
-            if txt:
-                source_parts.append(txt)
-        except Exception:
-            continue
-
-    source = "\n".join(source_parts)
-    if not source:
-        return None
-
-    lines = [re.sub(r"\s+", " ", ln).strip() for ln in source.splitlines()]
-    lines = [ln for ln in lines if ln]
-
-    # Find female/women section if explicit.
-    female_idx = None
-    for i, ln in enumerate(lines):
-        if re.search(r"\b(women|female|femenin)", ln, re.I):
-            female_idx = i
-            break
-    if female_idx is not None:
-        lines = lines[female_idx:]
-
-    # Round aliases.
-    round_patterns = [
-        (r"\bfinal\b", "Final"),
-        (r"\bsemi[- ]?finals?\b|\bsf\b", "Semifinales"),
-        (r"\bquarter[- ]?finals?\b|\bqf\b", "Cuartos de final"),
-        (r"\bround of 16\b|\br16\b", "Octavos de final"),
-        (r"\b2nd round\b|\bsecond round\b|\br2\b", "Segunda ronda"),
-        (r"\b1st round\b|\bfirst round\b|\br1\b", "Primera ronda"),
-        (r"\bqual", "Clasificación"),
-    ]
-
-    current_round = ""
-    current_date = ""
-    current_time = ""
-    current_time_type = "exact"
-
-    # Simple date recognizers.
-    date_re_iso = re.compile(r"\b(20\d{2})[-/](\d{1,2})[-/](\d{1,2})\b")
-    date_re_dmy = re.compile(r"\b(\d{1,2})[-/](\d{1,2})[-/](20\d{2})\b")
-    time_re = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b")
-
-    # Candidate player line heuristic: name-like line, no scores/times/headers.
-    def is_player_line(ln: str) -> bool:
-        if len(ln) < 3 or len(ln) > 80:
-            return False
-        if time_re.search(ln):
-            return False
-        if re.search(r"\b(court|center|centre|order of play|women|female|men|male|final|semi|quarter|round|qual|not before|followed by)\b", ln, re.I):
-            return False
-        if re.search(r"\b\d{1,2}[-–]\d{1,2}\b", ln):
-            return False
-        return bool(re.search(r"[A-Za-zÀ-ÿ]", ln))
-
-    candidates = []
-
-    for i, ln in enumerate(lines):
-        low = ln.lower()
-
-        for pat, label in round_patterns:
-            if re.search(pat, low, re.I):
-                current_round = label
-                break
-
-        m = date_re_iso.search(ln)
-        if m:
-            current_date = f"{int(m.group(1)):04d}-{int(m.group(2)):02d}-{int(m.group(3)):02d}"
-        else:
-            m = date_re_dmy.search(ln)
-            if m:
-                current_date = f"{int(m.group(3)):04d}-{int(m.group(2)):02d}-{int(m.group(1)):02d}"
-
-        tm = time_re.search(ln)
-        if tm:
-            current_time = f"{int(tm.group(1)):02d}:{int(tm.group(2)):02d}"
-            current_time_type = "not_before" if "not before" in low else "exact"
-
-        # Pair patterns: "A / B vs C / D" or "A & B vs C & D"
-        pair_match = re.search(
-            r"(.+?(?:/|&).+?)\s+(?:vs\.?|v\.?)\s+(.+?(?:/|&).+)",
-            ln,
-            re.I,
-        )
-        if pair_match:
-            p1 = re.sub(r"\s*&\s*", " / ", pair_match.group(1)).strip(" -")
-            p2 = re.sub(r"\s*&\s*", " / ", pair_match.group(2)).strip(" -")
-            candidates.append({
-                "round": current_round or "Partido",
-                "pair1": p1,
-                "pair2": p2,
-                "date": current_date,
-                "time": current_time,
-                "time_type": current_time_type,
-            })
-            continue
-
-        # Fallback: four consecutive player-like lines around a time.
-        if current_time and i + 3 < len(lines):
-            block = lines[i:i+4]
-            if all(is_player_line(x) for x in block):
-                candidates.append({
-                    "round": current_round or "Partido",
-                    "pair1": f"{block[0]} / {block[1]}",
-                    "pair2": f"{block[2]} / {block[3]}",
-                    "date": current_date,
-                    "time": current_time,
-                    "time_type": current_time_type,
-                })
-
-    if not candidates:
-        return None
-
-    event_tz = ZoneInfo(_event_timezone(event.get("place", "")))
-    madrid_tz = ZoneInfo("Europe/Madrid")
-    now_madrid = datetime.now(madrid_tz)
-
-    normalized = []
-    seen = set()
-    for item in candidates:
-        key = (item["pair1"].lower(), item["pair2"].lower(), item["date"], item["time"])
-        if key in seen:
-            continue
-        seen.add(key)
-
-        dt_madrid = None
-        if item["date"] and item["time"]:
-            try:
-                local_dt = datetime.strptime(
-                    f"{item['date']} {item['time']}",
-                    "%Y-%m-%d %H:%M"
-                ).replace(tzinfo=event_tz)
-                dt_madrid = local_dt.astimezone(madrid_tz)
-            except Exception:
-                pass
-
-        item["datetime_madrid"] = dt_madrid
-        normalized.append(item)
-
-    future = [
-        x for x in normalized
-        if x["datetime_madrid"] and x["datetime_madrid"] >= now_madrid - timedelta(minutes=15)
-    ]
-    chosen = min(future, key=lambda x: x["datetime_madrid"]) if future else normalized[0]
-
-    dt = chosen.pop("datetime_madrid", None)
-    if dt:
-        today = now_madrid.date()
-        if dt.date() == today:
-            day_label = "Hoy"
-        elif dt.date() == today + timedelta(days=1):
-            day_label = "Mañana"
-        else:
-            day_label = dt.strftime("%d/%m")
-
-        prefix = "No antes de " if chosen.get("time_type") == "not_before" else ""
-        chosen["when"] = f"{day_label} · {prefix}{dt.strftime('%H:%M')} (hora de España)"
-        chosen["iso_madrid"] = dt.isoformat()
-    else:
-        chosen["when"] = "Horario por confirmar"
-        chosen["iso_madrid"] = ""
-
-    return chosen
-
-
-def _norm_person_name(value: str) -> str:
-    value = unicodedata.normalize("NFKD", value or "")
-    value = "".join(ch for ch in value if not unicodedata.combining(ch))
-    value = re.sub(r"[^a-zA-Z0-9]+", " ", value).lower()
-    return re.sub(r"\s+", " ", value).strip()
-
-
-async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
-    """
-    FIP Results/Female extractor without Groq.
-
-    v28 proved Chromium works but the visible Female control did not switch the DOM:
-      female=False, female_hits=0, inputs=3
-
-    v29 does not depend on that visual switch. It:
-    1) captures XHR/fetch payloads triggered by every candidate gender control;
-    2) searches those payloads for women's-ranking names;
-    3) also searches HIDDEN DOM containers, because FIP can preload both genders
-       and hide one with CSS;
-    4) returns whichever source is positively verified as female.
-    """
-    diag = {
-        "playwright": False,
-        "female_clicked": False,
-        "female_verified": False,
-        "visible_female_hits": 0,
-        "hidden_female_hits": 0,
-        "network_female_hits": 0,
-        "network_payloads": 0,
-        "inputs": 0,
-        "source_mode": "",
-    }
-
-    if async_playwright is None:
-        print("  FIP browser: Playwright no disponible")
-        return "", diag
-
-    url = event.get("url", "")
-    if not url:
-        return "", diag
-
-    try:
-        ranking_names = await get_womens_ranking_names(limit=200)
-    except Exception:
-        ranking_names = []
-
-    ranking_norm = [_norm_person_name(x) for x in ranking_names if x]
-
-    def count_hits(text: str) -> int:
-        norm = _norm_person_name(text)
-        padded = f" {norm} "
-        return len({
-            name for name in ranking_norm
-            if name and f" {name} " in padded
-        })
-
-    browser = None
-    network_payloads = []
-
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
-            )
-            diag["playwright"] = True
-
-            page = await browser.new_page(
-                viewport={"width": 1440, "height": 1400},
-                locale="en-US",
-            )
-
-            # Capture XHR/fetch from the start. We later keep only payloads verified
-            # by women's ranking names, so male bootstrap data is harmless.
-            async def on_response(response):
-                try:
-                    if response.request.resource_type not in {"xhr", "fetch"}:
-                        return
-                    ct = (response.headers.get("content-type") or "").lower()
-                    if not any(x in ct for x in ("json", "text", "html")):
-                        return
-                    body = await response.text()
-                    if body and 20 < len(body) < 500000:
-                        network_payloads.append(
-                            {"url": response.url, "body": body}
-                        )
-                except Exception:
-                    pass
-
-            page.on("response", on_response)
-
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            await page.wait_for_timeout(1800)
-
-            # Activate Results with several strategies.
-            for label in ("Results", "Resultados"):
-                try:
-                    loc = page.get_by_text(label, exact=True).first
-                    if await loc.count():
-                        await loc.click(force=True, timeout=3000)
-                        await page.wait_for_timeout(900)
-                        break
-                except Exception:
-                    pass
-
-            try:
-                await page.evaluate(r"""
-                () => {
-                  const norm = s => (s || '').replace(/\s+/g,' ').trim().toLowerCase();
-                  const els = Array.from(document.querySelectorAll('a,button,[role=tab],[role=button],li,div,span'));
-                  for (const el of els) {
-                    if (['results','resultados'].includes(norm(el.textContent))) {
-                      try {
-                        el.click();
-                        el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                      } catch(e) {}
-                    }
-                  }
-                }
-                """)
-                await page.wait_for_timeout(900)
-            except Exception:
-                pass
-
-            # Visible body baseline.
-            try:
-                visible = await page.locator("body").inner_text(timeout=6000)
-            except Exception:
-                visible = ""
-            diag["visible_female_hits"] = count_hits(visible)
-
-            # ----------------------------------------------------------
-            # Hidden DOM inspection BEFORE touching the gender selector.
-            # innerText misses display:none; textContent does not.
-            # ----------------------------------------------------------
-            try:
-                hidden_candidates = await page.evaluate(r"""
-                () => {
-                  const out = [];
-                  const nodes = Array.from(document.querySelectorAll('body *'));
-                  for (const el of nodes) {
-                    const text = (el.textContent || '').replace(/\s+/g,' ').trim();
-                    if (text.length < 40 || text.length > 30000) continue;
-                    const style = getComputedStyle(el);
-                    const hidden =
-                      style.display === 'none' ||
-                      style.visibility === 'hidden' ||
-                      el.hidden ||
-                      el.getAttribute('aria-hidden') === 'true';
-                    if (hidden) out.push(text);
-                  }
-                  return [...new Set(out)].slice(0,300);
-                }
-                """)
-            except Exception:
-                hidden_candidates = []
-
-            best_hidden = ""
-            best_hidden_hits = 0
-            for text in hidden_candidates:
-                hits = count_hits(text)
-                if hits > best_hidden_hits:
-                    best_hidden_hits = hits
-                    best_hidden = text
-
-            diag["hidden_female_hits"] = best_hidden_hits
-
-            # ----------------------------------------------------------
-            # Probe every plausible input/control and collect network.
-            # ----------------------------------------------------------
-            try:
-                input_count = await page.locator("input").count()
-            except Exception:
-                input_count = 0
-            diag["inputs"] = input_count
-
-            # First click text/labels with force.
-            for label in ("Female", "Women", "Femenino", "Femenina"):
-                try:
-                    locs = page.get_by_text(label, exact=True)
-                    for i in range(await locs.count()):
-                        try:
-                            await locs.nth(i).click(force=True, timeout=1500)
-                            await page.wait_for_timeout(1000)
-                            diag["female_clicked"] = True
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
-
-            # Then probe each input and its associated label/siblings.
-            for idx in range(min(input_count, 15)):
-                try:
-                    await page.evaluate(r"""
-                    (idx) => {
-                      const el = document.querySelectorAll('input')[idx];
-                      if (!el) return;
-                      const targets = [
-                        el,
-                        el.closest('label'),
-                        el.parentElement,
-                        el.previousElementSibling,
-                        el.nextElementSibling
-                      ].filter(Boolean);
-
-                      for (const t of targets) {
-                        try { t.click(); } catch(e) {}
-                        try {
-                          t.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                        } catch(e) {}
-                      }
-
-                      try { el.checked = !el.checked; } catch(e) {}
-                      try { el.dispatchEvent(new Event('input',{bubbles:true})); } catch(e) {}
-                      try { el.dispatchEvent(new Event('change',{bubbles:true})); } catch(e) {}
-                    }
-                    """, idx)
-                    await page.wait_for_timeout(1000)
-                except Exception:
-                    continue
-
-            # Give asynchronous requests time to complete.
-            await page.wait_for_timeout(1200)
-
-            # Check visible DOM after probing.
-            try:
-                visible_after = await page.locator("body").inner_text(timeout=6000)
-            except Exception:
-                visible_after = ""
-
-            visible_hits_after = count_hits(visible_after)
-            diag["visible_female_hits"] = max(
-                diag["visible_female_hits"], visible_hits_after
-            )
-
-            # Re-scan hidden DOM after controls were toggled.
-            try:
-                all_text_candidates = await page.evaluate(r"""
-                () => {
-                  const out = [];
-                  const nodes = Array.from(document.querySelectorAll('body *'));
-                  for (const el of nodes) {
-                    const text = (el.textContent || '').replace(/\s+/g,' ').trim();
-                    if (text.length >= 40 && text.length <= 40000) out.push(text);
-                  }
-                  return [...new Set(out)].slice(0,600);
-                }
-                """)
-            except Exception:
-                all_text_candidates = []
-
-            best_dom = ""
-            best_dom_hits = 0
-            for text in all_text_candidates:
-                hits = count_hits(text)
-                if hits > best_dom_hits:
-                    best_dom_hits = hits
-                    best_dom = text
-
-            diag["hidden_female_hits"] = max(
-                diag["hidden_female_hits"], best_dom_hits
-            )
-
-            # Verify captured network responses.
-            best_network = ""
-            best_network_hits = 0
-            best_network_url = ""
-
-            for payload in network_payloads:
-                hits = count_hits(payload["body"])
-                if hits > best_network_hits:
-                    best_network_hits = hits
-                    best_network = payload["body"]
-                    best_network_url = payload["url"]
-
-            diag["network_payloads"] = len(network_payloads)
-            diag["network_female_hits"] = best_network_hits
-
-            # ----------------------------------------------------------
-            # Choose positively verified female source.
-            # Prefer network JSON/API, then full/hidden DOM, then visible DOM.
-            # ----------------------------------------------------------
-            source = ""
-
-            if best_network_hits >= 2:
-                source = f"=== FEMALE NETWORK {best_network_url} ===\n{best_network}"
-                diag["female_verified"] = True
-                diag["source_mode"] = "network"
-            elif best_dom_hits >= 2:
-                source = f"=== FEMALE DOM ===\n{best_dom}"
-                diag["female_verified"] = True
-                diag["source_mode"] = "hidden-or-full-dom"
-            elif visible_hits_after >= 2:
-                source = f"=== FEMALE VISIBLE ===\n{visible_after}"
-                diag["female_verified"] = True
-                diag["source_mode"] = "visible-dom"
-
-            if diag["female_verified"]:
-                diag["female_clicked"] = True
-
-            await browser.close()
-            browser = None
-
-            print(
-                "  FIP female probe:",
-                f"verified={diag['female_verified']}",
-                f"mode={diag['source_mode'] or '-'}",
-                f"visible_hits={diag['visible_female_hits']}",
-                f"hidden_hits={diag['hidden_female_hits']}",
-                f"network_hits={diag['network_female_hits']}",
-                f"xhr={diag['network_payloads']}",
-                f"inputs={diag['inputs']}",
-            )
-
-            return source[:350000], diag
-
-    except Exception as exc:
-        print(f"  FIP female probe error: {type(exc).__name__}: {exc}")
-        if browser is not None:
-            try:
-                await browser.close()
-            except Exception:
-                pass
-        return "", diag
-
-
-async def _womens_ranking_validation_sets() -> tuple[set[str], set[str], bool]:
-    """Ranking femenino; strict solo si la lista es suficientemente completa."""
-    try:
-        names = await get_womens_ranking_names(limit=250)
-    except Exception:
-        names = []
-
-    full = {_norm_person_name(n) for n in names if n}
-    surnames = {n.split()[-1] for n in full if n.split()}
-    return full, surnames, len(full) >= 40
-
-
-def _pair_is_womens_ranking_pair(pair: str, ranking_full: set[str], ranking_surnames: set[str]) -> bool:
-    """
-    Result output uses 'Apellido / Apellido'. Validate both sides against
-    the women's ranking so a male result can never leak into En juego.
-    """
-    pieces = [p.strip() for p in pair.split("/") if p.strip()]
-    if len(pieces) != 2:
-        return False
-
-    for piece in pieces:
-        norm = _norm_person_name(piece)
-        if not norm:
-            return False
-
-        # Exact/full-name containment.
-        if any(norm == full or norm in full or full in norm for full in ranking_full):
-            continue
-
-        # Surname fallback for compact display ("Triay / Brea").
-        last = norm.split()[-1]
-        if last not in ranking_surnames:
-            return False
-
-    return True
-
-def _round_from_snapshot(snapshot: str, event: dict) -> str:
-    """Infer round using date shown in snapshot + tournament structure."""
-    round_aliases = [
-        ("semi-final", "Semifinales"),
-        ("semifinal", "Semifinales"),
-        ("quarter-final", "Cuartos de final"),
-        ("quarter final", "Cuartos de final"),
-        ("round of 16", "Octavos de final"),
-        ("2nd round", "Segunda ronda"),
-        ("second round", "Segunda ronda"),
-        ("1st round", "Primera ronda"),
-        ("first round", "Primera ronda"),
-        ("final", "Final"),
-        ("qual", "Clasificación"),
-    ]
-
-    # If snapshot itself names the round, easiest path.
-    low = snapshot.lower()
-    for needle, label in round_aliases:
-        if needle in low:
-            return label
-
-    # Extract day/month from snapshot.
-    dm = re.search(
-        r"\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)?[,]?\s*(\d{1,2})\s+"
-        r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\b",
-        snapshot,
-        re.I,
-    )
-    if not dm:
-        return "Partidos"
-
-    day = str(int(dm.group(1)))
-    month = dm.group(2).lower()
-
-    event_text = _clean_text(BeautifulSoup(event.get("html", ""), "html.parser"))
-    event_low = event_text.lower()
-
-    # Find the occurrence of the date in tournament structure and inspect context before it.
-    date_pat = re.compile(rf"\b{re.escape(day)}\s+{re.escape(month)}[a-z]*\b", re.I)
-    for m in date_pat.finditer(event_low):
-        ctx = event_low[max(0, m.start() - 180):m.start() + 40]
-        for needle, label in round_aliases:
-            if needle in ctx:
-                return label
-
-    return "Partidos"
-
-
-async def _extract_official_results(event: dict, gender: str = "female") -> list:
-    """
-    Results parser v29.
-
-    Accepts verified female source from:
-      - XHR/fetch JSON/text,
-      - hidden/preloaded DOM,
-      - visible DOM.
-
-    It never uses Groq.
-    """
-    gender = (gender or "female").strip().lower()
-    if gender in {"women", "woman"}:
-        gender = "female"
-
-    source = ""
-    browser_diag = {}
-
-    if gender == "female":
-        try:
-            source, browser_diag = await _browser_fip_womens_results_text(event)
-        except Exception as exc:
-            print(f"  live source error: {type(exc).__name__}: {exc}")
-
-    if not source:
-        _LIVE_DEBUG_STATE.update({
-            "browser": browser_diag,
-            "parser": "female-source-v29",
-            "parsed_results": 0,
-            "valid_results": 0,
-            "source_chars": 0,
-            "groq_used": False,
-        })
+async def _extract_official_womens_results(event: dict) -> list:
+    """Estructura resultados usando exclusivamente la ficha oficial FIP."""
+    soup = BeautifulSoup(event["html"], "html.parser")
+    for tag in soup.find_all(["script", "style", "nav", "footer", "header"]):
+        tag.decompose()
+    official_text = _clean_text(soup)
+    if not official_text:
         return []
 
-    ranking_full, ranking_surnames, _ = await _womens_ranking_validation_sets()
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        print("  live results: GROQ_API_KEY no configurada")
+        return []
 
-    def match_player(text: str) -> str | None:
-        norm = _norm_person_name(text)
-        if not norm:
-            return None
-        if norm in ranking_full:
-            return norm
-        candidates = [name for name in ranking_full if name and name in norm]
-        return max(candidates, key=len) if candidates else None
+    source = official_text[:60000]
+    client = Groq(api_key=api_key)
+    prompt = f"""Extrae resultados del circuito FEMENINO únicamente del siguiente texto de la web OFICIAL FIP.
+No uses conocimiento externo. No deduzcas marcadores. No completes nombres.
 
-    # ----------------------------------------------------------
-    # Convert network JSON to an ordered scalar stream.
-    # ----------------------------------------------------------
-    scalar_lines = []
+FUENTE OFICIAL FIP:
+{source}
 
-    raw_payload = source.split("\n", 1)[1] if "\n" in source else source
+Devuelve SOLO JSON con TODOS los partidos FEMENINOS FINALIZADOS que aparezcan claramente en la fuente, ordenados de la ronda más reciente a la más antigua:
+[{{"round":"Semifinal", "winner":"Apellido / Apellido", "loser":"Apellido / Apellido", "score":"6-1, 7-5"}}]
 
-    if browser_diag.get("source_mode") == "network":
-        try:
-            obj = json.loads(raw_payload)
+Reglas:
+- Cada pareja debe contener exactamente 2 jugadoras.
+- winner es la pareja marcada como vencedora en FIP.
+- score es el resultado por sets desde el punto de vista de winner.
+- No incluyas partidos sin resultado final.
+- No incluyas masculino.
+- Si no puedes demostrar un partido con el texto, omítelo.
+- Si no hay resultados femeninos claros, devuelve []."""
 
-            def walk(value):
-                if isinstance(value, dict):
-                    # Preserve insertion order from response.
-                    for k, v in value.items():
-                        # Keys can carry semantic hints like score/player/round.
-                        scalar_lines.append(str(k))
-                        walk(v)
-                elif isinstance(value, list):
-                    for item in value:
-                        walk(item)
-                elif value is not None:
-                    scalar_lines.append(str(value))
+    try:
+        resp = await asyncio.to_thread(lambda: client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            max_tokens=5000,
+            temperature=0,
+            messages=[{"role": "user", "content": prompt}],
+        ))
+        raw = resp.choices[0].message.content.strip()
+        m = re.search(r"\[.*\]", raw, re.DOTALL)
+        if not m:
+            return []
+        parsed = json.loads(m.group())
+    except Exception as e:
+        print(f"  official FIP result extraction error: {e}")
+        return []
 
-            walk(obj)
-        except Exception:
-            # Network response may be HTML/text instead of JSON.
-            scalar_lines = raw_payload.splitlines()
-    else:
-        scalar_lines = raw_payload.splitlines()
-
-    lines = [re.sub(r"\s+", " ", str(x)).strip() for x in scalar_lines]
-    lines = [x for x in lines if x]
-
-    round_aliases = [
-        (r"\bsemi[- ]?finals?\b|\bsf\b", "Semifinales"),
-        (r"\bquarter[- ]?finals?\b|\bqf\b", "Cuartos de final"),
-        (r"\bround of 16\b|\br16\b", "Octavos de final"),
-        (r"\b2nd round\b|\bsecond round\b|\br2\b", "Segunda ronda"),
-        (r"\b1st round\b|\bfirst round\b|\br1\b", "Primera ronda"),
-        (r"\bfinal\b", "Final"),
-        (r"\bqual", "Clasificación"),
-    ]
-
-    # Identify player hits in stream.
-    hits = []
-    current_round = "Partidos"
-    round_at_index = {}
-
-    for idx, line in enumerate(lines):
-        low = line.lower()
-        for pat, label in round_aliases:
-            if re.search(pat, low):
-                current_round = label
-                break
-        round_at_index[idx] = current_round
-
-        player = match_player(line)
-        if player:
-            if not hits or not (hits[-1][1] == player and hits[-1][0] == idx - 1):
-                hits.append((idx, player))
-
-    # Numeric score cell helper.
-    def nums_between(a: int, b: int):
-        vals = []
-        for line in lines[a:b]:
-            # Standalone score cells only.
-            if re.fullmatch(r"\d{1,2}", line):
-                n = int(line)
-                if 0 <= n <= 20:
-                    vals.append(n)
-        return vals
-
-    parsed = []
-    pos = 0
-
-    while pos + 3 < len(hits):
-        i1, p1 = hits[pos]
-        i2, p2 = hits[pos + 1]
-        i3, p3 = hits[pos + 2]
-        i4, p4 = hits[pos + 3]
-        nxt = hits[pos + 4][0] if pos + 4 < len(hits) else len(lines)
-
-        a_scores = nums_between(i2 + 1, i3)
-        b_scores = nums_between(i4 + 1, nxt)
-
-        # JSON APIs often emit all set scores after the four players.
-        if min(len(a_scores), len(b_scores)) < 2:
-            combined = nums_between(i4 + 1, nxt)
-            if len(combined) in {4, 6}:
-                half = len(combined) // 2
-                a_scores = combined[:half]
-                b_scores = combined[half:]
-
-        count = min(len(a_scores), len(b_scores), 3)
-        if count < 2:
-            pos += 1
-            continue
-
-        a_scores = a_scores[:count]
-        b_scores = b_scores[:count]
-
-        a_sets = sum(1 for a,b in zip(a_scores,b_scores) if a>b)
-        b_sets = sum(1 for a,b in zip(a_scores,b_scores) if b>a)
-
-        if a_sets == b_sets:
-            pos += 1
-            continue
-
-        rnd = round_at_index.get(i1, "Partidos")
-        pair_a = f"{p1.title()} / {p2.title()}"
-        pair_b = f"{p3.title()} / {p4.title()}"
-
-        if a_sets > b_sets:
-            winner, loser = pair_a, pair_b
-            score = "  ".join(f"{a}-{b}" for a,b in zip(a_scores,b_scores))
-        else:
-            winner, loser = pair_b, pair_a
-            score = "  ".join(f"{b}-{a}" for a,b in zip(a_scores,b_scores))
-
-        parsed.append({
-            "round": rnd,
-            "winner": winner,
-            "loser": loser,
-            "score": score,
-            "date": "",
-        })
-        pos += 4
-
-    # Dedupe
+    normalized_source = re.sub(r"\s+", " ", official_text).lower()
     valid = []
-    seen = set()
-    for item in parsed:
-        key = (
-            item["round"],
-            item["winner"].casefold(),
-            item["loser"].casefold(),
-            item["score"],
-        )
-        if key in seen:
+    for item in parsed[:40]:
+        winner = str(item.get("winner", "")).strip()
+        loser = str(item.get("loser", "")).strip()
+        score = str(item.get("score", "")).strip()
+        rnd = str(item.get("round", "")).strip()
+        if not winner or not loser or not score or "/" not in winner or "/" not in loser:
             continue
-        seen.add(key)
-        valid.append(item)
+        if not re.fullmatch(r"\d{1,2}-\d{1,2}(?:\s*,\s*\d{1,2}-\d{1,2}){1,2}", score):
+            continue
 
-    valid.sort(
-        key=lambda x: ROUND_ORDER.get(x["round"], 0),
-        reverse=True,
-    )
+        names = [x.strip().lower() for x in re.split(r"/", winner + "/" + loser) if x.strip()]
+        surnames = [n.split()[-1] for n in names if n.split()]
+        if len(surnames) != 4 or not all(tok in normalized_source for tok in surnames):
+            continue
 
-    _LIVE_DEBUG_STATE.update({
-        "browser": browser_diag,
-        "parser": "female-source-v29",
-        "female_player_hits": len(hits),
-        "parsed_results": len(parsed),
-        "valid_results": len(valid),
-        "ranking_players_seen": len(ranking_full),
-        "source_chars": len(source),
-        "groq_used": False,
-    })
-
-    print(
-        "  live parser:",
-        f"source={browser_diag.get('source_mode') or '-'}",
-        f"female_hits={len(hits)}",
-        f"parsed={len(parsed)}",
-        f"valid={len(valid)}",
-    )
+        valid.append({"round": rnd, "winner": winner, "loser": loser, "score": score})
     return valid
 
 
-async def get_tournament_now(gender: str = "female") -> dict:
-    """
-    Torneo actual + resultados femeninos acumulados mientras el torneo está en curso.
-    No se espera a la final: cada partido terminado se muestra en cuanto FIP lo publica.
-    """
+async def get_tournament_now() -> dict:
+    """Torneo actual + resultados femeninos, usando únicamente fuentes oficiales."""
     today_str = date.today().strftime("%d/%m/%Y")
     event = await _get_official_live_event()
     if not event:
         return {
             "active": False, "name": "", "place": "", "dates": "",
-            "watch": [], "results": [], "next_match": None, "updated": today_str,
-            "gender": gender,
-            "source": "FIP", "source_url": FIP_PREMIER_CALENDAR_URL.format(year=date.today().year),
+            "watch": [], "results": [], "updated": today_str,
+            "source": "FIP", "source_url": FIP_LIVE_URL,
         }
 
-    parts = await asyncio.gather(
+    watch, results = await asyncio.gather(
         _get_watch_official(),
-        _extract_official_results(event, gender),
-        _extract_next_womens_match(event) if gender in {"female", "women", "woman"} else asyncio.sleep(0, result=None),
-        return_exceptions=True,
+        _extract_official_womens_results(event),
     )
-
-    watch, results, next_match = parts
-
-    if isinstance(watch, Exception):
-        print(f"  live watch error: {watch}")
-        watch = []
-    if isinstance(results, Exception):
-        print(f"  live results error: {results}")
-        results = []
-    if isinstance(next_match, Exception):
-        print(f"  live next-match error: {next_match}")
-        next_match = None
-
     return {
         "active": True,
         "name": event["name"],
         "place": event["place"],
         "dates": event["dates"],
-        "watch": watch or [],
-        "results": results or [],
-        "next_match": next_match,
+        "watch": watch,
+        "results": results,
         "updated": today_str,
-        "gender": gender,
         "source": "FIP · Premier Padel",
         "source_url": event["url"],
-        "_debug": dict(_LIVE_DEBUG_STATE),
     }
