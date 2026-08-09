@@ -1955,6 +1955,12 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
                     "source":"snapshot",
                 })
 
+                print(
+                    "  snapshot match:",
+                    " / ".join(players),
+                    f"scores={scores}",
+                )
+
         return out
 
     # GET terminado. AHORA sí filtramos contra ranking100.
@@ -2038,11 +2044,47 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         """
         FILTRO FEMENINO DESPUÉS DE CAPTURAR.
 
-        Cada nombre visible del partido se cruza contra las 100 jugadoras.
-        Sólo si conseguimos exactamente 4 jugadoras distintas, el partido
-        puede pasar al siguiente paso.
+        IMPORTANTE:
+        _snapshot_blocks_after_get() ya devuelve `players` resueltos contra
+        ranking100. En v112 este campo se ignoraba y se buscaba únicamente
+        `raw_names`, que no existía en esos bloques. Por eso 2 bloques reales
+        acababan en female_after_ranking100=0.
         """
-        raw_names = block.get("raw_names") or []
+
+        # 1) Camino normal para snapshots: las cuatro jugadoras ya fueron
+        # resueltas DESPUÉS del GET limpio.
+        existing = [
+            str(x).strip()
+            for x in (block.get("players") or [])
+            if str(x).strip()
+        ]
+
+        if len(existing) == 4:
+            # Validación explícita: cada nombre debe pertenecer realmente
+            # a las 100 jugadoras, no basta con que venga en el bloque.
+            validated = []
+            for display in existing:
+                norm = _norm_person_name(display)
+                match = next(
+                    (
+                        canonical_display
+                        for ranking_norm, canonical_display in ranking_display.items()
+                        if norm == ranking_norm
+                        or norm in ranking_norm
+                        or ranking_norm in norm
+                    ),
+                    None,
+                )
+                if not match:
+                    validated = []
+                    break
+                validated.append(match)
+
+            if len(validated) == 4 and len({x.casefold() for x in validated}) == 4:
+                return validated
+
+        # 2) Fallback para futuros raw blocks que sí traigan raw_names.
+        raw_names = block.get("raw_names") or block.get("raw_leaves") or []
         hits = []
 
         for item in raw_names:
@@ -2121,22 +2163,17 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
         players = _resolve_womens_players_from_raw(block)
         if len(players) != 4:
-            # Resultado real detectado, pero no podemos atribuirlo con seguridad
-            # al cuadro femenino. No inventamos nombres.
+            print(
+                "  ranking100 reject:",
+                f"source={block.get('source','')}",
+                f"players={block.get('players',[])}",
+                f"text={str(block.get('text',''))[:180]}",
+            )
             continue
 
         pair_probe_a = f"{players[0]} / {players[1]}"
         pair_probe_b = f"{players[2]} / {players[3]}"
 
-        raw_norm = _norm_person_name(str(block.get("text", "")))
-        explicit_female = bool(re.search(
-            r"\b(female|women|woman|femenino|femenina|mujeres)\b",
-            raw_norm,
-        ))
-        explicit_male = bool(re.search(
-            r"\b(male|men|masculino|hombres)\b",
-            raw_norm,
-        ))
 
         ranking_says_women = (
             _pair_is_womens_ranking_pair(pair_probe_a, ranking_full, ranking_surnames)
@@ -2267,7 +2304,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         f"snapshot_blocks={len(blocks)}",
         f"snapshots={len(snapshots)}",
         f"raw_parsed={raw_parsed_count}",
-        f"female_after_ranking100={female_filtered_count}",
+        f"matches_after_ranking100={female_filtered_count}",
         f"ranking100={len(ranking_full)}",
         f"valid={len(valid)}",
         f"dates={len(dates)}",
