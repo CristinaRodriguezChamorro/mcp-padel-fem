@@ -2195,43 +2195,27 @@ async def _browser_fip_womens_draw_blocks(event: dict) -> tuple[list[dict], dict
 
 async def _extract_official_results(event: dict, gender: str = "female") -> list:
     """
-    EN JUEGO ONLY — v39
+    EN JUEGO — stable results-only pipeline.
 
-    Recibe bloques con 4 jugadoras + scores de todos los estados/días.
-    Reconstruye pareja ganadora, perdedora, marcador, fecha y ronda.
+    Source of truth: v39 Results parser only.
+    Draws is intentionally NOT called here because it has been partial/slow and
+    can block the whole /api/live response.
     """
-    # PRIMARY: FIP Draws tab, where the round is explicit by bracket column.
     try:
-        blocks, draw_diag = await _browser_fip_womens_draw_blocks(event)
+        source, capture_diag = await _browser_fip_womens_results_text(event)
     except Exception as exc:
-        print(f"  draw live-source error: {type(exc).__name__}: {exc}")
-        blocks, draw_diag = [], {}
+        print(f"  v39 live-source error: {type(exc).__name__}: {exc}")
+        source, capture_diag = "", {}
 
-    capture_diag = {"draw": draw_diag}
-
-    # FALLBACK: existing v39 Results parser.
-    # A partial Draw capture must not replace the complete results feed.
-    if len(blocks) < 8:
-        if blocks:
-            print(f"  FIP draw parcial: {len(blocks)} bloques; usando v39 para resultados completos")
+    try:
+        blocks = json.loads(source).get("blocks", []) if source else []
+    except Exception:
         blocks = []
-        try:
-            source, v39_diag = await _browser_fip_womens_results_text(event)
-        except Exception as exc:
-            print(f"  v39 live-source error: {type(exc).__name__}: {exc}")
-            source, v39_diag = "", {}
-
-        capture_diag["v39"] = v39_diag
-
-        try:
-            blocks = json.loads(source).get("blocks", []) if source else []
-        except Exception:
-            blocks = []
 
     if not blocks:
         for attempt in range(1, 3):
             print(f"  live results: v39 devolvió 0 bloques; reintento {attempt}/2")
-            await asyncio.sleep(1.2 * attempt)
+            await asyncio.sleep(1.0 * attempt)
             try:
                 retry_source, retry_diag = await _browser_fip_womens_results_text(event)
                 retry_blocks = json.loads(retry_source).get("blocks", []) if retry_source else []
@@ -2241,13 +2225,17 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
             if retry_blocks:
                 blocks = retry_blocks
-                capture_diag["v39_retry"] = retry_diag
+                capture_diag = retry_diag
                 print(f"  live retry {attempt}: recuperados {len(blocks)} bloques")
                 break
 
     if not blocks:
-        print("  live results: reintentos v39 sin datos; activando flat fallback")
-        blocks = await _browser_fip_flat_results_fallback(event)
+        print("  live results: v39 sin datos; activando flat fallback")
+        try:
+            blocks = await _browser_fip_flat_results_fallback(event)
+        except Exception as exc:
+            print(f"  flat fallback error: {type(exc).__name__}: {exc}")
+            blocks = []
 
     month_map = {
         "jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,
@@ -2467,9 +2455,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         seen.add(key)
         valid.append(item)
 
-    # Production fix: never trust broad DOM round labels for the closing draw.
-    # Rebuild Final/SF/QF/R16 from the full v39 sequence, then validate.
-    valid = _assign_knockout_rounds_from_tail(valid)
+    valid = _rebuild_rounds_from_advancement(valid)
     valid = _validate_explicit_rounds(valid)
 
     valid.sort(
@@ -2484,7 +2470,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     _LIVE_DEBUG_STATE.update({
         "browser": capture_diag,
-        "parser": "v39-tail-rounds-v97",
+        "parser": "v39-advancement-graph-v98",
         "raw_blocks": len(blocks),
         "parsed_results": len(parsed),
         "valid_results": len(valid),
@@ -2530,68 +2516,131 @@ def _round_pair_signature(pair: str) -> tuple[str, ...]:
     return tuple(sorted(sig))
 
 
-def _assign_knockout_rounds_from_tail(results: list) -> list:
-    """
-    Rebuild the closing rounds from the COMPLETE v39 result order.
+def _pair_graph_sig(pair: str) -> tuple[str, ...]:
+    """Identity for a pair using each player's first surname."""
+    players = [x.strip() for x in re.split(r"\s*/\s*", pair or "") if x.strip()]
+    out = []
+    for player in players:
+        parts = _norm_person_name(player).split()
+        if len(parts) >= 2:
+            out.append(parts[1])
+        elif parts:
+            out.append(parts[0])
+    return tuple(sorted(out))
 
-    The bug we saw in production came from contaminated DOM text tagging an
-    early match as "Final". The capacity guard then kept that wrong match.
 
-    v39 consistently returns the complete cumulative result set in source order.
-    For the closing knockout rounds, the tail is deterministic:
-      last 1  -> Final
-      prev 2  -> Semifinales
-      prev 4  -> Cuartos de final
-      prev 8  -> Octavos de final
+def _rebuild_rounds_from_advancement(results: list) -> list:
     """
-    rows = [dict(x) for x in (results or [])]
+    Reconstruct Final/SF/QF/R16 from advancement relationships.
+
+    If pair X wins match A and appears in match B, A feeds B.
+    The deepest terminal match is the Final. Its direct predecessors are the
+    Semifinals, then Quarterfinals, then Round of 16.
+
+    This avoids both unreliable FIP DOM labels and unreliable date chips.
+    """
+    rows = [dict(r) for r in (results or [])]
     if not rows:
         return rows
 
-    # Remove unreliable knockout labels first.
-    for row in rows:
-        if row.get("round") in {
-            "Final", "Semifinales", "Cuartos de final", "Octavos de final"
-        }:
-            row["round"] = "Partidos"
-            row["round_source"] = "tail-reset"
+    winner_sig = []
+    participants = []
+    for r in rows:
+        w = _pair_graph_sig(str(r.get("winner", "")))
+        l = _pair_graph_sig(str(r.get("loser", "")))
+        winner_sig.append(w)
+        participants.append({x for x in (w, l) if x})
 
-    cursor = len(rows)
+    # For each match, possible parents are prior completed matches whose winner
+    # is one of this match's two participating pairs. We don't rely on source
+    # order; pair identity itself defines the edge.
+    parents = {i: [] for i in range(len(rows))}
+    children = {i: [] for i in range(len(rows))}
 
-    for rnd, count in (
-        ("Final", 1),
-        ("Semifinales", 2),
-        ("Cuartos de final", 4),
-        ("Octavos de final", 8),
-    ):
-        start = max(0, cursor - count)
-        for row in rows[start:cursor]:
-            row["round"] = rnd
-            row["round_source"] = "v39-tail-order"
-        cursor = start
+    for child in range(len(rows)):
+        child_parts = participants[child]
+        for parent in range(len(rows)):
+            if parent == child:
+                continue
+            ws = winner_sig[parent]
+            if ws and ws in child_parts:
+                parents[child].append(parent)
+                children[parent].append(child)
 
-    # Older matches are kept, but explicitly separated from R16 onwards.
-    for row in rows[:cursor]:
-        row["round"] = "Rondas anteriores"
-        row["round_source"] = "v39-tail-order"
+    # Remove impossible reciprocal edges if two rows accidentally share winner
+    # signatures because of bad scraping. Prefer the edge into the match whose
+    # opponent is different and whose ancestry can grow.
+    # The graph is small, so depth is calculated with cycle protection.
+    memo = {}
 
-    final_rows = [r for r in rows if r.get("round") == "Final"]
-    if final_rows:
-        f = final_rows[0]
-        print(
-            "  FINAL ASIGNADA:",
-            f"{f.get('winner','')} vs {f.get('loser','')}",
-            f"score={f.get('score','')}",
-        )
+    def depth(i, stack=None):
+        if i in memo:
+            return memo[i]
+        stack = set() if stack is None else set(stack)
+        if i in stack:
+            return 0
+        stack.add(i)
+        ps = parents.get(i, [])
+        vals = [depth(p, stack) for p in ps if p not in stack]
+        d = 0 if not vals else 1 + max(vals)
+        memo[i] = d
+        return d
 
+    terminals = [i for i in range(len(rows)) if not children.get(i)]
+    if not terminals:
+        print("  bracket graph: no terminal match")
+        return rows
+
+    # A real final should have two feeder matches when the full draw is present.
+    final_idx = max(
+        terminals,
+        key=lambda i: (depth(i), len(parents.get(i, [])))
+    )
+
+    # Reset only closing-round labels.
+    for r in rows:
+        if r.get("round") in {"Final","Semifinales","Cuartos de final","Octavos de final"}:
+            r["round"] = "Partidos"
+            r["round_source"] = "graph-reset"
+
+    # Traverse exactly one generation backwards at a time.
+    labels = ["Final", "Semifinales", "Cuartos de final", "Octavos de final"]
+    frontier = {final_idx}
+    assigned = set()
+
+    for label in labels:
+        next_frontier = set()
+        for idx in frontier:
+            if idx in assigned:
+                continue
+            rows[idx]["round"] = label
+            rows[idx]["round_source"] = "advancement-graph"
+            assigned.add(idx)
+            for p in parents.get(idx, []):
+                if p not in assigned:
+                    next_frontier.add(p)
+        frontier = next_frontier
+
+    # Everything else is an earlier round / unresolved bucket.
+    for i, r in enumerate(rows):
+        if i not in assigned and r.get("round") == "Partidos":
+            r["round"] = "Rondas anteriores"
+            r["round_source"] = "advancement-graph"
+
+    counts = {label: sum(1 for r in rows if r.get("round")==label) for label in labels}
+    f = rows[final_idx]
     print(
-        "  tail rounds:",
-        f"total={len(rows)}",
-        f"Final={sum(1 for r in rows if r.get('round')=='Final')}",
-        f"Semifinales={sum(1 for r in rows if r.get('round')=='Semifinales')}",
-        f"Cuartos={sum(1 for r in rows if r.get('round')=='Cuartos de final')}",
-        f"Octavos={sum(1 for r in rows if r.get('round')=='Octavos de final')}",
-        f"anteriores={sum(1 for r in rows if r.get('round')=='Rondas anteriores')}",
+        "  bracket graph FINAL:",
+        f"{f.get('winner','')} vs {f.get('loser','')}",
+        f"score={f.get('score','')}",
+        f"depth={depth(final_idx)}",
+    )
+    print(
+        "  bracket graph counts:",
+        f"Final={counts['Final']}",
+        f"Semifinales={counts['Semifinales']}",
+        f"Cuartos={counts['Cuartos de final']}",
+        f"Octavos={counts['Octavos de final']}",
     )
 
     return rows
@@ -3996,7 +4045,7 @@ async def get_tournament_now(gender: str = "female") -> dict:
         print(f"  live results error: {results}")
         results = []
 
-    # Rounds have already been rebuilt and validated in _extract_official_results.
+    # Rounds are already reconstructed and validated above.
     results = results or []
 
     normalized_results = []
