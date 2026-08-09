@@ -1067,8 +1067,8 @@ async function loadEnJuego(){
   };
 
   try{
-    console.log('[En juego] solicitando /api/live?gender=women');
-    const d=await fetch('/api/live?gender=women',{cache:'no-store'}).then(r=>{
+    console.log('[En juego] solicitando /api/live');
+    const d=await fetch('/api/live',{cache:'no-store'}).then(r=>{
       console.log('[En juego] respuesta HTTP',r.status);
       if(!r.ok)throw new Error(`HTTP ${r.status}`);
       return r.json();
