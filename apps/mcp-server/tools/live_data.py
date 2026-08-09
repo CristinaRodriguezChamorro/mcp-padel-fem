@@ -1065,7 +1065,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
         "states_scanned": 0,
         "candidate_blocks": 0,
         "female_blocks": 0,
-        "source_mode": "full-draw-alias-v77",
+        "source_mode": "KNOWN-GOOD-v81-ROLLBACK",
     }
 
     if async_playwright is None:
@@ -1115,7 +1115,6 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
 
             async def collect_state(tag: str):
                 diag["states_scanned"] += 1
-                diag.setdefault("state_tags", []).append(tag)
                 try:
                     state = await page.evaluate(
                         r"""
@@ -1166,42 +1165,6 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                             return hits;
                           };
 
-                          const roundFromText = value => {
-                            const t = clean(value);
-                            if (/\bsemi[- ]?finals?\b/i.test(t)) return 'Semifinales';
-                            if (/\bquarter[- ]?finals?\b/i.test(t)) return 'Cuartos de final';
-                            if (/\bround of 16\b|\boctav/i.test(t)) return 'Octavos de final';
-                            if (/\bsecond round\b|\b2nd round\b/i.test(t)) return 'Segunda ronda';
-                            if (/\bfirst round\b|\b1st round\b/i.test(t)) return 'Primera ronda';
-                            if (/\bqual/i.test(t)) return 'Clasificación';
-                            // FINAL must be checked after SEMIFINAL.
-                            if (/\bfinal\b/i.test(t)) return 'Final';
-                            return '';
-                          };
-
-                          const nearestRound = el => {
-                            // A) Small parent containers often include WOMEN + SEMIFINALS/FINAL.
-                            let p = el;
-                            for (let depth=0; depth<5 && p; depth++, p=p.parentElement) {
-                              const txt = clean(p.innerText || p.textContent || '');
-                              if (txt.length <= 700) {
-                                const r = roundFromText(txt);
-                                if (r) return r;
-                              }
-                            }
-
-                            // B) Scan backwards in DOM order for the nearest short round heading.
-                            const idx = all.indexOf(el);
-                            for (let j=idx-1; j>=0 && j>=idx-90; j--) {
-                              const txt = clean(all[j].innerText || all[j].textContent || '');
-                              if (!txt || txt.length > 120) continue;
-                              const r = roundFromText(txt);
-                              if (r) return r;
-                            }
-
-                            return '';
-                          };
-
                           const candidates = [];
 
                           for (const el of all) {
@@ -1227,8 +1190,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                               tag,
                               text,
                               players: unique,
-                              scores,
-                              roundHint: nearestRound(el)
+                              scores
                             });
                           }
 
@@ -1256,8 +1218,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                               text: c.text.slice(0,1600),
                               players: ordered,
                               scores: c.scores,
-                              aliases: c.players.map(x=>x.alias),
-                              roundHint: c.roundHint || ''
+                              aliases: c.players.map(x=>x.alias)
                             });
                           }
 
@@ -1295,7 +1256,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                         looks_date = any(re.search(
                             r"(?:\bMon\b|\bTue\b|\bWed\b|\bThu\b|\bFri\b|\bSat\b|\bSun\b|"
                             r"\bMonday\b|\bTuesday\b|\bWednesday\b|\bThursday\b|\bFriday\b|\bSaturday\b|\bSunday\b|"
-                            r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9}|[A-Za-z]{3,9}\s+\d{1,2})",
+                            r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9})",
                             lab, re.I
                         ) for lab in labels)
                         if not looks_date:
@@ -1330,7 +1291,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                             if not re.search(
                                 r"(?:\bMon\b|\bTue\b|\bWed\b|\bThu\b|\bFri\b|\bSat\b|\bSun\b|"
                                 r"\bMonday\b|\bTuesday\b|\bWednesday\b|\bThursday\b|\bFriday\b|\bSaturday\b|\bSunday\b|"
-                                r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9}|[A-Za-z]{3,9}\s+\d{1,2})",
+                                r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9})",
                                 label, re.I
                             ):
                                 continue
@@ -1460,7 +1421,6 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
         f"states={diag['states_scanned']}",
         f"candidates={diag['candidate_blocks']}",
         f"blocks={diag['female_blocks']}",
-        f"tags={diag.get('state_tags', [])[:20]}",
     )
 
     return json.dumps({"blocks": unique, "diag": diag}, ensure_ascii=False), diag
@@ -2195,11 +2155,10 @@ async def _browser_fip_womens_draw_blocks(event: dict) -> tuple[list[dict], dict
 
 async def _extract_official_results(event: dict, gender: str = "female") -> list:
     """
-    EN JUEGO — stable results-only pipeline.
+    EN JUEGO ONLY — v39
 
-    Source of truth: v39 Results parser only.
-    Draws is intentionally NOT called here because it has been partial/slow and
-    can block the whole /api/live response.
+    Recibe bloques con 4 jugadoras + scores de todos los estados/días.
+    Reconstruye pareja ganadora, perdedora, marcador, fecha y ronda.
     """
     try:
         source, capture_diag = await _browser_fip_womens_results_text(event)
@@ -2215,7 +2174,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
     if not blocks:
         for attempt in range(1, 3):
             print(f"  live results: v39 devolvió 0 bloques; reintento {attempt}/2")
-            await asyncio.sleep(1.0 * attempt)
+            await asyncio.sleep(1.2 * attempt)
             try:
                 retry_source, retry_diag = await _browser_fip_womens_results_text(event)
                 retry_blocks = json.loads(retry_source).get("blocks", []) if retry_source else []
@@ -2230,12 +2189,8 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
                 break
 
     if not blocks:
-        print("  live results: v39 sin datos; activando flat fallback")
-        try:
-            blocks = await _browser_fip_flat_results_fallback(event)
-        except Exception as exc:
-            print(f"  flat fallback error: {type(exc).__name__}: {exc}")
-            blocks = []
+        print("  live results: reintentos v39 sin datos; activando flat fallback")
+        blocks = await _browser_fip_flat_results_fallback(event)
 
     month_map = {
         "jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,
@@ -2256,7 +2211,6 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
             except Exception:
                 pass
 
-        # 8 Aug / 8 AUGUST
         m = re.search(r"\b(\d{1,2})\s+([A-Za-z]{3,12})\b", raw)
         if m:
             d = int(m.group(1))
@@ -2266,78 +2220,43 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
                     return date(year, mo, d).isoformat()
                 except Exception:
                     pass
-
-        # AUG 8 / AUGUST 8 — format used by FIP date chips.
-        m = re.search(r"\b([A-Za-z]{3,12})\s+(\d{1,2})\b", raw)
-        if m:
-            mo = month_map.get(m.group(1).lower()[:3])
-            d = int(m.group(2))
-            if mo:
-                try:
-                    return date(year, mo, d).isoformat()
-                except Exception:
-                    pass
-
         return ""
 
-    def round_from_official_date(match_date: str) -> str:
-        """
-        Main-draw round from the selected FIP date chip.
-
-        Premier Padel's closing sequence is:
-          event end date     -> Final
-          end - 1 day        -> Semifinales
-          end - 2 days       -> Cuartos de final
-          end - 3 days       -> Octavos de final
-
-        Unlike the old logic, this uses the actual date state selected on FIP,
-        not the number/order of scraped matches.
-        """
-        if not match_date:
-            return ""
-
-        end_dt = _event_end_date_from_dates(event)
-        if not end_dt:
-            return ""
-
-        try:
-            md = date.fromisoformat(match_date)
-        except Exception:
-            return ""
-
-        delta = (end_dt - md).days
-        if delta == 0:
-            return "Final"
-        if delta == 1:
-            return "Semifinales"
-        if delta == 2:
-            return "Cuartos de final"
-        if delta == 3:
-            return "Octavos de final"
-        if delta == 4:
-            return "Segunda ronda"
-        if delta >= 5:
-            return "Primera ronda"
-        return ""
-
-
-    def infer_round(context: str, match_date: str = "") -> str:
-        """
-        Production rule: rounds are only assigned from explicit FIP text/DOM.
-
-        We intentionally do NOT infer a round from today's date or from the number
-        of matches. A missing label is safer as "Partidos" than a wrong semifinal.
-        """
-        low = (context or "").lower()
+    def infer_round(context: str, match_date: str) -> str:
+        low = context.lower()
         if re.search(r"semi[- ]?final", low): return "Semifinales"
         if re.search(r"quarter[- ]?final", low): return "Cuartos de final"
         if re.search(r"round of 16|octav", low): return "Octavos de final"
+        if re.search(r"\bfinal\b", low): return "Final"
+        if re.search(r"\bqual|clasif", low): return "Clasificación"
         if re.search(r"2nd round|second round|segunda", low): return "Segunda ronda"
         if re.search(r"1st round|first round|primera", low): return "Primera ronda"
-        if re.search(r"\bqual|clasif", low): return "Clasificación"
-        if re.search(r"\bfinal\b", low): return "Final"
-        return "Partidos"
 
+        # London P1 / standard Premier Padel end-of-week cadence.
+        raw_dates = str(event.get("dates", "") or "")
+        m = re.search(
+            r"(\d{1,2})\s*[-–]\s*(\d{1,2})\s+([A-Za-z]{3,12})(?:\s+(20\d{2}))?",
+            raw_dates, re.I
+        )
+        if m and match_date:
+            end_day = int(m.group(2))
+            mo = month_map.get(m.group(3).lower()[:3])
+            y = int(m.group(4) or date.today().year)
+            if mo:
+                try:
+                    end_dt = date(y, mo, end_day)
+                    md = date.fromisoformat(match_date)
+                    delta = (end_dt - md).days
+                    if delta == 0: return "Final"
+                    if delta == 1: return "Semifinales"
+                    if delta == 2: return "Cuartos de final"
+                    if delta == 3: return "Octavos de final"
+                    if delta in {4,5}: return "Primera ronda"
+                    if delta >= 6: return "Clasificación"
+                except Exception:
+                    pass
+
+        return "Partidos"
 
     parsed = []
 
@@ -2408,33 +2327,11 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
             except Exception:
                 pass
 
-        explicit_round = str(block.get("roundHint", "") or "").strip()
-        context = (
-            explicit_round + " " +
-            str(block.get("text","")) + " " +
-            str(block.get("tag",""))
-        )
-
-        date_round = round_from_official_date(match_date)
-
-        # Production priority:
-        # 1) explicit Draws-column roundHint
-        # 2) selected FIP date
-        # 3) local card text
-        # 4) unknown
-        if explicit_round:
-            rnd = explicit_round
-            round_source = "fip-draw-column"
-        elif date_round:
-            rnd = date_round
-            round_source = "fip-date"
-        else:
-            rnd = infer_round(context, match_date)
-            round_source = "fip-text" if rnd != "Partidos" else "unknown"
+        context = str(block.get("text","")) + " " + str(block.get("tag",""))
+        rnd = infer_round(context, match_date)
 
         parsed.append({
             "round": rnd,
-            "round_source": round_source,
             "winner": winner,
             "loser": loser,
             "score": "  ".join(f"{a}-{b}" for a,b in display),
@@ -2455,9 +2352,6 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         seen.add(key)
         valid.append(item)
 
-    valid = _rebuild_rounds_from_advancement(valid)
-    valid = _validate_explicit_rounds(valid)
-
     valid.sort(
         key=lambda x: (
             x.get("date",""),
@@ -2470,7 +2364,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     _LIVE_DEBUG_STATE.update({
         "browser": capture_diag,
-        "parser": "v39-advancement-graph-v98",
+        "parser": "KNOWN-GOOD-v81-ROLLBACK",
         "raw_blocks": len(blocks),
         "parsed_results": len(parsed),
         "valid_results": len(valid),
@@ -2514,136 +2408,6 @@ def _round_pair_signature(pair: str) -> tuple[str, ...]:
         elif parts:
             sig.append(parts[0])
     return tuple(sorted(sig))
-
-
-def _pair_graph_sig(pair: str) -> tuple[str, ...]:
-    """Identity for a pair using each player's first surname."""
-    players = [x.strip() for x in re.split(r"\s*/\s*", pair or "") if x.strip()]
-    out = []
-    for player in players:
-        parts = _norm_person_name(player).split()
-        if len(parts) >= 2:
-            out.append(parts[1])
-        elif parts:
-            out.append(parts[0])
-    return tuple(sorted(out))
-
-
-def _rebuild_rounds_from_advancement(results: list) -> list:
-    """
-    Reconstruct Final/SF/QF/R16 from advancement relationships.
-
-    If pair X wins match A and appears in match B, A feeds B.
-    The deepest terminal match is the Final. Its direct predecessors are the
-    Semifinals, then Quarterfinals, then Round of 16.
-
-    This avoids both unreliable FIP DOM labels and unreliable date chips.
-    """
-    rows = [dict(r) for r in (results or [])]
-    if not rows:
-        return rows
-
-    winner_sig = []
-    participants = []
-    for r in rows:
-        w = _pair_graph_sig(str(r.get("winner", "")))
-        l = _pair_graph_sig(str(r.get("loser", "")))
-        winner_sig.append(w)
-        participants.append({x for x in (w, l) if x})
-
-    # For each match, possible parents are prior completed matches whose winner
-    # is one of this match's two participating pairs. We don't rely on source
-    # order; pair identity itself defines the edge.
-    parents = {i: [] for i in range(len(rows))}
-    children = {i: [] for i in range(len(rows))}
-
-    for child in range(len(rows)):
-        child_parts = participants[child]
-        for parent in range(len(rows)):
-            if parent == child:
-                continue
-            ws = winner_sig[parent]
-            if ws and ws in child_parts:
-                parents[child].append(parent)
-                children[parent].append(child)
-
-    # Remove impossible reciprocal edges if two rows accidentally share winner
-    # signatures because of bad scraping. Prefer the edge into the match whose
-    # opponent is different and whose ancestry can grow.
-    # The graph is small, so depth is calculated with cycle protection.
-    memo = {}
-
-    def depth(i, stack=None):
-        if i in memo:
-            return memo[i]
-        stack = set() if stack is None else set(stack)
-        if i in stack:
-            return 0
-        stack.add(i)
-        ps = parents.get(i, [])
-        vals = [depth(p, stack) for p in ps if p not in stack]
-        d = 0 if not vals else 1 + max(vals)
-        memo[i] = d
-        return d
-
-    terminals = [i for i in range(len(rows)) if not children.get(i)]
-    if not terminals:
-        print("  bracket graph: no terminal match")
-        return rows
-
-    # A real final should have two feeder matches when the full draw is present.
-    final_idx = max(
-        terminals,
-        key=lambda i: (depth(i), len(parents.get(i, [])))
-    )
-
-    # Reset only closing-round labels.
-    for r in rows:
-        if r.get("round") in {"Final","Semifinales","Cuartos de final","Octavos de final"}:
-            r["round"] = "Partidos"
-            r["round_source"] = "graph-reset"
-
-    # Traverse exactly one generation backwards at a time.
-    labels = ["Final", "Semifinales", "Cuartos de final", "Octavos de final"]
-    frontier = {final_idx}
-    assigned = set()
-
-    for label in labels:
-        next_frontier = set()
-        for idx in frontier:
-            if idx in assigned:
-                continue
-            rows[idx]["round"] = label
-            rows[idx]["round_source"] = "advancement-graph"
-            assigned.add(idx)
-            for p in parents.get(idx, []):
-                if p not in assigned:
-                    next_frontier.add(p)
-        frontier = next_frontier
-
-    # Everything else is an earlier round / unresolved bucket.
-    for i, r in enumerate(rows):
-        if i not in assigned and r.get("round") == "Partidos":
-            r["round"] = "Rondas anteriores"
-            r["round_source"] = "advancement-graph"
-
-    counts = {label: sum(1 for r in rows if r.get("round")==label) for label in labels}
-    f = rows[final_idx]
-    print(
-        "  bracket graph FINAL:",
-        f"{f.get('winner','')} vs {f.get('loser','')}",
-        f"score={f.get('score','')}",
-        f"depth={depth(final_idx)}",
-    )
-    print(
-        "  bracket graph counts:",
-        f"Final={counts['Final']}",
-        f"Semifinales={counts['Semifinales']}",
-        f"Cuartos={counts['Cuartos de final']}",
-        f"Octavos={counts['Octavos de final']}",
-    )
-
-    return rows
 
 
 def _validate_explicit_rounds(results: list) -> list:
@@ -4045,8 +3809,9 @@ async def get_tournament_now(gender: str = "female") -> dict:
         print(f"  live results error: {results}")
         results = []
 
-    # Rounds are already reconstructed and validated above.
-    results = results or []
+    # IMPORTANT: rounds already come from explicit FIP DOM/text.
+    # Never reconstruct them from match counts or today's tournament stage.
+    results = _validate_explicit_rounds(results or [])
 
     normalized_results = []
     for result in (results or []):

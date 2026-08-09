@@ -591,7 +591,7 @@ async def resumen_diario_padel_femenino():
 
 @app.get("/api/version")
 async def api_version():
-    return {"version": "v98-stable-v39-graph-rounds-2026-08-09"}
+    return {"version": "v100-rollback-live-known-good-v81-2026-08-09"}
 
 @app.get("/")
 async def index():
@@ -601,7 +601,7 @@ async def index():
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
-            "X-App-Version": "v98-stable-v39-graph-rounds-2026-08-09",
+            "X-App-Version": "v100-rollback-live-known-good-v81-2026-08-09",
         },
     )
 
