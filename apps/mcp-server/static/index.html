@@ -1252,7 +1252,7 @@ async function loadEnJuego(){
         ? matches.map(r=>`
             <div class="knockout-card ${idx===bracketRounds.length-1?'last-round':''}">
               <div class="knockout-card-row winner">
-                <span class="knockout-pair">🏆 ${compactPair(r.winner||'')}</span>
+                <span class="knockout-pair">${round==='Final'?'🏆':'✓'} ${compactPair(r.winner||'')}</span>
                 <span class="knockout-score">${r.score||''}</span>
               </div>
               <div class="knockout-card-row loser">
@@ -1279,11 +1279,14 @@ async function loadEnJuego(){
       const matches=roundMatches.map(r=>`
         <div class="result-row">
           <div class="result-card">
-            <div class="result-winner">${r.winner||''}<span class="trophy">🏆</span></div>
+            <div class="result-winner">
+              ${r.winner||''}
+              <span class="trophy">${round==='Final'?'🏆':'✓'}</span>
+            </div>
             <div class="result-loser">${r.loser||''}</div>
             <div class="result-score">${r.score||''}</div>
             <div class="result-meta">
-              <span class="result-status">Finalizado</span>
+              <span class="result-status">${round==='Final'?'Finalizado · Campeonas':'Finalizado · Ganadoras del partido'}</span>
               ${r.date?`<span class="result-date">· ${fmtResultDate(r.date)}</span>`:''}
             </div>
           </div>
@@ -1324,7 +1327,7 @@ async function loadEnJuego(){
           <div class="knockout-board">${bracketHtml}</div>
         </div>
         <div class="knockout-note">
-          Vista visual del cuadro construida con los partidos finalizados clasificados por FIP.
+          ✓ = ganadoras de ese partido · 🏆 = campeonas del torneo (solo aparece en la Final).
         </div>
       </div>
 

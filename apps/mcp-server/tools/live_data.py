@@ -1991,9 +1991,20 @@ async def _browser_fip_womens_draw_blocks(event: dict) -> tuple[list[dict], dict
                     return '';
                   };
 
+                  const matchPlayer=text=>{
+                    const n=norm(text);
+                    if(!n || n.length<3)return null;
+                    for(const p of profiles){
+                      for(const alias of (p.aliases||[])){
+                        if(!alias || alias.length<4)continue;
+                        if(n===alias || n.includes(alias) || alias.includes(n))return p;
+                      }
+                    }
+                    return null;
+                  };
+
                   const all=Array.from(document.querySelectorAll('body *')).filter(visible);
 
-                  // Visible bracket headings and their X centers.
                   const headings=[];
                   for(const el of all){
                     const txt=clean(el.innerText||el.textContent);
@@ -2004,112 +2015,144 @@ async def _browser_fip_womens_draw_blocks(event: dict) -> tuple[list[dict], dict
                     headings.push({round,x:r.left+r.width/2,text:txt});
                   }
 
-                  // Dedupe headings by round/x.
                   const hd=[];
                   for(const h of headings.sort((a,b)=>a.x-b.x)){
-                    if(!hd.some(x=>x.round===h.round && Math.abs(x.x-h.x)<80))hd.push(h);
+                    if(!hd.some(x=>x.round===h.round && Math.abs(x.x-h.x)<90))hd.push(h);
                   }
 
-                  const matchPlayer = text => {
-                    const n=norm(text);
-                    if(!n || n.length<3)return null;
-                    for(const p of profiles){
-                      for(const alias of (p.aliases||[])){
-                        if(!alias || alias.length<4)continue;
-                        if(n===alias || n.includes(alias) || alias.includes(n)){
-                          return p;
-                        }
-                      }
-                    }
-                    return null;
-                  };
-
-                  const leafNodes=el=>Array.from(el.querySelectorAll('*'))
-                    .filter(x=>x.children.length===0 && visible(x));
-
-                  const candidates=[];
+                  const playerLeaves=[];
+                  const scoreLeaves=[];
 
                   for(const el of all){
-                    const text=clean(el.innerText);
-                    if(!text || text.length<25 || text.length>1800)continue;
+                    if(el.children.length!==0)continue;
+                    const txt=clean(el.textContent);
+                    if(!txt)continue;
 
-                    const leaves=leafNodes(el).map(x=>{
-                      const r=x.getBoundingClientRect();
-                      return {
-                        text:clean(x.textContent),
-                        x:r.left+r.width/2,
-                        y:r.top+r.height/2,
-                      };
-                    }).filter(x=>x.text);
+                    const r=el.getBoundingClientRect();
+                    const x=r.left+r.width/2;
+                    const y=r.top+r.height/2;
 
-                    const players=[];
-                    for(const leaf of leaves){
-                      const p=matchPlayer(leaf.text);
-                      if(p && !players.some(q=>q.canonical===p.canonical)){
-                        players.push({
-                          canonical:p.canonical,
-                          display:p.display,
-                          x:leaf.x,
-                          y:leaf.y,
+                    const p=matchPlayer(txt);
+                    if(p){
+                      playerLeaves.push({
+                        canonical:p.canonical,
+                        display:p.display,
+                        x,y
+                      });
+                      continue;
+                    }
+
+                    if(/^\d{1,2}$/.test(txt)){
+                      const value=Number(txt);
+                      if(value>=0 && value<=20)scoreLeaves.push({value,x,y});
+                    }
+                  }
+
+                  const players=[];
+                  for(const p of playerLeaves.sort((a,b)=>a.x-b.x || a.y-b.y)){
+                    if(!players.some(q=>
+                      q.canonical===p.canonical &&
+                      Math.abs(q.x-p.x)<25 &&
+                      Math.abs(q.y-p.y)<15
+                    )){
+                      players.push(p);
+                    }
+                  }
+
+                  const rawBlocks=[];
+
+                  for(let hi=0; hi<hd.length; hi++){
+                    const heading=hd[hi];
+                    const left=hi===0 ? -Infinity : (hd[hi-1].x+heading.x)/2;
+                    const right=hi===hd.length-1 ? Infinity : (heading.x+hd[hi+1].x)/2;
+
+                    const colPlayers=players
+                      .filter(p=>p.x>=left && p.x<right)
+                      .sort((a,b)=>a.y-b.y);
+
+                    if(colPlayers.length<4)continue;
+
+                    // Find candidate teams from adjacent player names.
+                    const teams=[];
+                    for(let i=0;i<colPlayers.length-1;i++){
+                      const a=colPlayers[i], b=colPlayers[i+1];
+                      if(a.canonical===b.canonical)continue;
+                      const dy=b.y-a.y;
+                      if(dy>=0 && dy<=72){
+                        teams.push({
+                          players:[a,b],
+                          top:a.y,
+                          bottom:b.y,
+                          center:(a.y+b.y)/2
                         });
                       }
                     }
 
-                    if(players.length!==4)continue;
+                    // Two consecutive teams form a match. Avoid overlapping reuse.
+                    const usedTeam=new Set();
+                    for(let ti=0;ti<teams.length-1;ti++){
+                      if(usedTeam.has(ti))continue;
+                      const ta=teams[ti];
+                      let bestJ=-1;
+                      let bestGap=Infinity;
 
-                    const scores=leaves
-                      .filter(x=>/^\d{1,2}$/.test(x.text))
-                      .map(x=>Number(x.text))
-                      .filter(n=>n>=0 && n<=20);
+                      for(let tj=ti+1;tj<teams.length;tj++){
+                        if(usedTeam.has(tj))continue;
+                        const tb=teams[tj];
 
-                    if(scores.length<4 || scores.length>12)continue;
+                        // Do not pair teams that share a player.
+                        const aCanon=new Set(ta.players.map(x=>x.canonical));
+                        if(tb.players.some(x=>aCanon.has(x.canonical)))continue;
 
-                    const r=el.getBoundingClientRect();
-                    candidates.push({
-                      el,
-                      text,
-                      players,
-                      scores,
-                      x:r.left+r.width/2,
-                      area:r.width*r.height,
-                    });
+                        const gap=tb.top-ta.bottom;
+                        if(gap>=12 && gap<=175 && gap<bestGap){
+                          bestGap=gap;
+                          bestJ=tj;
+                        }
+                      }
+
+                      if(bestJ<0)continue;
+                      const tb=teams[bestJ];
+                      const top=ta.top-40;
+                      const bottom=tb.bottom+40;
+
+                      const scores=scoreLeaves
+                        .filter(sc=>
+                          sc.x>=left && sc.x<right &&
+                          sc.y>=top && sc.y<=bottom
+                        )
+                        .sort((a,b)=>a.y-b.y || a.x-b.x)
+                        .map(sc=>sc.value);
+
+                      if(scores.length>=4 && scores.length<=12){
+                        rawBlocks.push({
+                          tag:'draw:'+heading.round,
+                          text:[...ta.players,...tb.players].map(x=>x.display).join(' | '),
+                          players:[...ta.players,...tb.players].map(x=>x.display),
+                          scores,
+                          roundHint:heading.round
+                        });
+                        usedTeam.add(ti);
+                        usedTeam.add(bestJ);
+                      }
+                    }
                   }
-
-                  // Keep smallest DOM containers representing one match.
-                  const minimal=candidates.filter(c=>
-                    !candidates.some(o=>o!==c && c.el.contains(o.el))
-                  );
 
                   const blocks=[];
                   const seen=new Set();
-
-                  for(const c of minimal){
-                    if(!hd.length)continue;
-
-                    // Closest bracket column heading by horizontal center.
-                    const heading=[...hd].sort((a,b)=>Math.abs(a.x-c.x)-Math.abs(b.x-c.x))[0];
-                    if(!heading)continue;
-
-                    const ordered=[...c.players].sort((a,b)=>a.y-b.y || a.x-b.x);
-                    const playerNames=ordered.map(x=>x.display);
-
-                    const key=heading.round+'|'+playerNames.join('|')+'|'+c.scores.join(',');
+                  for(const b of rawBlocks){
+                    const key=b.roundHint+'|'+b.players.join('|')+'|'+b.scores.join(',');
                     if(seen.has(key))continue;
                     seen.add(key);
-
-                    blocks.push({
-                      tag:'draw:'+heading.round,
-                      text:c.text.slice(0,1600),
-                      players:playerNames,
-                      scores:c.scores,
-                      roundHint:heading.round,
-                    });
+                    blocks.push(b);
                   }
 
                   return {
                     headings:hd,
-                    candidateCount:candidates.length,
-                    blocks,
+                    playerLeaves:players.length,
+                    scoreLeaves:scoreLeaves.length,
+                    candidateCount:rawBlocks.length,
+                    blocks
                   };
                 }
                 """,
@@ -2121,6 +2164,8 @@ async def _browser_fip_womens_draw_blocks(event: dict) -> tuple[list[dict], dict
 
             diag["headings"] = result.get("headings", []) or []
             diag["candidates"] = int(result.get("candidateCount", 0) or 0)
+            diag["player_leaves"] = int(result.get("playerLeaves", 0) or 0)
+            diag["score_leaves"] = int(result.get("scoreLeaves", 0) or 0)
             blocks = result.get("blocks", []) or []
             diag["blocks"] = len(blocks)
 
@@ -2130,6 +2175,8 @@ async def _browser_fip_womens_draw_blocks(event: dict) -> tuple[list[dict], dict
                 f"female_hits={diag.get('female_player_hits',0)}",
                 f"main={diag['main_activated']}",
                 f"headings={[x.get('round') for x in diag['headings']]}",
+                f"players={diag.get('player_leaves',0)}",
+                f"scores={diag.get('score_leaves',0)}",
                 f"candidates={diag['candidates']}",
                 f"blocks={diag['blocks']}",
             )
@@ -2163,7 +2210,11 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
     capture_diag = {"draw": draw_diag}
 
     # FALLBACK: existing v39 Results parser.
-    if not blocks:
+    # A partial Draw capture must not replace the complete results feed.
+    if len(blocks) < 8:
+        if blocks:
+            print(f"  FIP draw parcial: {len(blocks)} bloques; usando v39 para resultados completos")
+        blocks = []
         try:
             source, v39_diag = await _browser_fip_womens_results_text(event)
         except Exception as exc:
