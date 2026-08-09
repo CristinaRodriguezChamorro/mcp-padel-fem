@@ -9,6 +9,7 @@ Web personal para seguir de forma sencilla el **pádel femenino profesional**, c
 - 🏆 **Ranking** femenino Top 20.
 - 📅 **Torneos** actuales y próximos.
 - 👑 **Sponsors** y material de algunas de las principales jugadoras.
+- 💡 **¿Sabías que?**: reglas, historia y leyendas del pádel femenino
 - 📱 Diseño adaptado a escritorio y móvil.
 
 ## Cómo funciona
