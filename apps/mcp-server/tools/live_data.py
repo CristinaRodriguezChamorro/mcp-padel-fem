@@ -1633,6 +1633,66 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
             if response_tasks:
                 await asyncio.gather(*response_tasks, return_exceptions=True)
 
+            discovered_results_urls = [
+                str(x.get("url","") or "")
+                for x in ajax_payloads
+                if "get-result-data.php" in str(x.get("url","") or "")
+                and "widget=resultsbyday" in str(x.get("url","") or "")
+            ]
+
+            if discovered_results_urls:
+                seed_url = discovered_results_urls[0]
+                m = re.search(
+                    r"get-result-data\.php\?year=(\d+)&id=(\d+)&day=(\d+)&totalday=(\d+)&widget=([^&#]+)",
+                    seed_url,
+                    re.I,
+                )
+                if m:
+                    year, event_id, current_day, total_day, widget = m.groups()
+                    total_day_int = int(total_day)
+                    print(
+                        "  FIP RESULT ENDPOINT discovered:",
+                        f"year={year}", f"id={event_id}",
+                        f"current_day={current_day}",
+                        f"totalday={total_day_int}", f"widget={widget}",
+                    )
+
+                    for day_num in range(1, total_day_int + 1):
+                        day_url = re.sub(
+                            r"([?&]day=)\d+",
+                            rf"\g<1>{day_num}",
+                            seed_url,
+                            count=1,
+                        )
+                        try:
+                            resp = await page.request.get(
+                                day_url,
+                                headers={"Referer": url, "Accept": "application/json,text/plain,*/*"},
+                                timeout=20000,
+                            )
+                            body = await resp.text()
+                            ajax_payloads.append({
+                                "url": day_url,
+                                "method": "GET",
+                                "resource_type": "api-request",
+                                "content_type": str(resp.headers.get("content-type","") or ""),
+                                "post_data": "",
+                                "body": body[:1200000],
+                            })
+                            print(
+                                "  FIP RESULT DAY:",
+                                f"day={day_num}/{total_day_int}",
+                                f"status={resp.status}",
+                                f"chars={len(body)}",
+                                f"preview={body[:220]!r}",
+                            )
+                        except Exception as exc:
+                            print(
+                                "  FIP RESULT DAY error:",
+                                f"day={day_num}/{total_day_int}",
+                                f"{type(exc).__name__}: {exc}",
+                            )
+
             await browser.close()
             browser=None
 
@@ -2424,7 +2484,127 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
         return out
 
+    def _resultsbyday_blocks_after_get(payloads: list[dict]) -> list[dict]:
+        """Parse real get-result-data.php responses after the clean GET."""
+        out=[]
+        seen=set()
+
+        def resolve_name(raw: str) -> str:
+            raw=re.sub(r"\s+"," ",str(raw or "")).strip()
+            if len(raw)<5 or len(re.findall(r"[A-Za-zÀ-ÿ]+",raw))<2:
+                return ""
+            nr=_norm_person_name(raw)
+            if not nr:
+                return ""
+
+            matches=[]
+            for rn,display in ranking_display.items():
+                if nr==rn or nr in rn or rn in nr:
+                    matches.append((len(rn),display))
+            if matches:
+                return max(matches,key=lambda x:x[0])[1]
+
+            rt=set(nr.split())
+            partial=[]
+            for rn,display in ranking_display.items():
+                overlap=[t for t in (rt & set(rn.split())) if len(t)>=3]
+                if len(overlap)>=2:
+                    partial.append((sum(len(t) for t in overlap),display))
+            return max(partial,key=lambda x:x[0])[1] if partial else ""
+
+        for payload in payloads:
+            urlp=str(payload.get("url","") or "")
+            if "get-result-data.php" not in urlp or "widget=resultsbyday" not in urlp:
+                continue
+            body=str(payload.get("body","") or "")
+            if not body:
+                continue
+
+            dm=re.search(r"[?&]day=(\d+)",urlp)
+            source_day=int(dm.group(1)) if dm else None
+
+            fragments=[]
+            try:
+                obj=json.loads(body)
+                def walk(x):
+                    if isinstance(x,dict):
+                        for v in x.values(): walk(v)
+                    elif isinstance(x,list):
+                        for v in x: walk(v)
+                    elif isinstance(x,str):
+                        fragments.append(x)
+                walk(obj)
+            except Exception:
+                fragments=[body]
+
+            for fragment in fragments:
+                if not fragment:
+                    continue
+                soup=BeautifulSoup(fragment,"html.parser")
+                elements=list(soup.find_all(True))
+
+                # smallest DOM nodes first
+                for el in reversed(elements):
+                    leaves=[]
+                    for node in el.find_all(True):
+                        if node.find(True):
+                            continue
+                        val=re.sub(r"\s+"," ",node.get_text(" ",strip=True)).strip()
+                        if val:
+                            leaves.append(val)
+
+                    players=[]
+                    pseen=set()
+                    for leaf in leaves:
+                        resolved=resolve_name(leaf)
+                        if resolved and resolved.casefold() not in pseen:
+                            pseen.add(resolved.casefold())
+                            players.append(resolved)
+                    if len(players)!=4:
+                        continue
+
+                    scores=[]
+                    for leaf in leaves:
+                        if re.fullmatch(r"\d{1,2}",leaf):
+                            n=int(leaf)
+                            if 0<=n<=20:
+                                scores.append(n)
+                    if len(scores)<4:
+                        continue
+
+                    key=(source_day,tuple(x.casefold() for x in players),tuple(scores[:12]))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+
+                    text=re.sub(r"\s+"," ",el.get_text(" ",strip=True)).strip()
+                    out.append({
+                        "tag":f"resultsbyday|day:{source_day}",
+                        "text":text[:3000],
+                        "players":players,
+                        "scores":scores[:12],
+                        "pairing_mode":"resultsbyday-postfilter",
+                        "source":"resultsbyday",
+                        "source_day":source_day,
+                    })
+
+        return out
+
     # GET terminado. AHORA sí filtramos contra ranking100.
+    resultsbyday_blocks=_resultsbyday_blocks_after_get(ajax_payloads)
+    if resultsbyday_blocks:
+        print(f"  RESULTSBYDAY parse after GET: {len(resultsbyday_blocks)} partidos candidatos")
+        for preview in resultsbyday_blocks[:30]:
+            print(
+                "  resultsbyday card:",
+                f"day={preview.get('source_day')}",
+                f"{' / '.join(preview.get('players',[]))}",
+                f"scores={preview.get('scores',[])}",
+            )
+        blocks.extend(resultsbyday_blocks)
+    else:
+        print("  RESULTSBYDAY parse after GET: 0 partidos candidatos")
+
     ajax_blocks=_ajax_blocks_after_get(ajax_payloads)
     if ajax_blocks:
         print(f"  AJAX parse after GET: {len(ajax_blocks)} partidos candidatos")
@@ -2771,7 +2951,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     _LIVE_DEBUG_STATE.update({
         "browser": capture_diag,
-        "parser": "ajax-plus-snapshot-v117-reviewed",
+        "parser": "resultsbyday-all-days-v118",
         "raw_blocks": len(blocks),
         "raw_parsed_before_gender": raw_parsed_count,
         "female_after_filter": female_filtered_count,
