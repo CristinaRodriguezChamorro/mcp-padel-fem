@@ -842,16 +842,21 @@ def _round_assignment_quality(rows: list, assignments: list[str]) -> int:
 
 def _assign_results_from_tournament_structure(results: list, event: dict) -> tuple[list, dict]:
     """
-    Clasifica los partidos finalizados usando la estructura REAL del torneo.
+    Clasificación simple por DÍA REAL del torneo.
 
-    1. Lee el tamaño del cuadro femenino desde FIP.
-    2. Calcula las fases que realmente existen y sus capacidades.
-    3. Distribuye los resultados acumulados según esas capacidades.
-    4. Prueba ambos órdenes de FIP y elige el que mejor respeta el avance
-       de las parejas entre rondas.
+    Fuente:
+    - `source_day` viene del endpoint real de FIP/MatchScorer (`day=1..totalday`).
+    - La estructura de rondas viene de `_build_womens_round_plan(event)`.
 
-    Si FIP aún no ha publicado una ronda completa, sólo se muestran los
-    partidos finalizados que existan en esa fase.
+    Regla:
+    - último día del torneo -> Final
+    - penúltimo -> Semifinales
+    - anterior -> Cuartos
+    - anterior -> Octavos
+    - rondas anteriores, si existen en el plan FIP, siguen hacia atrás.
+
+    No se reconstruyen parejas ni se inventan avances.
+    No se usa el texto global "Final" para clasificar partidos.
     """
     rows = [dict(r) for r in (results or [])]
     structure = _build_womens_round_plan(event)
@@ -860,79 +865,143 @@ def _assign_results_from_tournament_structure(results: list, event: dict) -> tup
     if not rows or not plan:
         return rows, structure
 
-    expected_total = sum(int(x.get("matches", 0)) for x in plan)
-    usable = min(len(rows), expected_total)
+    # Capacidades oficiales/matemáticas del cuadro femenino ya detectado.
+    capacities = {
+        item["round"]: int(item.get("matches", 0))
+        for item in plan
+        if item.get("round")
+    }
 
-    def build_assignments(count: int) -> list[str]:
-        out = []
-        remaining = count
-        for item in plan:
-            if remaining <= 0:
-                break
-            take = min(int(item["matches"]), remaining)
-            out.extend([item["round"]] * take)
-            remaining -= take
-        return out
+    # Días reales encontrados en los resultados de FIP.
+    source_days = sorted({
+        int(r.get("source_day"))
+        for r in rows
+        if isinstance(r.get("source_day"), int)
+        or str(r.get("source_day", "")).isdigit()
+    })
 
-    assignments = build_assignments(usable)
+    # Si no hay source_day, no inventamos la ronda.
+    if not source_days:
+        for row in rows:
+            row["round"] = "Partidos"
+            row["round_source"] = "sin-source-day"
+        structure["classification"] = "sin-source-day"
+        structure["completed_by_round"] = {}
+        print("  round classify v121: sin source_day; no se asignan rondas")
+        return rows, structure
 
-    # Caso normal: resultados acumulados en orden cronológico.
-    chrono_rows = rows[:usable]
-    chrono_quality = _round_assignment_quality(chrono_rows, assignments)
+    last_day = max(source_days)
 
-    # Fallback: algunas vistas pueden listar los últimos partidos primero.
-    reverse_rows = list(reversed(rows[:usable]))
-    reverse_quality = _round_assignment_quality(reverse_rows, assignments)
+    # Construir el mapa de atrás hacia delante usando EXACTAMENTE las rondas
+    # que existen en el plan femenino detectado.
+    #
+    # Ejemplo draw 28:
+    # day 8 -> Final
+    # day 7 -> Semifinales
+    # day 6 -> Cuartos
+    # day 5 -> Octavos
+    # day 4 -> Primera ronda
+    closing_order = [
+        "Final",
+        "Semifinales",
+        "Cuartos de final",
+        "Octavos de final",
+        "Segunda ronda",
+        "Primera ronda",
+        "Clasificación",
+    ]
 
-    if reverse_quality > chrono_quality:
-        ordered_rows = reverse_rows
-        order_mode = "newest-first-reversed"
-        quality = reverse_quality
-    else:
-        ordered_rows = chrono_rows
-        order_mode = "source-order"
-        quality = chrono_quality
+    existing_rounds = [
+        rnd for rnd in closing_order
+        if rnd in capacities
+    ]
 
-    classified = []
-    for row, rnd in zip(ordered_rows, assignments):
-        item = dict(row)
-        item["round"] = rnd
-        item["round_source"] = "FIP-structure"
-        classified.append(item)
+    day_to_round = {}
+    day_cursor = last_day
 
-    # Si hubiera resultados extra (por ejemplo qualifying mezclado), no los
-    # inventamos dentro del main draw.
-    extras = rows[usable:]
-    for item in extras:
-        extra = dict(item)
-        extra["round"] = "Partidos"
-        extra["round_source"] = "unclassified-extra"
-        classified.append(extra)
+    for rnd in existing_rounds:
+        if day_cursor < min(source_days):
+            break
+        day_to_round[day_cursor] = rnd
+        day_cursor -= 1
+
+    # Cualquier día todavía anterior al primer día mapeado pertenece a la
+    # ronda más temprana conocida del plan, pero sólo si esa ronda existe.
+    earliest_round = existing_rounds[-1] if existing_rounds else None
+
+    for row in rows:
+        raw_day = row.get("source_day")
+        try:
+            source_day = int(raw_day)
+        except Exception:
+            source_day = None
+
+        if source_day is None:
+            row["round"] = "Partidos"
+            row["round_source"] = "sin-source-day"
+            continue
+
+        rnd = day_to_round.get(source_day)
+
+        if not rnd and earliest_round and source_day < min(day_to_round):
+            rnd = earliest_round
+
+        row["round"] = rnd or "Partidos"
+        row["round_source"] = "FIP-source-day"
+
+    # Validación de capacidad: la clasificación nunca puede afirmar más
+    # partidos de una ronda de los que admite el cuadro.
+    #
+    # Si ocurre, NO reasignamos partidos arbitrariamente. Los excedentes se
+    # dejan como "Partidos" para no inventar datos.
+    for rnd, capacity in capacities.items():
+        if capacity <= 0:
+            continue
+
+        indices = [
+            i for i, row in enumerate(rows)
+            if row.get("round") == rnd
+        ]
+
+        if len(indices) <= capacity:
+            continue
+
+        print(
+            "  ROUND CAPACITY WARNING:",
+            f"round={rnd}",
+            f"found={len(indices)}",
+            f"capacity={capacity}",
+            "excedentes -> Partidos",
+        )
+
+        # Mantener orden de captura FIP. No elegir ganadoras/finalistas por intuición.
+        for idx in indices[capacity:]:
+            rows[idx]["round"] = "Partidos"
+            rows[idx]["round_source"] = "capacity-overflow"
 
     structure["results_seen"] = len(rows)
-    structure["expected_main_draw_matches"] = expected_total
-    structure["order_mode"] = order_mode
-    structure["assignment_quality"] = quality
+    structure["expected_main_draw_matches"] = sum(capacities.values())
+    structure["classification"] = "FIP-source-day-v121"
+    structure["source_days"] = source_days
+    structure["day_to_round"] = dict(sorted(day_to_round.items()))
     structure["completed_by_round"] = {
-        item["round"]: sum(1 for r in classified if r.get("round") == item["round"])
-        for item in plan
+        rnd: sum(1 for row in rows if row.get("round") == rnd)
+        for rnd in capacities
     }
 
     print(
         "  FIP structure:",
-        f"women_draw={structure.get('draw_size',0)}",
-        f"plan={[(x['round'],x['matches']) for x in plan]}",
+        f"women_draw={structure.get('draw_size', 0)}",
+        f"plan={[(x['round'], x['matches']) for x in plan]}",
     )
     print(
-        "  round classify:",
-        f"results={len(rows)}",
-        f"expected={expected_total}",
-        f"order={order_mode}",
-        f"quality={quality}",
+        "  round classify v121:",
+        f"source_days={source_days}",
+        f"day_to_round={structure['day_to_round']}",
         f"completed={structure['completed_by_round']}",
     )
 
-    return classified, structure
+    return rows, structure
 
 
 async def _get_watch_official() -> list[str]:
