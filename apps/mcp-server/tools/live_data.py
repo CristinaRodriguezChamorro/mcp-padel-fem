@@ -842,35 +842,24 @@ def _round_assignment_quality(rows: list, assignments: list[str]) -> int:
 
 def _assign_results_from_tournament_structure(results: list, event: dict) -> tuple[list, dict]:
     """
-    Clasificación ESTRICTA por estructura del cuadro.
+    Clasificación simple y explícita del cuadro femenino.
 
-    La teoría del cuadro manda:
-      Final         -> 1 partido
-      Semifinales   -> 2
-      Cuartos       -> 4
-      Octavos       -> 8
-      Primera ronda -> lo que determine el draw (12 si draw=28)
+    Regla acordada:
+      Final       -> 1 partido
+      Semifinales -> 2 partidos
+      Cuartos     -> 4 partidos
+      Octavos     -> 8 partidos
+      Todo lo anterior -> Primera ronda
 
-    Cómo se asigna:
-    1. Ordenamos los partidos femeninos finalizados del MÁS RECIENTE al MÁS ANTIGUO
-       usando `source_day` real de FIP/MatchScorer.
-    2. Repartimos exactamente las capacidades del cuadro desde la Final hacia atrás.
-    3. Lo que quede antes del main draw se etiqueta como `Clasificación`.
-
-    No se usa el texto HTML "Final", ni se reconstruyen ganadoras.
+    Se ordena desde el partido más reciente al más antiguo usando `source_day`
+    real de FIP/MatchScorer. No existe ya una categoría automática
+    "Clasificación".
     """
     rows = [dict(r) for r in (results or [])]
     structure = _build_womens_round_plan(event)
-    plan = structure.get("rounds") or []
 
-    if not rows or not plan:
+    if not rows:
         return rows, structure
-
-    capacities = {
-        item["round"]: int(item.get("matches", 0))
-        for item in plan
-        if item.get("round") and int(item.get("matches", 0)) > 0
-    }
 
     # Normalizar día e índice de captura.
     for pos, row in enumerate(rows):
@@ -878,68 +867,64 @@ def _assign_results_from_tournament_structure(results: list, event: dict) -> tup
             row["_day"] = int(row.get("source_day"))
         except Exception:
             row["_day"] = -1
+
         try:
             row["_idx"] = int(row.get("_source_index", pos))
         except Exception:
             row["_idx"] = pos
 
-        row["round"] = "Partidos"
-        row["round_source"] = "unclassified"
+        row["round"] = "Primera ronda"
+        row["round_source"] = "before-octavos"
 
-    # Más reciente primero. Dentro del mismo día conservamos el orden de FIP.
+    # Más reciente primero. Dentro del mismo día mantenemos el orden capturado.
     ordered = sorted(
         rows,
         key=lambda r: (r.get("_day", -1), r.get("_idx", -1)),
         reverse=True,
     )
 
-    # Repartir desde la Final hacia atrás con CAPACIDAD EXACTA.
-    closing_order = [
-        "Final",
-        "Semifinales",
-        "Cuartos de final",
-        "Octavos de final",
-        "Segunda ronda",
-        "Primera ronda",
+    # Capacidades fijas de las rondas eliminatorias finales.
+    fixed_rounds = [
+        ("Final", 1),
+        ("Semifinales", 2),
+        ("Cuartos de final", 4),
+        ("Octavos de final", 8),
     ]
 
     cursor = 0
-    assigned_counts = {}
-
-    for rnd in closing_order:
-        capacity = capacities.get(rnd, 0)
-        if capacity <= 0:
-            continue
-
+    for rnd, capacity in fixed_rounds:
         chunk = ordered[cursor:cursor + capacity]
 
         for row in chunk:
             row["round"] = rnd
-            row["round_source"] = "strict-bracket-capacity"
+            row["round_source"] = "strict-closing-capacity"
 
-        assigned_counts[rnd] = len(chunk)
         cursor += len(chunk)
 
-    # Cualquier partido femenino anterior al main draw queda fuera del cuadro principal.
+    # TODO lo restante pertenece a Primera ronda.
     for row in ordered[cursor:]:
-        row["round"] = "Clasificación"
-        row["round_source"] = "before-main-draw"
+        row["round"] = "Primera ronda"
+        row["round_source"] = "all-before-octavos"
 
-    # Invariantes duras: nunca puede haber más partidos que la capacidad de la ronda.
-    for rnd, capacity in capacities.items():
+    # Invariantes duras de las rondas finales.
+    hard_caps = {
+        "Final": 1,
+        "Semifinales": 2,
+        "Cuartos de final": 4,
+        "Octavos de final": 8,
+    }
+
+    for rnd, capacity in hard_caps.items():
         actual = sum(1 for row in ordered if row.get("round") == rnd)
         if actual > capacity:
             raise RuntimeError(
-                f"Clasificación inválida: {rnd} tiene {actual} partidos y su capacidad es {capacity}"
+                f"Clasificación inválida: {rnd} tiene {actual} partidos y máximo {capacity}"
             )
 
-    # Y las rondas ya completadas deben tener EXACTAMENTE su capacidad siempre que
-    # tengamos suficientes resultados acumulados.
-    expected_main = sum(capacities.values())
-    enough_results = len(ordered) >= expected_main
-
-    if enough_results:
-        for rnd, capacity in capacities.items():
+    # Si hay suficientes resultados, las rondas finales deben quedar completas.
+    minimum_for_full_closing = sum(hard_caps.values())  # 15
+    if len(ordered) >= minimum_for_full_closing:
+        for rnd, capacity in hard_caps.items():
             actual = sum(1 for row in ordered if row.get("round") == rnd)
             if actual != capacity:
                 raise RuntimeError(
@@ -952,31 +937,27 @@ def _assign_results_from_tournament_structure(results: list, event: dict) -> tup
         row.pop("_idx", None)
 
     structure["results_seen"] = len(ordered)
-    structure["expected_main_draw_matches"] = expected_main
-    structure["classification"] = "strict-bracket-capacity-v124"
+    structure["classification"] = "fixed-closing-rest-first-round-v126"
     structure["completed_by_round"] = {
-        rnd: sum(1 for row in ordered if row.get("round") == rnd)
-        for rnd in capacities
+        "Final": sum(1 for row in ordered if row.get("round") == "Final"),
+        "Semifinales": sum(1 for row in ordered if row.get("round") == "Semifinales"),
+        "Cuartos de final": sum(1 for row in ordered if row.get("round") == "Cuartos de final"),
+        "Octavos de final": sum(1 for row in ordered if row.get("round") == "Octavos de final"),
+        "Primera ronda": sum(1 for row in ordered if row.get("round") == "Primera ronda"),
     }
-    structure["qualification_matches"] = sum(
-        1 for row in ordered if row.get("round") == "Clasificación"
-    )
 
     print(
-        "  STRICT ROUND CLASSIFY v124:",
+        "  ROUND CLASSIFY v126:",
         f"results={len(ordered)}",
-        f"expected_main={expected_main}",
         f"completed={structure['completed_by_round']}",
-        f"qualification={structure['qualification_matches']}",
     )
-
-    # Log de seguridad explícito.
     print(
         "  ROUND INVARIANTS:",
-        f"Final={structure['completed_by_round'].get('Final', 0)}/1",
-        f"Semifinales={structure['completed_by_round'].get('Semifinales', 0)}/2",
-        f"Cuartos={structure['completed_by_round'].get('Cuartos de final', 0)}/4",
-        f"Octavos={structure['completed_by_round'].get('Octavos de final', 0)}/8",
+        f"Final={structure['completed_by_round']['Final']}/1",
+        f"Semifinales={structure['completed_by_round']['Semifinales']}/2",
+        f"Cuartos={structure['completed_by_round']['Cuartos de final']}/4",
+        f"Octavos={structure['completed_by_round']['Octavos de final']}/8",
+        f"Primera ronda={structure['completed_by_round']['Primera ronda']}",
     )
 
     return ordered, structure
