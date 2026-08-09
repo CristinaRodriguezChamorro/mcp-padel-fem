@@ -582,6 +582,359 @@ async def _get_official_live_event() -> dict | None:
     return None
 
 
+def _canonical_round_label(raw: str) -> str:
+    value = _norm_person_name(raw or "")
+    if not value:
+        return "Partidos"
+
+    if re.search(r"\bfinal\b", value) and not re.search(r"\bsemi|quarter|cuarto\b", value):
+        return "Final"
+    if re.search(r"\bsemi ?final|semifinal|\bsf\b", value):
+        return "Semifinales"
+    if re.search(r"\bquarter ?final|cuartos?|\bqf\b", value):
+        return "Cuartos de final"
+    if re.search(r"\bround of 16|round 16|octavos?|\br16\b", value):
+        return "Octavos de final"
+    if re.search(r"\b2nd round|second round|segunda ronda|\br2\b", value):
+        return "Segunda ronda"
+    if re.search(r"\b1st round|first round|primera ronda|\br1\b", value):
+        return "Primera ronda"
+    if re.search(r"\bqual|clasific", value):
+        return "Clasificación"
+    return "Partidos"
+
+
+def _extract_womens_main_draw_size(event: dict) -> int:
+    """
+    Extrae el tamaño del cuadro principal femenino desde la ficha oficial FIP.
+
+    Ejemplo London:
+      MAIN DRAW
+      Men: 48 (...)
+      Women: 28 (...)
+    """
+    html = event.get("html", "") or ""
+    if not html:
+        return 0
+
+    text = _clean_text(BeautifulSoup(html, "html.parser"))
+
+    # Limitar la búsqueda al bloque MAIN DRAW -> QUALIFYING cuando exista.
+    main_match = re.search(
+        r"MAIN\s+DRAW(?P<body>.*?)(?:QUALIFYING|ORDER\s+OF\s+PLAY|PLAY\s+ORDER|ORDEN\s+DE\s+JUEGO)",
+        text,
+        re.I | re.S,
+    )
+    body = main_match.group("body") if main_match else text
+
+    patterns = [
+        r"\bWomen\s*:?\s*(\d{1,3})\b",
+        r"\bFemale\s*:?\s*(\d{1,3})\b",
+        r"\bMujeres\s*:?\s*(\d{1,3})\b",
+        r"\bFemenin[oa]\s*:?\s*(\d{1,3})\b",
+    ]
+    for pat in patterns:
+        m = re.search(pat, body, re.I)
+        if m:
+            try:
+                value = int(m.group(1))
+                if 2 <= value <= 128:
+                    return value
+            except Exception:
+                pass
+
+    return 0
+
+
+def _extract_rounds_declared_by_fip(event: dict) -> list[str]:
+    """
+    Lee las fases que FIP declara en 'Tournament structure / Play Order'.
+
+    No presupone que todos los torneos tengan Octavos.
+    """
+    html = event.get("html", "") or ""
+    if not html:
+        return []
+
+    text = _clean_text(BeautifulSoup(html, "html.parser"))
+    candidates = []
+
+    patterns = [
+        (r"MAIN\s+DRAW\s*:\s*1ST\s+ROUND", "Primera ronda"),
+        (r"MAIN\s+DRAW\s*:\s*2ND\s+ROUND", "Segunda ronda"),
+        (r"MAIN\s+DRAW\s*:\s*ROUND\s+OF\s+16", "Octavos de final"),
+        (r"MAIN\s+DRAW\s*:\s*QUARTER[-\s]?FINALS?", "Cuartos de final"),
+        (r"MAIN\s+DRAW\s*:\s*SEMI[-\s]?FINALS?", "Semifinales"),
+        (r"MAIN\s+DRAW\s*:\s*FINAL\b", "Final"),
+        (r"CUADRO\s+PRINCIPAL\s*:\s*1", "Primera ronda"),
+        (r"OCTAVOS\s+DE\s+FINAL", "Octavos de final"),
+        (r"CUARTOS\s+DE\s+FINAL", "Cuartos de final"),
+        (r"SEMIFINALES?", "Semifinales"),
+        (r"\bFINAL\b", "Final"),
+    ]
+
+    found = []
+    for pat, label in patterns:
+        m = re.search(pat, text, re.I)
+        if m:
+            found.append((m.start(), label))
+
+    for _, label in sorted(found, key=lambda x: x[0]):
+        if label not in candidates:
+            candidates.append(label)
+
+    return candidates
+
+
+def _build_womens_round_plan(event: dict) -> dict:
+    """
+    Construye el plan del cuadro femenino dinámicamente.
+
+    No presupone Octavos:
+      - 8 parejas  -> Cuartos, Semis, Final
+      - 16 parejas -> Octavos, Cuartos, Semis, Final
+      - 28 parejas -> Primera ronda (12), Octavos (8), Cuartos (4), Semis (2), Final (1)
+      - 48 parejas -> Primera (16), Segunda (16), Octavos (8), ...
+    """
+    draw_size = _extract_womens_main_draw_size(event)
+    declared = _extract_rounds_declared_by_fip(event)
+
+    if draw_size < 2:
+        return {
+            "draw_size": 0,
+            "rounds": [],
+            "declared_rounds": declared,
+            "source": "FIP event structure",
+        }
+
+    bracket_size = 1
+    while bracket_size < draw_size:
+        bracket_size *= 2
+
+    plan = []
+
+    # Etapas previas a R16 según tamaño de bracket.
+    if bracket_size >= 64:
+        first_matches = max(0, draw_size - 32)
+        if first_matches:
+            plan.append({"round": "Primera ronda", "matches": first_matches})
+        plan.append({"round": "Segunda ronda", "matches": 16})
+        plan.extend([
+            {"round": "Octavos de final", "matches": 8},
+            {"round": "Cuartos de final", "matches": 4},
+            {"round": "Semifinales", "matches": 2},
+            {"round": "Final", "matches": 1},
+        ])
+    elif bracket_size == 32:
+        first_matches = max(0, draw_size - 16)
+        if first_matches:
+            plan.append({"round": "Primera ronda", "matches": first_matches})
+        plan.extend([
+            {"round": "Octavos de final", "matches": 8},
+            {"round": "Cuartos de final", "matches": 4},
+            {"round": "Semifinales", "matches": 2},
+            {"round": "Final", "matches": 1},
+        ])
+    elif bracket_size == 16:
+        r16_matches = max(0, draw_size - 8)
+        if r16_matches:
+            plan.append({"round": "Octavos de final", "matches": r16_matches})
+        plan.extend([
+            {"round": "Cuartos de final", "matches": 4},
+            {"round": "Semifinales", "matches": 2},
+            {"round": "Final", "matches": 1},
+        ])
+    elif bracket_size == 8:
+        qf_matches = max(0, draw_size - 4)
+        if qf_matches:
+            plan.append({"round": "Cuartos de final", "matches": qf_matches})
+        plan.extend([
+            {"round": "Semifinales", "matches": 2},
+            {"round": "Final", "matches": 1},
+        ])
+    elif bracket_size == 4:
+        sf_matches = max(0, draw_size - 2)
+        if sf_matches:
+            plan.append({"round": "Semifinales", "matches": sf_matches})
+        plan.append({"round": "Final", "matches": 1})
+    else:
+        plan.append({"round": "Final", "matches": 1})
+
+    # Mantener sólo fases que tengan sentido en la ficha FIP cuando ésta
+    # proporciona información suficiente. La matemática del draw sigue siendo
+    # fallback cuando FIP no enumera bien todas las fases.
+    declared_set = set(declared)
+    if declared_set:
+        filtered = [
+            item for item in plan
+            if item["round"] in declared_set
+            or item["round"] in {"Final", "Semifinales", "Cuartos de final", "Octavos de final"}
+        ]
+        if filtered:
+            plan = filtered
+
+    return {
+        "draw_size": draw_size,
+        "bracket_size": bracket_size,
+        "rounds": plan,
+        "declared_rounds": declared,
+        "source": "FIP event structure",
+    }
+
+
+def _pair_signature_for_rounds(pair: str) -> tuple[str, ...]:
+    players = [
+        x.strip()
+        for x in re.split(r"\s*/\s*", str(pair or ""))
+        if x.strip()
+    ]
+    sig = []
+    for player in players:
+        parts = _norm_person_name(player).split()
+        if len(parts) >= 2:
+            sig.append(parts[1])
+        elif parts:
+            sig.append(parts[0])
+    return tuple(sorted(sig))
+
+
+def _round_assignment_quality(rows: list, assignments: list[str]) -> int:
+    """
+    Puntúa si la clasificación respeta el avance:
+    las parejas de QF deben venir de ganadoras de R16, etc.
+
+    Sirve para detectar si FIP devuelve resultados oldest->newest o al revés.
+    """
+    by_round = {}
+    for row, rnd in zip(rows, assignments):
+        by_round.setdefault(rnd, []).append(row)
+
+    chain = [
+        ("Octavos de final", "Cuartos de final"),
+        ("Cuartos de final", "Semifinales"),
+        ("Semifinales", "Final"),
+    ]
+
+    score = 0
+    for prev_round, next_round in chain:
+        prev = by_round.get(prev_round, [])
+        nxt = by_round.get(next_round, [])
+        if not prev or not nxt:
+            continue
+
+        winners = {
+            _pair_signature_for_rounds(r.get("winner", ""))
+            for r in prev
+        }
+        winners.discard(tuple())
+
+        for match in nxt:
+            participants = {
+                _pair_signature_for_rounds(match.get("winner", "")),
+                _pair_signature_for_rounds(match.get("loser", "")),
+            }
+            participants.discard(tuple())
+            for pair in participants:
+                score += 2 if pair in winners else -1
+
+    return score
+
+
+def _assign_results_from_tournament_structure(results: list, event: dict) -> tuple[list, dict]:
+    """
+    Clasifica los partidos finalizados usando la estructura REAL del torneo.
+
+    1. Lee el tamaño del cuadro femenino desde FIP.
+    2. Calcula las fases que realmente existen y sus capacidades.
+    3. Distribuye los resultados acumulados según esas capacidades.
+    4. Prueba ambos órdenes de FIP y elige el que mejor respeta el avance
+       de las parejas entre rondas.
+
+    Si FIP aún no ha publicado una ronda completa, sólo se muestran los
+    partidos finalizados que existan en esa fase.
+    """
+    rows = [dict(r) for r in (results or [])]
+    structure = _build_womens_round_plan(event)
+    plan = structure.get("rounds") or []
+
+    if not rows or not plan:
+        return rows, structure
+
+    expected_total = sum(int(x.get("matches", 0)) for x in plan)
+    usable = min(len(rows), expected_total)
+
+    def build_assignments(count: int) -> list[str]:
+        out = []
+        remaining = count
+        for item in plan:
+            if remaining <= 0:
+                break
+            take = min(int(item["matches"]), remaining)
+            out.extend([item["round"]] * take)
+            remaining -= take
+        return out
+
+    assignments = build_assignments(usable)
+
+    # Caso normal: resultados acumulados en orden cronológico.
+    chrono_rows = rows[:usable]
+    chrono_quality = _round_assignment_quality(chrono_rows, assignments)
+
+    # Fallback: algunas vistas pueden listar los últimos partidos primero.
+    reverse_rows = list(reversed(rows[:usable]))
+    reverse_quality = _round_assignment_quality(reverse_rows, assignments)
+
+    if reverse_quality > chrono_quality:
+        ordered_rows = reverse_rows
+        order_mode = "newest-first-reversed"
+        quality = reverse_quality
+    else:
+        ordered_rows = chrono_rows
+        order_mode = "source-order"
+        quality = chrono_quality
+
+    classified = []
+    for row, rnd in zip(ordered_rows, assignments):
+        item = dict(row)
+        item["round"] = rnd
+        item["round_source"] = "FIP-structure"
+        classified.append(item)
+
+    # Si hubiera resultados extra (por ejemplo qualifying mezclado), no los
+    # inventamos dentro del main draw.
+    extras = rows[usable:]
+    for item in extras:
+        extra = dict(item)
+        extra["round"] = "Partidos"
+        extra["round_source"] = "unclassified-extra"
+        classified.append(extra)
+
+    structure["results_seen"] = len(rows)
+    structure["expected_main_draw_matches"] = expected_total
+    structure["order_mode"] = order_mode
+    structure["assignment_quality"] = quality
+    structure["completed_by_round"] = {
+        item["round"]: sum(1 for r in classified if r.get("round") == item["round"])
+        for item in plan
+    }
+
+    print(
+        "  FIP structure:",
+        f"women_draw={structure.get('draw_size',0)}",
+        f"plan={[(x['round'],x['matches']) for x in plan]}",
+    )
+    print(
+        "  round classify:",
+        f"results={len(rows)}",
+        f"expected={expected_total}",
+        f"order={order_mode}",
+        f"quality={quality}",
+        f"completed={structure['completed_by_round']}",
+    )
+
+    return classified, structure
+
+
 async def _get_watch_official() -> list[str]:
     """Dónde ver Premier Padel desde España según la web oficial del circuito."""
     html = await _fetch(PREMIER_WATCH_URL)
@@ -1874,7 +2227,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     parsed = []
 
-    for block in blocks:
+    for block_idx, block in enumerate(blocks):
         players = list(block.get("players", []))
         scores = [int(x) for x in block.get("scores", []) if str(x).isdigit()]
 
@@ -1942,7 +2295,11 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
                 pass
 
         context = str(block.get("text","")) + " " + str(block.get("tag",""))
-        rnd = infer_round(context, match_date)
+
+        # Si tenemos fecha oficial individual, infer_round puede usarla.
+        # Sin fecha (el caso actual de FIP: dates=0), NO confiamos en palabras
+        # como "Final" dentro de contenedores HTML amplios.
+        rnd = infer_round(context, match_date) if match_date else "Partidos"
 
         parsed.append({
             "round": rnd,
@@ -1950,6 +2307,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
             "loser": loser,
             "score": "  ".join(f"{a}-{b}" for a,b in display),
             "date": match_date,
+            "_source_index": block_idx,
         })
 
     # Dedupe all tournament results.
@@ -1965,14 +2323,6 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
             continue
         seen.add(key)
         valid.append(item)
-
-    valid.sort(
-        key=lambda x: (
-            x.get("date",""),
-            ROUND_ORDER.get(x.get("round","Partidos"),0),
-        ),
-        reverse=True,
-    )
 
     dates = sorted({x.get("date","") for x in valid if x.get("date")}, reverse=True)
 
@@ -2241,6 +2591,179 @@ def _annotate_result_rounds(results: list, next_match: dict | None, event: dict)
     }
 
     return results
+
+
+
+def _pair_advancement_signature(pair: str) -> tuple[str, ...]:
+    """
+    Firma robusta de una pareja usando el primer apellido de cada jugadora.
+
+    FIP puede devolver:
+      "Claudia Fernandez Sanchez / Martina Calvo Santamaria"
+    y en otro punto:
+      "Claudia Fernandez / Martina Calvo"
+
+    Ambas deben considerarse la misma pareja.
+    """
+    players = [
+        x.strip()
+        for x in re.split(r"\s*/\s*", str(pair or ""))
+        if x.strip()
+    ]
+    if len(players) != 2:
+        return tuple()
+
+    surnames = []
+    for player in players:
+        parts = _norm_person_name(player).split()
+        if len(parts) >= 2:
+            surnames.append(parts[1])
+        elif parts:
+            surnames.append(parts[0])
+
+    return tuple(sorted(x for x in surnames if x))
+
+
+def _classify_finished_rounds_by_advancement(results: list, event: dict) -> list:
+    """
+    Etiqueta las rondas a partir de la progresión REAL de los resultados.
+
+    Regla fundamental:
+    si la pareja ganadora del partido A aparece como una de las dos parejas
+    del partido B, A alimenta a B.
+
+    Para un torneo ya finalizado:
+      Final       = partido terminal con mayor profundidad
+      Semifinales = partidos que alimentan esa Final
+      Cuartos     = partidos que alimentan las Semifinales
+      Octavos     = partidos que alimentan los Cuartos
+
+    Esto evita el error anterior de convertir un partido cualquiera en Final
+    porque un contenedor grande de FIP incluyera la palabra "Final".
+    """
+    rows = [dict(r) for r in (results or [])]
+    if not rows:
+        return rows
+
+    winners = []
+    participants = []
+
+    for row in rows:
+        w = _pair_advancement_signature(row.get("winner", ""))
+        l = _pair_advancement_signature(row.get("loser", ""))
+        winners.append(w)
+        participants.append({sig for sig in (w, l) if sig})
+
+    parents = {i: [] for i in range(len(rows))}
+    children = {i: [] for i in range(len(rows))}
+
+    for parent_idx, winner_sig in enumerate(winners):
+        if not winner_sig:
+            continue
+        for child_idx, child_pairs in enumerate(participants):
+            if child_idx == parent_idx:
+                continue
+            if winner_sig in child_pairs:
+                parents[child_idx].append(parent_idx)
+                children[parent_idx].append(child_idx)
+
+    # Profundidad = longitud de la cadena de partidos anteriores.
+    memo = {}
+
+    def depth(idx: int, stack=None) -> int:
+        if idx in memo:
+            return memo[idx]
+
+        stack = set(stack or ())
+        if idx in stack:
+            return 0
+        stack.add(idx)
+
+        valid_parents = [p for p in parents.get(idx, []) if p not in stack]
+        if not valid_parents:
+            memo[idx] = 0
+        else:
+            memo[idx] = 1 + max(depth(p, stack) for p in valid_parents)
+        return memo[idx]
+
+    terminal = [i for i in range(len(rows)) if not children.get(i)]
+    if not terminal:
+        print("  round graph: sin partido terminal; conservando rondas FIP")
+        return rows
+
+    max_depth = max(depth(i) for i in terminal)
+    deepest_terminal = [i for i in terminal if depth(i) == max_depth]
+
+    # Al terminar el torneo debería existir exactamente una final completada.
+    # Si hay varios terminales a la misma profundidad, no inventamos una Final.
+    final_idx = None
+    if _stage_from_event(event) == "Final" and len(deepest_terminal) == 1:
+        final_idx = deepest_terminal[0]
+
+    if final_idx is None:
+        print(
+            "  round graph:",
+            f"stage={_stage_from_event(event)}",
+            f"terminales_profundos={len(deepest_terminal)}",
+            "sin Final inequívoca"
+        )
+        return rows
+
+    # Limpiar SOLO etiquetas de las cuatro rondas objetivo.
+    for row in rows:
+        if row.get("round") in {
+            "Final", "Semifinales", "Cuartos de final", "Octavos de final"
+        }:
+            row["round"] = "Partidos"
+
+    labels = [
+        "Final",
+        "Semifinales",
+        "Cuartos de final",
+        "Octavos de final",
+    ]
+
+    frontier = {final_idx}
+    assigned = set()
+
+    for label in labels:
+        next_frontier = set()
+
+        for idx in frontier:
+            if idx in assigned:
+                continue
+
+            rows[idx]["round"] = label
+            rows[idx]["round_source"] = "advancement-graph"
+            assigned.add(idx)
+
+            for p in parents.get(idx, []):
+                if p not in assigned:
+                    next_frontier.add(p)
+
+        frontier = next_frontier
+
+    counts = {
+        label: sum(1 for row in rows if row.get("round") == label)
+        for label in labels
+    }
+
+    final_row = rows[final_idx]
+    print(
+        "  round graph FINAL:",
+        f"{final_row.get('winner','')} vs {final_row.get('loser','')}",
+        f"score={final_row.get('score','')}",
+        f"depth={max_depth}",
+    )
+    print(
+        "  round graph counts:",
+        f"Final={counts['Final']}",
+        f"Semifinales={counts['Semifinales']}",
+        f"Cuartos={counts['Cuartos de final']}",
+        f"Octavos={counts['Octavos de final']}",
+    )
+
+    return rows
 
 
 def _repair_current_round_from_previous(results: list, event: dict) -> list:
@@ -3316,6 +3839,7 @@ async def get_tournament_now(gender: str = "female") -> dict:
     if not event:
         return {
             "active": False,
+            "message": "No hay torneos en juego en este momento.",
             "name": "",
             "place": "",
             "dates": "",
@@ -3345,8 +3869,14 @@ async def get_tournament_now(gender: str = "female") -> dict:
         print(f"  live results error: {results}")
         results = []
 
-    # Label rounds using only event stage; no OOP dependency.
-    results = _annotate_result_rounds(results or [], None, event)
+    # EN JUEGO:
+    # - detectar el torneo activo por fechas oficiales FIP;
+    # - leer su estructura femenina real;
+    # - clasificar sólo los partidos finalizados según esa estructura.
+    results, tournament_structure = _assign_results_from_tournament_structure(
+        results or [],
+        event,
+    )
 
     normalized_results = []
     for result in (results or []):
@@ -3376,5 +3906,6 @@ async def get_tournament_now(gender: str = "female") -> dict:
         "gender": gender,
         "source": "FIP · Premier Padel",
         "source_url": event["url"],
+        "structure": tournament_structure,
         "_debug": dict(_LIVE_DEBUG_STATE),
     }
