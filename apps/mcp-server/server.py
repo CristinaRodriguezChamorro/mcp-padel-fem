@@ -591,7 +591,7 @@ async def resumen_diario_padel_femenino():
 
 @app.get("/api/version")
 async def api_version():
-    return {"version": "v91-fip-date-chip-fix-2026-08-09"}
+    return {"version": "v92-fip-draw-column-rounds-2026-08-09"}
 
 @app.get("/")
 async def index():
@@ -601,7 +601,7 @@ async def index():
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
-            "X-App-Version": "v91-fip-date-chip-fix-2026-08-09",
+            "X-App-Version": "v92-fip-draw-column-rounds-2026-08-09",
         },
     )
 

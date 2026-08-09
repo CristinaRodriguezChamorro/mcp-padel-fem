@@ -1735,6 +1735,316 @@ async def _browser_fip_flat_results_fallback(event: dict) -> list:
         return []
 
 
+async def _browser_fip_womens_draw_blocks(event: dict) -> tuple[list[dict], dict]:
+    """
+    Primary production extractor for completed women's main-draw matches.
+
+    Instead of trying to infer the round from dates/results pages, this reads
+    FIP's DRAW itself. The draw has visible column headings (ROUND 16,
+    QUARTER-FINALS, SEMI-FINALS, FINAL). We assign every detected match card
+    to the nearest heading by horizontal position.
+
+    This directly matches the bracket UI shown by FIP and is much harder to
+    misclassify than date-based inference.
+    """
+    diag = {
+        "playwright": False,
+        "female_activated": False,
+        "main_activated": False,
+        "headings": [],
+        "candidates": 0,
+        "blocks": 0,
+    }
+
+    if async_playwright is None:
+        return [], diag
+
+    url = event.get("url", "")
+    if not url:
+        return [], diag
+
+    try:
+        ranking_names = await get_womens_ranking_names(limit=250)
+    except Exception:
+        ranking_names = []
+
+    profiles = _player_schedule_profiles(ranking_names)
+    if not profiles:
+        return [], diag
+
+    browser = None
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(
+                headless=True,
+                args=["--no-sandbox", "--disable-dev-shm-usage"],
+            )
+            diag["playwright"] = True
+
+            page = await browser.new_page(
+                viewport={"width": 2200, "height": 1800},
+                locale="en-US",
+            )
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            await page.wait_for_timeout(1400)
+
+            # Open Draws.
+            for label in ("Draws", "Cuadros"):
+                try:
+                    loc = page.get_by_text(label, exact=True).first
+                    if await loc.count() and await loc.is_visible():
+                        await loc.click(force=True, timeout=2500)
+                        await page.wait_for_timeout(1000)
+                        break
+                except Exception:
+                    pass
+
+            # Activate Female/Women.
+            try:
+                labels = page.locator("label")
+                for li in range(await labels.count()):
+                    lab = labels.nth(li)
+                    text = re.sub(r"\s+", " ", (await lab.inner_text()).strip()).lower()
+                    if text not in {"female", "women", "femenino", "femenina"}:
+                        continue
+                    target_id = await lab.get_attribute("for")
+                    if target_id:
+                        inp = page.locator(f"#{target_id}")
+                        if await inp.count():
+                            try:
+                                await inp.check(force=True, timeout=2200)
+                            except Exception:
+                                await inp.click(force=True, timeout=2200)
+                            diag["female_activated"] = True
+                    if not diag["female_activated"]:
+                        await lab.click(force=True, timeout=2200)
+                        diag["female_activated"] = True
+                    break
+            except Exception:
+                pass
+
+            if not diag["female_activated"]:
+                try:
+                    activated = await page.evaluate(
+                        r"""
+                        () => {
+                          const clean=s=>(s||'').replace(/\s+/g,' ').trim().toLowerCase();
+                          const nodes=Array.from(document.querySelectorAll('label,button,[role=button],[role=tab]'));
+                          const el=nodes.find(x=>['female','women','femenino','femenina'].includes(clean(x.innerText||x.textContent)));
+                          if(!el)return false;
+                          el.click();
+                          el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                          return true;
+                        }
+                        """
+                    )
+                    diag["female_activated"] = bool(activated)
+                except Exception:
+                    pass
+
+            await page.wait_for_timeout(900)
+
+            # Activate Main draw if a Qualify/Main selector exists.
+            try:
+                result = await page.evaluate(
+                    r"""
+                    () => {
+                      const clean=s=>(s||'').replace(/\s+/g,' ').trim().toLowerCase();
+                      const nodes=Array.from(document.querySelectorAll('label,button,[role=button],[role=tab]'));
+                      const el=nodes.find(x=>['main','main draw','cuadro principal'].includes(clean(x.innerText||x.textContent)));
+                      if(!el)return false;
+                      el.click();
+                      el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                      return true;
+                    }
+                    """
+                )
+                diag["main_activated"] = bool(result)
+            except Exception:
+                pass
+
+            await page.wait_for_timeout(1000)
+
+            result = await page.evaluate(
+                r"""
+                (profiles) => {
+                  const norm=s=>(s||'')
+                    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
+                    .toLowerCase().replace(/[^a-z0-9]+/g,' ')
+                    .replace(/\s+/g,' ').trim();
+                  const clean=s=>(s||'').replace(/\s+/g,' ').trim();
+
+                  const visible=el=>{
+                    const st=getComputedStyle(el);
+                    const r=el.getBoundingClientRect();
+                    return st.display!=='none' && st.visibility!=='hidden' &&
+                           r.width>0 && r.height>0;
+                  };
+
+                  const roundName=text=>{
+                    const t=clean(text).toLowerCase();
+                    if(/\bround\s*16\b|\br16\b/.test(t)) return 'Octavos de final';
+                    if(/quarter[\s-]*final|1\/4\s*final|cuartos?/.test(t)) return 'Cuartos de final';
+                    if(/semi[\s-]*final|semifinal/.test(t)) return 'Semifinales';
+                    if(/\bfinal\b/.test(t) && !/semi|quarter|cuarto/.test(t)) return 'Final';
+                    if(/\bround\s*32\b|\br32\b/.test(t)) return 'Primera ronda';
+                    return '';
+                  };
+
+                  const all=Array.from(document.querySelectorAll('body *')).filter(visible);
+
+                  // Visible bracket headings and their X centers.
+                  const headings=[];
+                  for(const el of all){
+                    const txt=clean(el.innerText||el.textContent);
+                    if(!txt || txt.length>70)continue;
+                    const round=roundName(txt);
+                    if(!round)continue;
+                    const r=el.getBoundingClientRect();
+                    headings.push({round,x:r.left+r.width/2,text:txt});
+                  }
+
+                  // Dedupe headings by round/x.
+                  const hd=[];
+                  for(const h of headings.sort((a,b)=>a.x-b.x)){
+                    if(!hd.some(x=>x.round===h.round && Math.abs(x.x-h.x)<80))hd.push(h);
+                  }
+
+                  const matchPlayer = text => {
+                    const n=norm(text);
+                    if(!n || n.length<3)return null;
+                    for(const p of profiles){
+                      for(const alias of (p.aliases||[])){
+                        if(!alias || alias.length<4)continue;
+                        if(n===alias || n.includes(alias) || alias.includes(n)){
+                          return p;
+                        }
+                      }
+                    }
+                    return null;
+                  };
+
+                  const leafNodes=el=>Array.from(el.querySelectorAll('*'))
+                    .filter(x=>x.children.length===0 && visible(x));
+
+                  const candidates=[];
+
+                  for(const el of all){
+                    const text=clean(el.innerText);
+                    if(!text || text.length<25 || text.length>1800)continue;
+
+                    const leaves=leafNodes(el).map(x=>{
+                      const r=x.getBoundingClientRect();
+                      return {
+                        text:clean(x.textContent),
+                        x:r.left+r.width/2,
+                        y:r.top+r.height/2,
+                      };
+                    }).filter(x=>x.text);
+
+                    const players=[];
+                    for(const leaf of leaves){
+                      const p=matchPlayer(leaf.text);
+                      if(p && !players.some(q=>q.canonical===p.canonical)){
+                        players.push({
+                          canonical:p.canonical,
+                          display:p.display,
+                          x:leaf.x,
+                          y:leaf.y,
+                        });
+                      }
+                    }
+
+                    if(players.length!==4)continue;
+
+                    const scores=leaves
+                      .filter(x=>/^\d{1,2}$/.test(x.text))
+                      .map(x=>Number(x.text))
+                      .filter(n=>n>=0 && n<=20);
+
+                    if(scores.length<4 || scores.length>12)continue;
+
+                    const r=el.getBoundingClientRect();
+                    candidates.push({
+                      el,
+                      text,
+                      players,
+                      scores,
+                      x:r.left+r.width/2,
+                      area:r.width*r.height,
+                    });
+                  }
+
+                  // Keep smallest DOM containers representing one match.
+                  const minimal=candidates.filter(c=>
+                    !candidates.some(o=>o!==c && c.el.contains(o.el))
+                  );
+
+                  const blocks=[];
+                  const seen=new Set();
+
+                  for(const c of minimal){
+                    if(!hd.length)continue;
+
+                    // Closest bracket column heading by horizontal center.
+                    const heading=[...hd].sort((a,b)=>Math.abs(a.x-c.x)-Math.abs(b.x-c.x))[0];
+                    if(!heading)continue;
+
+                    const ordered=[...c.players].sort((a,b)=>a.y-b.y || a.x-b.x);
+                    const playerNames=ordered.map(x=>x.display);
+
+                    const key=heading.round+'|'+playerNames.join('|')+'|'+c.scores.join(',');
+                    if(seen.has(key))continue;
+                    seen.add(key);
+
+                    blocks.push({
+                      tag:'draw:'+heading.round,
+                      text:c.text.slice(0,1600),
+                      players:playerNames,
+                      scores:c.scores,
+                      roundHint:heading.round,
+                    });
+                  }
+
+                  return {
+                    headings:hd,
+                    candidateCount:candidates.length,
+                    blocks,
+                  };
+                }
+                """,
+                profiles,
+            )
+
+            await browser.close()
+            browser = None
+
+            diag["headings"] = result.get("headings", []) or []
+            diag["candidates"] = int(result.get("candidateCount", 0) or 0)
+            blocks = result.get("blocks", []) or []
+            diag["blocks"] = len(blocks)
+
+            print(
+                "  FIP draw:",
+                f"female={diag['female_activated']}",
+                f"main={diag['main_activated']}",
+                f"headings={[x.get('round') for x in diag['headings']]}",
+                f"candidates={diag['candidates']}",
+                f"blocks={diag['blocks']}",
+            )
+
+            return blocks, diag
+
+    except Exception as exc:
+        print(f"  FIP draw error: {type(exc).__name__}: {exc}")
+        if browser is not None:
+            try:
+                await browser.close()
+            except Exception:
+                pass
+        return [], diag
+
+
 async def _extract_official_results(event: dict, gender: str = "female") -> list:
     """
     EN JUEGO ONLY — v39
@@ -1742,16 +2052,29 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
     Recibe bloques con 4 jugadoras + scores de todos los estados/días.
     Reconstruye pareja ganadora, perdedora, marcador, fecha y ronda.
     """
+    # PRIMARY: FIP Draws tab, where the round is explicit by bracket column.
     try:
-        source, capture_diag = await _browser_fip_womens_results_text(event)
+        blocks, draw_diag = await _browser_fip_womens_draw_blocks(event)
     except Exception as exc:
-        print(f"  v39 live-source error: {type(exc).__name__}: {exc}")
-        source, capture_diag = "", {}
+        print(f"  draw live-source error: {type(exc).__name__}: {exc}")
+        blocks, draw_diag = [], {}
 
-    try:
-        blocks = json.loads(source).get("blocks", []) if source else []
-    except Exception:
-        blocks = []
+    capture_diag = {"draw": draw_diag}
+
+    # FALLBACK: existing v39 Results parser.
+    if not blocks:
+        try:
+            source, v39_diag = await _browser_fip_womens_results_text(event)
+        except Exception as exc:
+            print(f"  v39 live-source error: {type(exc).__name__}: {exc}")
+            source, v39_diag = "", {}
+
+        capture_diag["v39"] = v39_diag
+
+        try:
+            blocks = json.loads(source).get("blocks", []) if source else []
+        except Exception:
+            blocks = []
 
     if not blocks:
         for attempt in range(1, 3):
@@ -1766,7 +2089,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
             if retry_blocks:
                 blocks = retry_blocks
-                capture_diag = retry_diag
+                capture_diag["v39_retry"] = retry_diag
                 print(f"  live retry {attempt}: recuperados {len(blocks)} bloques")
                 break
 
@@ -1955,17 +2278,19 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         date_round = round_from_official_date(match_date)
 
         # Production priority:
-        # 1) selected FIP date chip (most reliable for this main draw)
-        # 2) explicit local card text
-        # 3) unknown -> Partidos
-        rnd = date_round or infer_round(context, match_date)
-
-        if date_round:
+        # 1) explicit Draws-column roundHint
+        # 2) selected FIP date
+        # 3) local card text
+        # 4) unknown
+        if explicit_round:
+            rnd = explicit_round
+            round_source = "fip-draw-column"
+        elif date_round:
+            rnd = date_round
             round_source = "fip-date"
-        elif rnd != "Partidos":
-            round_source = "fip-text"
         else:
-            round_source = "unknown"
+            rnd = infer_round(context, match_date)
+            round_source = "fip-text" if rnd != "Partidos" else "unknown"
 
         parsed.append({
             "round": rnd,
@@ -2004,7 +2329,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     _LIVE_DEBUG_STATE.update({
         "browser": capture_diag,
-        "parser": "full-draw-fip-date-round-v84",
+        "parser": "fip-draw-column-v92",
         "raw_blocks": len(blocks),
         "parsed_results": len(parsed),
         "valid_results": len(valid),
