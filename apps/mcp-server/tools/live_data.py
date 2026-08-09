@@ -3176,6 +3176,14 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
             "loser": loser,
             "score": "  ".join(f"{a}-{b}" for a,b in display),
             "date": match_date,
+
+            # CRÍTICO: conservar el día REAL del widget FIP.
+            # El parser de widgets ya lo había capturado, pero aquí se perdía
+            # al construir el resultado normalizado. Por eso v121 terminaba
+            # diciendo "sin source_day" y mostraba todo como "Partidos".
+            "source_day": block.get("source_day"),
+            "source_totalday": block.get("source_totalday"),
+
             "_source_index": block_idx,
         })
 
@@ -3194,6 +3202,13 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         valid.append(item)
 
     dates = sorted({x.get("date","") for x in valid if x.get("date")}, reverse=True)
+
+    valid_days = {}
+    for _row in valid:
+        _day = _row.get("source_day")
+        if _day is not None:
+            valid_days[_day] = valid_days.get(_day, 0) + 1
+    print(f"  live valid source_days: {dict(sorted(valid_days.items()))}")
 
     _LIVE_DEBUG_STATE.update({
         "browser": capture_diag,
