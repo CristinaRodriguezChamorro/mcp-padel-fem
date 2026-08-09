@@ -282,6 +282,14 @@ nav {
   .category-label{margin-bottom:10px}
 }
 
+.sponsor-products-empty{
+  grid-template-columns:1fr!important;
+}
+.sponsor-products-empty .sponsor-category{
+  min-height:82px;
+  border-right:0;
+}
+
 /* ── EN JUEGO ── */
 
 .live-tournament{
@@ -1061,94 +1069,122 @@ async function loadEnJuego(){
 const SPONSORS_DATA=[{name:"Gemma Triay",pair:"Pareja: Delfina Brea",flag:"🇪🇸",emoji:"👑",rank:"#1",wikiTitle:"Gemma_Triay",note:"La número 1 del mundo. Bullpadel construyó su pala más vendida en torno a ella. Contrato hasta 2027.",categories:[{label:"🏏 Pala",brands:[{name:"Bullpadel Elite W 2026",cls:"bullpadel"}]},{label:"👕 Ropa",brands:[{name:"Bullpadel",cls:"bullpadel"}]},{label:"👟 Calzado",brands:[{name:"Bullpadel Hack",cls:"bullpadel"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Delfina Brea",pair:"Pareja: Gemma Triay",flag:"🇦🇷",emoji:"⭐",rank:"#2",wikiTitle:"Delfina_Brea",note:"La argentina más dominante de la historia del circuito. Bullpadel la tiene como embajadora global.",categories:[{label:"🏏 Pala",brands:[{name:"Bullpadel Vertex 05 W 2026",cls:"bullpadel"}]},{label:"👕 Ropa",brands:[{name:"Bullpadel",cls:"bullpadel"}]},{label:"👟 Calzado",brands:[{name:"Bullpadel Hack",cls:"bullpadel"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Ari Sánchez",pair:"Pareja: Paula Josemaría",flag:"🇪🇸",emoji:"🔥",rank:"#3",wikiTitle:"Ari_Sánchez",note:"Fichaje estrella de Adidas en 2025. Su carisma la convierte en la cara más marketiniana del pádel femenino español.",categories:[{label:"🏏 Pala",brands:[{name:"Adidas Metalbone W 2026",cls:"adidas"}]},{label:"👕 Ropa",brands:[{name:"Adidas",cls:"adidas"}]},{label:"👟 Calzado",brands:[{name:"Adidas Adizero",cls:"adidas"}]},{label:"⌚ Otros",brands:[{name:"Garmin",cls:"generic"}]}]},{name:"Paula Josemaría",pair:"Pareja: Ari Sánchez",flag:"🇪🇸",emoji:"💥",rank:"#4",wikiTitle:"Paula_Josemaría",note:"La pegada más potente del circuito. Head la fichó hace años y sigue siendo una de sus apuestas más claras.",categories:[{label:"🏏 Pala",brands:[{name:"Head Delta Pro W 2026",cls:"head"}]},{label:"👕 Ropa",brands:[{name:"Head",cls:"head"}]},{label:"👟 Calzado",brands:[{name:"Head Sprint Pro",cls:"head"}]},{label:"🥤 Nutrición",brands:[{name:"HSN",cls:"generic"}]}]},{name:"Alejandra Salazar",pair:"Pareja: Lucía Sainz",flag:"🇪🇸",emoji:"🏆",rank:"#5",wikiTitle:"Alejandra_Salazar",note:"Leyenda viva del circuito. Adidas la ha renovado season tras season; uno de los contratos más longevos del pádel femenino español.",categories:[{label:"🏏 Pala",brands:[{name:"Adidas Adipower W 2026",cls:"adidas"}]},{label:"👕 Ropa",brands:[{name:"Adidas",cls:"adidas"}]},{label:"👟 Calzado",brands:[{name:"Adidas Adizero",cls:"adidas"}]},{label:"🎾 Pelotas",brands:[{name:"Adidas",cls:"adidas"}]}]},{name:"Lucía Sainz",pair:"Pareja: Alejandra Salazar",flag:"🇪🇸",emoji:"✨",rank:"#6",wikiTitle:"Lucía_Sainz",note:"Nox la apoya desde sus inicios. Una de las jugadoras más seguidas en redes; clave para la marca en Europa.",categories:[{label:"🏏 Pala",brands:[{name:"Nox ML10 Pro Cup W 2026",cls:"nox"}]},{label:"👕 Ropa",brands:[{name:"Nox",cls:"nox"}]},{label:"👟 Calzado",brands:[{name:"K-Swiss Ultrashot",cls:"k-swiss"}]},{label:"🧴 Recuperación",brands:[{name:"Pilexil",cls:"generic"}]}]},{name:"Marta Ortega",pair:"Pareja: Ariana Sánchez",flag:"🇪🇸",emoji:"🎯",rank:"#7",wikiTitle:"Marta_Ortega_Gallego",note:"Nox apostó fuerte por ella y le está saliendo de lujo. Marta es la imagen de la renovación de la marca.",categories:[{label:"🏏 Pala",brands:[{name:"Nox AT10 Luxury W 2026",cls:"nox"}]},{label:"👕 Ropa",brands:[{name:"Nox",cls:"nox"}]},{label:"👟 Calzado",brands:[{name:"K-Swiss Ultrashot",cls:"k-swiss"}]},{label:"⌚ Otros",brands:[{name:"Garmin",cls:"generic"}]}]},{name:"Ariana Sánchez",pair:"Pareja: Marta Ortega",flag:"🇪🇸",emoji:"🚀",rank:"#8",wikiTitle:"Ariana_Sánchez_Fallada",note:"Head la tiene muy bien atada. Su nueva pareja con Marta promete resultados y más visibilidad para la marca.",categories:[{label:"🏏 Pala",brands:[{name:"Head Graphene W 2026",cls:"head"}]},{label:"👕 Ropa",brands:[{name:"Head",cls:"head"}]},{label:"👟 Calzado",brands:[{name:"Head Sprint Pro",cls:"head"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Jessica Castello",pair:"Pareja: Tamara Icardo",flag:"🇪🇸",emoji:"🌟",rank:"Top 10",wikiTitle:"Jessica_Castello",note:"Vibora la ha hecho su bandera en el pádel femenino español. Muy activa en RRSS y con una comunidad fiel.",categories:[{label:"🏏 Pala",brands:[{name:"Vibora Yarara Edition W",cls:"vibora"}]},{label:"👕 Ropa",brands:[{name:"Vibora",cls:"vibora"}]},{label:"👟 Calzado",brands:[{name:"Asics Gel-Padel",cls:"asics"}]}]},{name:"Tamara Icardo",pair:"Pareja: Jessica Castello",flag:"🇪🇸",emoji:"💪",rank:"Top 10",wikiTitle:"Tamara_Icardo",note:"Varlion la acompaña desde que debutó en el circuito profesional. Imagen de la elegancia dentro de la pista.",categories:[{label:"🏏 Pala",brands:[{name:"Varlion LW Carbon W 2026",cls:"varlion"}]},{label:"👕 Ropa",brands:[{name:"Varlion",cls:"varlion"}]},{label:"👟 Calzado",brands:[{name:"Asics Gel-Padel",cls:"asics"}]},{label:"🥤 Nutrición",brands:[{name:"Powerade",cls:"generic"}]}]}];
 async function renderSponsors(){
   const list=document.getElementById('sponsors-list');
-  const initials=name=>(name||'').split(/\s+/).filter(Boolean).slice(0,2)
-    .map(x=>x[0]?.toUpperCase()||'').join('');
-  const fallback=p=>`<div class="sponsor-fallback"><div class="sponsor-fallback-initials">${initials(p.name)}</div><div class="sponsor-fallback-ball">🎾</div></div>`;
 
   const norm=s=>(s||'')
     .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
     .toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 
-  let ranking=[];
-  try{ ranking=await fetch('/api/ranking').then(r=>r.json()); }catch(e){}
+  const initials=name=>(name||'').split(/\s+/).filter(Boolean).slice(0,2)
+    .map(x=>x[0]?.toUpperCase()||'').join('');
 
-  // Find the matching ranking row for each sponsor.
-  // Ari Sánchez is matched to Ariana Sánchez Fallada by surname + first-name prefix.
-  const rankingRowFor=p=>{
-    const sp=norm(p.name).split(/\s+/);
-    const first=sp[0]||'', surname=sp[1]||'';
+  const fallback=name=>`
+    <div class="sponsor-fallback">
+      <div class="sponsor-fallback-initials">${initials(name)}</div>
+      <div class="sponsor-fallback-ball">🎾</div>
+    </div>`;
 
-    return ranking.find(r=>{
-      const rp=norm(r.name).split(/\s+/);
-      const rFirst=rp[0]||'', rSurname=rp[1]||'';
+  const sponsorMetaFor=player=>{
+    const rp=norm(player.name).split(/\s+/);
+    const rFirst=rp[0]||'', rSurname=rp[1]||'';
+
+    return SPONSORS_DATA.find(meta=>{
+      const sp=norm(meta.name).split(/\s+/);
+      const sFirst=sp[0]||'', sSurname=sp[1]||'';
+
       const firstMatches =
-        rFirst===first ||
-        rFirst.startsWith(first) ||
-        first.startsWith(rFirst);
-      return firstMatches && rSurname===surname;
+        rFirst===sFirst ||
+        rFirst.startsWith(sFirst) ||
+        sFirst.startsWith(rFirst);
+
+      return firstMatches && rSurname===sSurname;
     }) || null;
   };
 
-  const fullPhotoName=p=>{
-    const row=rankingRowFor(p);
-    return row?.name || p.name;
-  };
-
-  // Convert ranking pair "Triay / Brea" into just the partner surname.
-  const currentPartner=p=>{
-    const row=rankingRowFor(p);
-    const pair=(row?.pair||'').trim();
-    if(!pair)return 'Por confirmar';
-
-    const surnames=pair.split('/').map(x=>x.trim()).filter(Boolean);
-    if(surnames.length<2)return pair;
-
-    const ownSurname=(norm(p.name).split(/\s+/)[1]||'');
-    const partner=surnames.find(x=>norm(x)!==ownSurname);
-    return partner || surnames[1] || pair;
-  };
-
-  const setDirectPhoto=(p,i)=>{
+  const setRankingPhoto=(player,i)=>{
     const box=document.getElementById(`av-${i}`);
     if(!box)return;
 
     const img=new Image();
-    img.alt=p.name;
+    img.alt=player.name;
     img.decoding='async';
     img.onload=()=>box.classList.add('has-photo');
     img.onerror=()=>{
       box.classList.remove('has-photo');
-      box.innerHTML=fallback(p);
+      box.innerHTML=fallback(player.name);
     };
 
-    const photoName=fullPhotoName(p);
+    // EXACTLY the same source used by Ranking.
     box.replaceChildren(img);
-    img.src=`/api/sponsor-photo-image?name=${encodeURIComponent(photoName)}&v=66`;
+    img.src=`/api/player-photo-image?name=${encodeURIComponent(player.name)}&v=83`;
   };
 
-  list.innerHTML=SPONSORS_DATA.map((p,i)=>{
-    return `
-    <article class="sponsor-card" style="animation-delay:${i*.05}s">
-      <div class="sponsor-profile">
-        <div class="sponsor-avatar" id="av-${i}">${fallback(p)}</div>
-        <div class="sponsor-meta">
-          <div class="sponsor-name">${p.name}</div>
-          <div class="sponsor-identity"><span>${p.flag}</span><span>Jugadora profesional</span></div>
-          <div class="sponsor-rank-line">
-            <span class="sponsor-rank-icon">🏆</span>
-            <div class="sponsor-rank-copy"><small>Ranking FIP</small><strong>${p.rank.startsWith('#')?p.rank.slice(1)+' del mundo':p.rank}</strong></div>
-            <span class="sponsor-rank-badge">${p.rank}</span>
-          </div>
-          <div class="sponsor-note">${p.note}</div>
-        </div>
-      </div>
-      <div class="sponsor-products">
-        ${p.categories.map(cat=>`<div class="sponsor-category"><div class="category-label">${cat.label}</div><div class="brand-chips">${cat.brands.map(b=>`<span class="chip ${b.cls}">▸ ${b.name}</span>`).join('')}</div></div>`).join('')}
-      </div>
-    </article>`;
-  }).join('');
+  try{
+    const ranking=await fetch('/api/ranking').then(r=>r.json());
 
-  SPONSORS_DATA.forEach((p,i)=>setDirectPhoto(p,i));
+    list.innerHTML=ranking.map((player,i)=>{
+      const meta=sponsorMetaFor(player);
+      const categories=meta?.categories||[];
+      const note=meta?.note||'Información de sponsors y marcas todavía no cargada para esta jugadora.';
+
+      const productsHtml=categories.length
+        ? `<div class="sponsor-products">
+            ${categories.map(cat=>`
+              <div class="sponsor-category">
+                <div class="category-label">${cat.label}</div>
+                <div class="brand-chips">
+                  ${cat.brands.map(b=>`<span class="chip ${b.cls}">▸ ${b.name}</span>`).join('')}
+                </div>
+              </div>`).join('')}
+           </div>`
+        : `<div class="sponsor-products sponsor-products-empty">
+             <div class="sponsor-category">
+               <div class="category-label">Sponsors</div>
+               <div class="brand-chips">
+                 <span class="chip generic">Datos por completar</span>
+               </div>
+             </div>
+           </div>`;
+
+      return `
+      <article class="sponsor-card" style="animation-delay:${i*.04}s">
+        <div class="sponsor-profile">
+          <div class="sponsor-avatar" id="av-${i}">${fallback(player.name)}</div>
+
+          <div class="sponsor-meta">
+            <div class="sponsor-name">${player.name}</div>
+
+            <div class="sponsor-identity">
+              <span>${player.flag||'🌍'}</span>
+              <span>Jugadora profesional</span>
+            </div>
+
+            <div class="sponsor-rank-line">
+              <span class="sponsor-rank-icon">🏆</span>
+              <div class="sponsor-rank-copy">
+                <small>Ranking FIP</small>
+                <strong>${player.pos} del mundo</strong>
+              </div>
+              <span class="sponsor-rank-badge">#${player.pos}</span>
+            </div>
+
+            <div class="sponsor-note">${note}</div>
+          </div>
+        </div>
+
+        ${productsHtml}
+      </article>`;
+    }).join('');
+
+    ranking.forEach((player,i)=>setRankingPhoto(player,i));
+
+    console.log(
+      'Sponsors sincronizados con ranking:',
+      ranking.length,
+      'jugadoras'
+    );
+  }catch(e){
+    list.innerHTML='<div class="empty-msg">No se pudo cargar la información de sponsors</div>';
+  }
 }
 
 buildSlideshow();loadNews();loadEnJuego();loadRanking();loadTorneos();renderSponsors();
