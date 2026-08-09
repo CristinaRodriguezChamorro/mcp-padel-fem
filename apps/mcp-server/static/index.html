@@ -1095,13 +1095,24 @@ async function loadEnJuego(){
       const s=String(raw).trim().toLowerCase()
         .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
 
-      if(/\b(final|finals)\b/.test(s) && !/(semi|quarter|cuarto)/.test(s)) return 'Final';
+      // IMPORTANTE:
+      // "Octavos de final" contiene la palabra "final".
+      // Antes se comprobaba "final" primero y TODOS los octavos acababan
+      // agrupados visualmente bajo FINAL aunque el backend los enviara bien.
+      //
+      // Clasificamos de lo específico a lo general y Final sólo admite
+      // una etiqueta de final REAL.
       if(/semi|semifinal|round\s*4|\br4\b/.test(s)) return 'Semifinales';
       if(/quarter|cuartos?|round\s*8|\br8\b/.test(s)) return 'Cuartos de final';
       if(/octavos?|round\s*16|\br16\b|1\/8/.test(s)) return 'Octavos de final';
       if(/round\s*32|\br32\b|segunda ronda/.test(s)) return 'Segunda ronda';
       if(/round\s*64|\br64\b|primera ronda/.test(s)) return 'Primera ronda';
       if(/qual|clasific/.test(s)) return 'Clasificación';
+
+      // Final: sólo coincidencia exacta/canónica, nunca porque una etiqueta
+      // termine en "... de final".
+      if(/^(final|finals|gran final)$/.test(s)) return 'Final';
+
       return raw||'Partidos';
     };
 
@@ -1109,6 +1120,22 @@ async function loadEnJuego(){
     (d.results||[]).forEach(r=>{
       const round=canonicalRound(r.round);
       (groups[round]??=[]).push({...r,round});
+    });
+
+    // Cinturón de seguridad visual. El backend ya valida estas capacidades,
+    // pero la UI nunca debe mostrar 2 finales, 3 semis, 5 cuartos o 9 octavos.
+    const hardCaps={
+      'Final':1,
+      'Semifinales':2,
+      'Cuartos de final':4,
+      'Octavos de final':8
+    };
+    Object.entries(hardCaps).forEach(([round,cap])=>{
+      if((groups[round]||[]).length>cap){
+        console.error('[En juego] capacidad de ronda inválida',round,groups[round].length,'>',cap);
+        const overflow=groups[round].splice(cap);
+        (groups['Partidos']??=[]).push(...overflow.map(r=>({...r,round:'Partidos'})));
+      }
     });
 
     const roundOrder=[
