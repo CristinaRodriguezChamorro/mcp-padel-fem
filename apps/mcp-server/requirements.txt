@@ -7,3 +7,5 @@ groq
 aiohttp
 lxml
 httpx
+pypdf
+playwright
