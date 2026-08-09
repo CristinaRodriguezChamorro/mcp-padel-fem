@@ -52,21 +52,6 @@ GET /api/ranking
 GET /api/tournaments
 ```
 
-## Ejecutar el proyecto
-
-Instala las dependencias:
-
-```bash
-pip install -r apps/mcp-server/requirements.txt
-playwright install chromium
-```
-
-Arranca el servidor:
-
-```bash
-uvicorn apps.mcp-server.server:app --host 0.0.0.0 --port 8080
-```
-
 > En despliegue se recomienda utilizar el `Dockerfile` incluido en el proyecto.
 
 ## Objetivo
