@@ -1165,6 +1165,42 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                             return hits;
                           };
 
+                          const roundFromText = value => {
+                            const t = clean(value);
+                            if (/\bsemi[- ]?finals?\b/i.test(t)) return 'Semifinales';
+                            if (/\bquarter[- ]?finals?\b/i.test(t)) return 'Cuartos de final';
+                            if (/\bround of 16\b|\boctav/i.test(t)) return 'Octavos de final';
+                            if (/\bsecond round\b|\b2nd round\b/i.test(t)) return 'Segunda ronda';
+                            if (/\bfirst round\b|\b1st round\b/i.test(t)) return 'Primera ronda';
+                            if (/\bqual/i.test(t)) return 'Clasificación';
+                            // FINAL must be checked after SEMIFINAL.
+                            if (/\bfinal\b/i.test(t)) return 'Final';
+                            return '';
+                          };
+
+                          const nearestRound = el => {
+                            // A) Small parent containers often include WOMEN + SEMIFINALS/FINAL.
+                            let p = el;
+                            for (let depth=0; depth<5 && p; depth++, p=p.parentElement) {
+                              const txt = clean(p.innerText || p.textContent || '');
+                              if (txt.length <= 700) {
+                                const r = roundFromText(txt);
+                                if (r) return r;
+                              }
+                            }
+
+                            // B) Scan backwards in DOM order for the nearest short round heading.
+                            const idx = all.indexOf(el);
+                            for (let j=idx-1; j>=0 && j>=idx-90; j--) {
+                              const txt = clean(all[j].innerText || all[j].textContent || '');
+                              if (!txt || txt.length > 120) continue;
+                              const r = roundFromText(txt);
+                              if (r) return r;
+                            }
+
+                            return '';
+                          };
+
                           const candidates = [];
 
                           for (const el of all) {
@@ -1190,7 +1226,8 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                               tag,
                               text,
                               players: unique,
-                              scores
+                              scores,
+                              roundHint: nearestRound(el)
                             });
                           }
 
@@ -1218,7 +1255,8 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                               text: c.text.slice(0,1600),
                               players: ordered,
                               scores: c.scores,
-                              aliases: c.players.map(x=>x.alias)
+                              aliases: c.players.map(x=>x.alias),
+                              roundHint: c.roundHint || ''
                             });
                           }
 
@@ -1764,41 +1802,23 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
                     pass
         return ""
 
-    def infer_round(context: str, match_date: str) -> str:
-        low = context.lower()
+    def infer_round(context: str, match_date: str = "") -> str:
+        """
+        Production rule: rounds are only assigned from explicit FIP text/DOM.
+
+        We intentionally do NOT infer a round from today's date or from the number
+        of matches. A missing label is safer as "Partidos" than a wrong semifinal.
+        """
+        low = (context or "").lower()
         if re.search(r"semi[- ]?final", low): return "Semifinales"
         if re.search(r"quarter[- ]?final", low): return "Cuartos de final"
         if re.search(r"round of 16|octav", low): return "Octavos de final"
-        if re.search(r"\bfinal\b", low): return "Final"
-        if re.search(r"\bqual|clasif", low): return "Clasificación"
         if re.search(r"2nd round|second round|segunda", low): return "Segunda ronda"
         if re.search(r"1st round|first round|primera", low): return "Primera ronda"
-
-        # London P1 / standard Premier Padel end-of-week cadence.
-        raw_dates = str(event.get("dates", "") or "")
-        m = re.search(
-            r"(\d{1,2})\s*[-–]\s*(\d{1,2})\s+([A-Za-z]{3,12})(?:\s+(20\d{2}))?",
-            raw_dates, re.I
-        )
-        if m and match_date:
-            end_day = int(m.group(2))
-            mo = month_map.get(m.group(3).lower()[:3])
-            y = int(m.group(4) or date.today().year)
-            if mo:
-                try:
-                    end_dt = date(y, mo, end_day)
-                    md = date.fromisoformat(match_date)
-                    delta = (end_dt - md).days
-                    if delta == 0: return "Final"
-                    if delta == 1: return "Semifinales"
-                    if delta == 2: return "Cuartos de final"
-                    if delta == 3: return "Octavos de final"
-                    if delta in {4,5}: return "Primera ronda"
-                    if delta >= 6: return "Clasificación"
-                except Exception:
-                    pass
-
+        if re.search(r"\bqual|clasif", low): return "Clasificación"
+        if re.search(r"\bfinal\b", low): return "Final"
         return "Partidos"
+
 
     parsed = []
 
@@ -1869,11 +1889,17 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
             except Exception:
                 pass
 
-        context = str(block.get("text","")) + " " + str(block.get("tag",""))
-        rnd = infer_round(context, match_date)
+        explicit_round = str(block.get("roundHint", "") or "").strip()
+        context = (
+            explicit_round + " " +
+            str(block.get("text","")) + " " +
+            str(block.get("tag",""))
+        )
+        rnd = explicit_round or infer_round(context, match_date)
 
         parsed.append({
             "round": rnd,
+            "round_source": "fip-dom" if explicit_round else ("fip-text" if rnd != "Partidos" else "unknown"),
             "winner": winner,
             "loser": loser,
             "score": "  ".join(f"{a}-{b}" for a,b in display),
@@ -1894,6 +1920,8 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         seen.add(key)
         valid.append(item)
 
+    valid = _validate_explicit_rounds(valid)
+
     valid.sort(
         key=lambda x: (
             x.get("date",""),
@@ -1906,7 +1934,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     _LIVE_DEBUG_STATE.update({
         "browser": capture_diag,
-        "parser": "full-draw-proximity-v39",
+        "parser": "full-draw-explicit-round-v82",
         "raw_blocks": len(blocks),
         "parsed_results": len(parsed),
         "valid_results": len(valid),
@@ -1940,6 +1968,63 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
     return valid
 
 
+def _round_pair_signature(pair: str) -> tuple[str, ...]:
+    players = [x.strip() for x in re.split(r"\s*/\s*", pair or "") if x.strip()]
+    sig = []
+    for player in players:
+        parts = _norm_person_name(player).split()
+        if len(parts) >= 2:
+            sig.append(parts[1])
+        elif parts:
+            sig.append(parts[0])
+    return tuple(sorted(sig))
+
+
+def _validate_explicit_rounds(results: list) -> list:
+    """
+    Production guard for impossible knockout groups.
+
+    A pair can play at most once in Final/SF/QF/R16. If two results would place
+    the same pair twice in the same round, the conflicting result is moved to
+    "Partidos" instead of publishing an impossible bracket.
+    """
+    knockout = {"Final", "Semifinales", "Cuartos de final", "Octavos de final"}
+    seen_by_round = {rnd: set() for rnd in knockout}
+    out = []
+
+    for item in results or []:
+        row = dict(item)
+        rnd = row.get("round") or "Partidos"
+
+        if rnd not in knockout:
+            out.append(row)
+            continue
+
+        w = _round_pair_signature(str(row.get("winner","")))
+        l = _round_pair_signature(str(row.get("loser","")))
+        conflict = (
+            (w and w in seen_by_round[rnd]) or
+            (l and l in seen_by_round[rnd])
+        )
+
+        if conflict:
+            print(
+                "  ROUND CONFLICT:",
+                f"round={rnd}",
+                f"{row.get('winner','')} vs {row.get('loser','')}",
+                "-> movido a Partidos",
+            )
+            row["round"] = "Partidos"
+            row["round_source"] = "conflict-guard"
+        else:
+            if w: seen_by_round[rnd].add(w)
+            if l: seen_by_round[rnd].add(l)
+
+        out.append(row)
+
+    return out
+
+
 def _normalize_scoreboard_result(item: dict) -> dict | None:
     """Normaliza un partido finalizado para el cuadro visual de En juego."""
     if not isinstance(item, dict):
@@ -1964,6 +2049,7 @@ def _normalize_scoreboard_result(item: dict) -> dict | None:
         "score": "  ".join(f"{a}–{b}" for a, b in sets[:3]),
         "date": str(item.get("date", "") or ""),
         "status": "finalizado",
+        "round_source": str(item.get("round_source", "") or ""),
     }
 
 
@@ -3269,8 +3355,9 @@ async def get_tournament_now(gender: str = "female") -> dict:
         print(f"  live results error: {results}")
         results = []
 
-    # Label rounds using only event stage; no OOP dependency.
-    results = _annotate_result_rounds(results or [], None, event)
+    # IMPORTANT: rounds already come from explicit FIP DOM/text.
+    # Never reconstruct them from match counts or today's tournament stage.
+    results = _validate_explicit_rounds(results or [])
 
     normalized_results = []
     for result in (results or []):
