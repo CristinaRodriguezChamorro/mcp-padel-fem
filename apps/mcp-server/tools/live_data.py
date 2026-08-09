@@ -1415,7 +1415,10 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
         "snapshots": 0,
         "snapshot_chars": 0,
         "state_tags": [],
-        "source_mode": "html-snapshots-first-v112",
+        "ajax_responses": 0,
+        "ajax_bytes": 0,
+        "ajax_urls": [],
+        "source_mode": "snapshots-plus-ajax-v116",
     }
 
     if async_playwright is None:
@@ -1427,6 +1430,8 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
 
     browser = None
     snapshots = []
+    ajax_payloads = []
+    response_tasks = []
 
     try:
         async with async_playwright() as p:
@@ -1440,6 +1445,67 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                 viewport={"width": 1800, "height": 2600},
                 locale="en-US",
             )
+
+            async def _capture_dynamic_response(resp):
+                """
+                Captura limpia: no mira género ni ranking.
+                Guarda respuestas dinámicas que FIP usa para pintar Resultados.
+                """
+                try:
+                    req = resp.request
+                    resource_type = str(req.resource_type or "").lower()
+                    method = str(req.method or "GET").upper()
+                    rurl = str(resp.url or "")
+
+                    headers = await resp.all_headers()
+                    ctype = str(headers.get("content-type", "") or "").lower()
+
+                    # Nos interesan especialmente XHR/fetch y WordPress admin-ajax.
+                    interesting = (
+                        resource_type in {"xhr", "fetch"}
+                        or "admin-ajax" in rurl.lower()
+                        or "ajax" in rurl.lower()
+                    )
+                    if not interesting:
+                        return
+
+                    body = await resp.text()
+                    if not body or len(body) < 10:
+                        return
+
+                    post_data = ""
+                    try:
+                        post_data = str(req.post_data or "")
+                    except Exception:
+                        pass
+
+                    ajax_payloads.append({
+                        "url": rurl,
+                        "method": method,
+                        "resource_type": resource_type,
+                        "content_type": ctype,
+                        "post_data": post_data[:12000],
+                        "body": body[:1200000],
+                    })
+
+                    diag["ajax_responses"] += 1
+                    diag["ajax_bytes"] += len(body)
+                    if len(diag["ajax_urls"]) < 40:
+                        diag["ajax_urls"].append({
+                            "method": method,
+                            "url": rurl,
+                            "post": post_data[:500],
+                        })
+                except Exception:
+                    pass
+
+            def _on_response(resp):
+                try:
+                    response_tasks.append(asyncio.create_task(_capture_dynamic_response(resp)))
+                except Exception:
+                    pass
+
+            page.on("response", _on_response)
             await page.goto(url, wait_until="domcontentloaded", timeout=45000)
             await page.wait_for_timeout(1600)
 
@@ -1563,6 +1629,10 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                 except Exception:
                     pass
 
+            await page.wait_for_timeout(1200)
+            if response_tasks:
+                await asyncio.gather(*response_tasks, return_exceptions=True)
+
             await browser.close()
             browser=None
 
@@ -1587,6 +1657,22 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
 
     diag["snapshots"]=len(unique)
 
+    # Dedupe AJAX responses.
+    unique_ajax=[]
+    seen_ajax=set()
+    for payload in ajax_payloads:
+        key=(
+            payload.get("url",""),
+            payload.get("post_data",""),
+            str(payload.get("body",""))[:1200],
+        )
+        if key in seen_ajax:
+            continue
+        seen_ajax.add(key)
+        unique_ajax.append(payload)
+
+    diag["ajax_responses"]=len(unique_ajax)
+
     print(
         "  FIP SNAPSHOTS:",
         f"states={diag['states_scanned']}",
@@ -1594,9 +1680,29 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
         f"chars={diag['snapshot_chars']}",
         f"tags={diag.get('state_tags',[])[:30]}",
     )
+    print(
+        "  FIP AJAX:",
+        f"responses={diag['ajax_responses']}",
+        f"bytes={diag['ajax_bytes']}",
+        f"urls={diag.get('ajax_urls',[])[:12]}",
+    )
+    if unique_ajax:
+        print(
+            "  FIP AJAX payload summary:",
+            [
+                {
+                    "url": str(x.get("url",""))[:180],
+                    "method": x.get("method",""),
+                    "post": str(x.get("post_data",""))[:300],
+                    "chars": len(str(x.get("body","") or "")),
+                }
+                for x in unique_ajax[:20]
+            ],
+        )
 
     return json.dumps({
         "snapshots": unique,
+        "ajax_payloads": unique_ajax,
         "diag": diag,
     }, ensure_ascii=False), diag
 
@@ -1845,9 +1951,10 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         source_obj = {}
 
     snapshots = list(source_obj.get("snapshots", []) or [])
+    ajax_payloads = list(source_obj.get("ajax_payloads", []) or [])
     blocks = []
 
-    if not snapshots:
+    if not snapshots and not ajax_payloads:
         for attempt in range(1, 3):
             print(f"  live results: v39 devolvió 0 bloques; reintento {attempt}/2")
             await asyncio.sleep(1.2 * attempt)
@@ -1855,18 +1962,23 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
                 retry_source, retry_diag = await _browser_fip_womens_results_text(event)
                 retry_obj = json.loads(retry_source) if retry_source else {}
                 retry_snapshots = retry_obj.get("snapshots", []) or []
+                retry_ajax = retry_obj.get("ajax_payloads", []) or []
             except Exception as exc:
                 print(f"  live retry {attempt} error: {type(exc).__name__}: {exc}")
                 retry_blocks = []
 
-            if retry_snapshots:
+            if retry_snapshots or retry_ajax:
                 snapshots = retry_snapshots
+                ajax_payloads = retry_ajax
                 capture_diag = retry_diag
-                print(f"  live retry {attempt}: recuperados {len(snapshots)} snapshots")
+                print(
+                    f"  live retry {attempt}: "
+                    f"snapshots={len(snapshots)} ajax={len(ajax_payloads)}"
+                )
                 break
 
-    if not snapshots:
-        print("  live results: sin snapshots; activando flat fallback")
+    if not snapshots and not ajax_payloads:
+        print("  live results: sin snapshots ni ajax; activando flat fallback")
         blocks = await _browser_fip_flat_results_fallback(event)
 
     # EN JUEGO: la frontera de género es el ranking femenino de 100 jugadoras.
@@ -2137,7 +2249,193 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
         return out
 
+    def _ajax_blocks_after_get(payloads: list[dict]) -> list[dict]:
+        """
+        Parsear respuestas dinámicas YA descargadas.
+        El GET ya terminó; aquí sí se usa ranking100.
+
+        Busca contenedores mínimos cuyo texto/hojas contengan exactamente
+        cuatro jugadoras distintas + marcador.
+        """
+        out=[]
+        seen=set()
+
+        def resolve_leaf(raw: str) -> str:
+            raw = re.sub(r"\s+", " ", str(raw or "")).strip()
+            # A player leaf must look like a human name. Do not feed scores,
+            # dates, buttons or short UI labels into ranking matching.
+            if (
+                not raw
+                or len(raw) < 5
+                or len(raw) > 100
+                or re.fullmatch(r"[\d\W_]+", raw)
+                or len(re.findall(r"[A-Za-zÀ-ÿ]+", raw)) < 2
+            ):
+                return ""
+
+            norm_raw=_norm_person_name(raw)
+            if not norm_raw:
+                return ""
+
+            best=None
+            for norm_name,display in ranking_display.items():
+                if not norm_name:
+                    continue
+                if (
+                    norm_raw==norm_name
+                    or norm_raw in norm_name
+                    or norm_name in norm_raw
+                ):
+                    score=len(norm_name)
+                    if best is None or score>best[0]:
+                        best=(score,display)
+
+            if best:
+                return best[1]
+
+            raw_tokens=set(norm_raw.split())
+            for norm_name,display in ranking_display.items():
+                rank_tokens=set(norm_name.split())
+                overlap=raw_tokens & rank_tokens
+                # For a partial-name fallback require at least two shared
+                # alphabetic tokens. One common surname is not enough.
+                useful=[t for t in overlap if len(t)>=3]
+                if len(useful) >= 2:
+                    score=sum(len(t) for t in useful)
+                    if best is None or score>best[0]:
+                        best=(score,display)
+
+            return best[1] if best else ""
+
+        def score_leaves(el):
+            vals=[]
+            for node in el.find_all(True):
+                if node.find(True):
+                    continue
+                raw=re.sub(r"\s+"," ",node.get_text(" ",strip=True)).strip()
+                if re.fullmatch(r"\d{1,2}",raw):
+                    n=int(raw)
+                    if 0<=n<=20:
+                        vals.append(n)
+            return vals[:12]
+
+        for payload in payloads:
+            body=str(payload.get("body","") or "")
+            if not body:
+                continue
+
+            meta = " ".join([
+                str(payload.get("url","") or ""),
+                str(payload.get("post_data","") or ""),
+                str(payload.get("content_type","") or ""),
+            ]).lower()
+
+            # Capture remains clean/unfiltered. Parsing, however, should only
+            # inspect responses plausibly related to draw/results/events.
+            # This avoids analytics/search/plugin AJAX being interpreted as matches.
+            resultish = any(token in meta for token in (
+                "draw", "result", "event", "match", "tournament",
+                "ajax_handle_draw", "admin-ajax"
+            ))
+            if not resultish:
+                continue
+
+            # JSON responses often contain HTML fragments nested in fields.
+            fragments=[]
+            try:
+                obj=json.loads(body)
+
+                def walk(x):
+                    if isinstance(x,dict):
+                        for v in x.values():
+                            walk(v)
+                    elif isinstance(x,list):
+                        for v in x:
+                            walk(v)
+                    elif isinstance(x,str) and len(x)>=20:
+                        fragments.append(x)
+
+                walk(obj)
+            except Exception:
+                fragments=[body]
+
+            for fragment in fragments:
+                if "<" not in fragment or ">" not in fragment:
+                    continue
+
+                soup=BeautifulSoup(fragment,"html.parser")
+                candidates=[]
+
+                for el in soup.find_all(True):
+                    # Resolve players from LEAF text only, not whole container text.
+                    resolved=[]
+                    seen_players=set()
+
+                    for node in el.find_all(True):
+                        if node.find(True):
+                            continue
+                        raw=re.sub(r"\s+"," ",node.get_text(" ",strip=True)).strip()
+                        if not raw or len(raw)>100:
+                            continue
+
+                        player=resolve_leaf(raw)
+                        if not player:
+                            continue
+
+                        key=player.casefold()
+                        if key not in seen_players:
+                            seen_players.add(key)
+                            resolved.append(player)
+
+                    if len(resolved)!=4:
+                        continue
+
+                    scores=score_leaves(el)
+                    if len(scores)<4:
+                        continue
+
+                    candidates.append((el,resolved,scores))
+
+                # Minimal container = one match.
+                minimal=[]
+                for el,players,scores in candidates:
+                    if any(
+                        other is not el and other in el.descendants
+                        for other,_,_ in candidates
+                    ):
+                        continue
+                    minimal.append((el,players,scores))
+
+                for el,players,scores in minimal:
+                    text=re.sub(r"\s+"," ",el.get_text(" ",strip=True)).strip()
+                    key=(tuple(x.casefold() for x in players),tuple(scores))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+
+                    out.append({
+                        "tag":"ajax:"+str(payload.get("post_data",""))[:500],
+                        "text":text[:3000],
+                        "players":players,
+                        "scores":scores,
+                        "pairing_mode":"ajax-postfilter",
+                        "source":"ajax",
+                    })
+
+        return out
+
     # GET terminado. AHORA sí filtramos contra ranking100.
+    ajax_blocks=_ajax_blocks_after_get(ajax_payloads)
+    if ajax_blocks:
+        print(f"  AJAX parse after GET: {len(ajax_blocks)} partidos candidatos")
+        for preview in ajax_blocks[:12]:
+            print(
+                "  ajax card:",
+                f"{' / '.join(preview.get('players',[]))}",
+                f"scores={preview.get('scores',[])}",
+            )
+        blocks.extend(ajax_blocks)
+
     snapshot_blocks=_snapshot_blocks_after_get(snapshots)
     if snapshot_blocks:
         print(f"  snapshot parse after GET: {len(snapshot_blocks)} partidos reales candidatos")
@@ -2473,7 +2771,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     _LIVE_DEBUG_STATE.update({
         "browser": capture_diag,
-        "parser": "player-links-snapshot-v115",
+        "parser": "ajax-plus-snapshot-v117-reviewed",
         "raw_blocks": len(blocks),
         "raw_parsed_before_gender": raw_parsed_count,
         "female_after_filter": female_filtered_count,
@@ -2490,8 +2788,9 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     print(
         "  live results filter:",
-        f"snapshot_blocks={len(blocks)}",
+        f"blocks={len(blocks)}",
         f"snapshots={len(snapshots)}",
+        f"ajax_payloads={len(ajax_payloads)}",
         f"raw_parsed={raw_parsed_count}",
         f"matches_after_ranking100={female_filtered_count}",
         f"ranking100={len(ranking_full)}",
