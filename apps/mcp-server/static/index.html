@@ -900,6 +900,14 @@ nav {
 .sq-source a{color:#b879dc;text-decoration:none}.sq-source a:hover{text-decoration:underline}
 @media(max-width:700px){.sq-grid{grid-template-columns:1fr}.sq-card-featured{grid-column:auto}.sq-intro{padding:20px 18px}.sq-intro-title{font-size:1.35em}}
 
+
+/* v128: ¿Sabías que? simplificado */
+#sabiasque .section-head{margin-bottom:18px}
+.sq-grid[data-filter="leyendas"] .sq-card:last-child:nth-child(odd){grid-column:1/-1}
+@media(max-width:700px){
+  .sq-grid[data-filter="leyendas"] .sq-card:last-child:nth-child(odd){grid-column:auto}
+}
+
 </style>
 </head>
 <body>
@@ -970,19 +978,11 @@ nav {
   <div id="sabiasque" class="section">
     <div class="section-head">
       <div class="section-title">¿Sabías que…? 💡</div>
-      <div class="section-sub">Reglas, historia y leyendas del pádel femenino</div>
-    </div>
-
-    <div class="sq-intro">
-      <div class="sq-intro-kicker">Cultura pádel</div>
-      <div class="sq-intro-title">Más allá del resultado</div>
-      <div class="sq-intro-text">Reglas oficiales, curiosidades históricas y protagonistas que han marcado el pádel femenino.</div>
-      <div class="sq-intro-note">Esta pestaña usa contenido guardado en la propia web y no hace llamadas nuevas a FIP al abrirse.</div>
+      <div class="section-sub">Reglas, historia y leyendas del pádel femenino · nuevas curiosidades cada día</div>
     </div>
 
     <div class="sq-filterbar">
-      <button class="sq-filter active" onclick="filterSabiasQue('all',this)">Todo</button>
-      <button class="sq-filter" onclick="filterSabiasQue('reglas',this)">Reglas</button>
+      <button class="sq-filter active" onclick="filterSabiasQue('reglas',this)">Reglas</button>
       <button class="sq-filter" onclick="filterSabiasQue('historia',this)">Historia</button>
       <button class="sq-filter" onclick="filterSabiasQue('leyendas',this)">Leyendas</button>
     </div>
@@ -994,21 +994,92 @@ nav {
 <script>
 
 const SABIAS_QUE_DATA=[
-  {type:"reglas",icon:"📘",year:"Reglamento",featured:true,title:"Las paredes forman parte del juego",body:"Tras botar en el campo correcto, la pelota puede tocar las paredes antes de ser devuelta. Esa interacción con cristal y pared es una de las grandes señas de identidad del pádel.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
-  {type:"reglas",icon:"🚪",year:"Reglamento",title:"Una pelota puede jugarse desde fuera de la pista",body:"Cuando la pista lo permite, una jugadora puede salir por la puerta para intentar devolver una pelota que ha botado correctamente y ha salido del recinto.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
-  {type:"reglas",icon:"🎾",year:"Reglamento",title:"El saque se ejecuta por debajo de la cintura",body:"El servicio se realiza tras botar la pelota y el impacto debe producirse a la altura de la cintura o por debajo.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
-  {type:"historia",icon:"🕰️",year:"Desde 1990",featured:true,title:"La historia del número 1 femenino se remonta décadas atrás",body:"La FIP mantiene un historial de las líderes del ranking femenino que permite seguir la evolución de las grandes generaciones del pádel.",source:"FIP · Ranking History",url:"https://www.padelfip.com/es/historial-de-clasificacion/"},
-  {type:"historia",icon:"👑",year:"Historia",title:"Carolina Navarro fue una referencia durante años",body:"El historial del ranking sitúa a Carolina Navarro repetidamente entre las grandes protagonistas de la élite femenina en distintas temporadas.",source:"FIP · Ranking History",url:"https://www.padelfip.com/es/historial-de-clasificacion/"},
-  {type:"leyendas",icon:"⭐",year:"Leyenda",title:"Carolina Navarro cerró su carrera profesional en Málaga",body:"La FIP presentó el Málaga P1 de 2025 como uno de los momentos de despedida de una de las grandes leyendas del pádel femenino.",source:"FIP · Málaga P1 2025",url:"https://www.padelfip.com/es/2025/07/dia2-navarro-a-octavos-la-leyenda-no-quiere-decir-adios/"},
-  {type:"historia",icon:"📊",year:"2026",title:"La FIP amplió sus estadísticas históricas",body:"En 2026 la web federativa incorporó nuevas herramientas para consultar títulos, finales e historia de los circuitos profesionales.",source:"FIP · Estadísticas 2026",url:"https://www.padelfip.com/es/2026/01/numeros-estadisticas-historia-de-los-circuitos-y-rankings-todas-las-nuevas-funcionalidades-del-sitio-web-de-la-fip-para-2026/"}
+  // ── REGLAS ───────────────────────────────────────────────
+  {type:"reglas",icon:"🎾",year:"Saque",title:"El saque comienza desde el lado derecho",body:"Al inicio de cada juego, el primer servicio se realiza desde el lado derecho y después se alterna de lado en cada punto.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
+  {type:"reglas",icon:"📘",year:"Paredes",title:"Las paredes forman parte del juego",body:"Después de botar correctamente en el campo contrario, la pelota puede tocar paredes o cristales y continuar en juego.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
+  {type:"reglas",icon:"🚪",year:"Salida",title:"La pelota puede devolverse desde fuera de la pista",body:"En pistas habilitadas para juego exterior, una jugadora puede salir por la puerta para intentar devolver una pelota que salió del recinto tras un bote válido.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
+  {type:"reglas",icon:"⬇️",year:"Servicio",title:"El saque se golpea a la altura de la cintura o por debajo",body:"La pelota se deja botar detrás de la línea de saque y el golpeo debe hacerse a la altura de la cintura o por debajo.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
+  {type:"reglas",icon:"✌️",year:"Servicio",title:"Hay dos intentos de saque",body:"Un primer servicio incorrecto no supone perder automáticamente el punto: existe un segundo intento de saque.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
+  {type:"reglas",icon:"🕸️",year:"Red",title:"Tocar la red durante el punto hace perder el punto",body:"Mientras la pelota está en juego, una jugadora, su pala o cualquier objeto que lleve no puede tocar la red ni sus postes.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
+  {type:"reglas",icon:"↔️",year:"Cambio",title:"Las parejas cambian de lado",body:"Las parejas cambian de lado según la secuencia establecida por el reglamento, de modo que las condiciones de juego se reparten entre ambas parejas.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
+  {type:"reglas",icon:"💥",year:"Punto",title:"La pelota puede salir de la pista tras botar",body:"Si la pelota bota correctamente en el campo rival y después sale del recinto, el punto continúa si existe posibilidad reglamentaria de devolución exterior.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
+  {type:"reglas",icon:"🧱",year:"Rebote",title:"No todo rebote en pared es válido",body:"La pelota debe botar primero en el suelo del campo contrario antes de tocar una pared rival para que el golpe sea válido.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
+  {type:"reglas",icon:"🟨",year:"Pala",title:"La pala también forma parte del juego reglamentado",body:"El reglamento establece requisitos sobre la pala y el cordón de seguridad, que debe utilizarse durante el juego.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
+  {type:"reglas",icon:"⏱️",year:"Ritmo",title:"El tiempo entre puntos también está regulado",body:"El reglamento fija tiempos para mantener la continuidad del juego y evitar interrupciones excesivas.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
+  {type:"reglas",icon:"🏁",year:"Sets",title:"Los partidos se estructuran por sets y juegos",body:"La competición profesional se organiza por juegos y sets, con sistemas de desempate previstos por la normativa de cada competición.",source:"FIP · Rules of Padel",url:"https://www.padelfip.com/documents/"},
+
+  // ── HISTORIA ─────────────────────────────────────────────
+  {type:"historia",icon:"🕰️",year:"1990",title:"La historia del número 1 femenino se remonta a 1990",body:"La FIP conserva el historial de las líderes del ranking femenino y permite recorrer varias generaciones de referentes.",source:"FIP · Ranking History",url:"https://www.padelfip.com/es/historial-de-clasificacion/"},
+  {type:"historia",icon:"🌍",year:"Expansión",title:"El pádel pasó de un fenómeno hispano-argentino a un deporte global",body:"España y Argentina fueron durante años los grandes centros competitivos, pero la expansión internacional ha multiplicado países, torneos y jugadoras.",source:"FIP · Historia internacional",url:"https://www.padelfip.com/2024/10/from-argentina-and-spain-to-global-fame-the-padel-passion-that-conquered-the-world/"},
+  {type:"historia",icon:"📊",year:"2026",title:"La FIP amplió sus estadísticas históricas",body:"La federación incorporó herramientas para consultar finales, títulos, números 1 y otros datos históricos de los circuitos profesionales.",source:"FIP · Estadísticas 2026",url:"https://www.padelfip.com/es/2026/01/numeros-estadisticas-historia-de-los-circuitos-y-rankings-todas-las-nuevas-funcionalidades-del-sitio-web-de-la-fip-para-2026/"},
+  {type:"historia",icon:"🏆",year:"Circuito",title:"Las estadísticas permiten comparar distintas épocas",body:"Los historiales de títulos, finales y número 1 ayudan a situar a las parejas actuales dentro de una historia profesional mucho más larga.",source:"FIP · Estadísticas históricas",url:"https://www.padelfip.com/es/2026/01/numeros-estadisticas-historia-de-los-circuitos-y-rankings-todas-las-nuevas-funcionalidades-del-sitio-web-de-la-fip-para-2026/"},
+  {type:"historia",icon:"📚",year:"Archivo",title:"El ranking histórico cuenta la evolución del pádel femenino",body:"El archivo permite ver cambios de dominio, parejas dominantes y la aparición de nuevas generaciones a lo largo del tiempo.",source:"FIP · Ranking History",url:"https://www.padelfip.com/es/historial-de-clasificacion/"},
+  {type:"historia",icon:"🇪🇸",year:"España",title:"España se convirtió en uno de los grandes centros del pádel profesional",body:"El crecimiento de clubes, torneos y jugadoras consolidó a España como una de las grandes referencias competitivas del deporte.",source:"FIP · Historia internacional",url:"https://www.padelfip.com/2024/10/from-argentina-and-spain-to-global-fame-the-padel-passion-that-conquered-the-world/"},
+  {type:"historia",icon:"🇦🇷",year:"Argentina",title:"Argentina fue clave en la consolidación competitiva del pádel",body:"Muchas de las primeras grandes figuras profesionales surgieron de Argentina y marcaron varias generaciones del circuito.",source:"FIP · Historia internacional",url:"https://www.padelfip.com/2024/10/from-argentina-and-spain-to-global-fame-the-padel-passion-that-conquered-the-world/"},
+  {type:"historia",icon:"🌐",year:"Global",title:"El circuito actual reúne cada vez más nacionalidades",body:"La internacionalización del calendario ha abierto el circuito a nuevas sedes y a una presencia creciente de jugadoras de distintos países.",source:"FIP · Circuitos internacionales",url:"https://www.padelfip.com/"},
+  {type:"historia",icon:"📈",year:"Ranking",title:"El ranking cuenta más que quién ocupa hoy el número 1",body:"Mirar su evolución histórica permite entender periodos de dominio, cambios de pareja y relevos generacionales.",source:"FIP · Ranking History",url:"https://www.padelfip.com/es/historial-de-clasificacion/"},
+  {type:"historia",icon:"🎟️",year:"Circuito",title:"La estructura profesional del pádel ha cambiado con los años",body:"Formatos, calendarios y competiciones han evolucionado a medida que el deporte se profesionalizaba e internacionalizaba.",source:"FIP · Historia del circuito",url:"https://www.padelfip.com/"},
+  {type:"historia",icon:"🧭",year:"Evolución",title:"El pádel femenino actual es mucho más internacional",body:"El historial reciente muestra una competición cada vez menos concentrada geográficamente y con mayor diversidad de jugadoras.",source:"FIP · Rankings",url:"https://www.padelfip.com/ranking-female/"},
+  {type:"historia",icon:"🗂️",year:"Datos",title:"La memoria del circuito también se construye con estadísticas",body:"Finales, títulos y posiciones de ranking permiten reconstruir el peso competitivo de cada generación.",source:"FIP · Estadísticas históricas",url:"https://www.padelfip.com/es/2026/01/numeros-estadisticas-historia-de-los-circuitos-y-rankings-todas-las-nuevas-funcionalidades-del-sitio-web-de-la-fip-para-2026/"},
+
+  // ── LEYENDAS ─────────────────────────────────────────────
+  {type:"leyendas",icon:"👑",year:"Carolina Navarro",title:"Una de las grandes referencias históricas del pádel femenino",body:"Carolina Navarro aparece de forma recurrente en la historia competitiva del pádel femenino y prolongó su carrera profesional durante décadas.",source:"FIP · Historia y competición",url:"https://www.padelfip.com/es/historial-de-clasificacion/"},
+  {type:"leyendas",icon:"⭐",year:"Carolina Navarro",title:"Málaga fue escenario de su despedida profesional",body:"En 2025, la FIP siguió su último torneo profesional en Málaga y la presentó como una de las grandes leyendas del deporte.",source:"FIP · Málaga P1 2025",url:"https://www.padelfip.com/es/2025/07/dia2-navarro-a-octavos-la-leyenda-no-quiere-decir-adios/"},
+  {type:"leyendas",icon:"🏆",year:"Icíar Montes",title:"Un nombre clave para entender las primeras grandes generaciones",body:"Icíar Montes forma parte de las jugadoras que aparecen en el historial de la élite femenina y conecta el pádel actual con etapas anteriores.",source:"FIP · Ranking History",url:"https://www.padelfip.com/es/historial-de-clasificacion/"},
+  {type:"leyendas",icon:"💜",year:"Cecilia Reiter",title:"Argentina también dejó una huella enorme en la élite femenina",body:"Cecilia Reiter pertenece a la generación de grandes jugadoras argentinas que protagonizaron la historia del circuito profesional femenino.",source:"FIP · Ranking History",url:"https://www.padelfip.com/es/historial-de-clasificacion/"},
+  {type:"leyendas",icon:"🌟",year:"Alejandra Salazar",title:"Una carrera asociada a distintas etapas de la élite",body:"Alejandra Salazar aparece en distintos periodos del ranking histórico y forma parte de la transición entre generaciones del pádel profesional.",source:"FIP · Ranking History",url:"https://www.padelfip.com/es/historial-de-clasificacion/"},
+  {type:"leyendas",icon:"🔥",year:"Mapi Sánchez Alayeto",title:"Las gemelas Sánchez Alayeto marcaron una época",body:"Mapi y Majo Sánchez Alayeto forman parte de las parejas más reconocibles de una etapa clave del pádel femenino profesional.",source:"FIP · Ranking History",url:"https://www.padelfip.com/es/historial-de-clasificacion/"},
+  {type:"leyendas",icon:"🔥",year:"Majo Sánchez Alayeto",title:"Una trayectoria inseparable de una pareja histórica",body:"Majo Sánchez Alayeto, junto a Mapi, protagonizó años de máxima competitividad dentro de la élite femenina.",source:"FIP · Ranking History",url:"https://www.padelfip.com/es/historial-de-clasificacion/"},
+  {type:"leyendas",icon:"🇦🇷",year:"Paula Eyheraguibel",title:"Una de las figuras argentinas de referencia en etapas anteriores",body:"Su nombre forma parte del recorrido histórico del pádel femenino argentino y del desarrollo profesional del circuito.",source:"FIP · Ranking History",url:"https://www.padelfip.com/es/historial-de-clasificacion/"},
+  {type:"leyendas",icon:"🎖️",year:"Historia",title:"Las grandes jugadoras también explican cómo cambió el estilo de juego",body:"Comparar generaciones permite observar cambios físicos, tácticos y profesionales dentro del pádel femenino.",source:"FIP · Archivo histórico",url:"https://www.padelfip.com/es/historial-de-clasificacion/"},
+  {type:"leyendas",icon:"🌍",year:"Legado",title:"Las leyendas ayudaron a internacionalizar el deporte",body:"Las grandes figuras históricas contribuyeron a que el pádel femenino ganara visibilidad más allá de sus mercados tradicionales.",source:"FIP · Historia internacional",url:"https://www.padelfip.com/2024/10/from-argentina-and-spain-to-global-fame-the-padel-passion-that-conquered-the-world/"},
+  {type:"leyendas",icon:"📖",year:"Archivo",title:"Una leyenda no se mide sólo por un ranking concreto",body:"Longevidad, títulos, influencia y capacidad de mantenerse en la élite ayudan a entender el legado de una jugadora.",source:"FIP · Estadísticas históricas",url:"https://www.padelfip.com/es/2026/01/numeros-estadisticas-historia-de-los-circuitos-y-rankings-todas-las-nuevas-funcionalidades-del-sitio-web-de-la-fip-para-2026/"},
+  {type:"leyendas",icon:"👟",year:"Generaciones",title:"Las referentes históricas abrieron camino a las actuales",body:"El crecimiento del circuito femenino se entiende mejor siguiendo a las jugadoras que fueron construyendo su profesionalización.",source:"FIP · Archivo histórico",url:"https://www.padelfip.com/es/historial-de-clasificacion/"}
 ];
 
-function renderSabiasQue(filter='all'){
+function sabiasDayKey(){
+  // Fecha local española: misma selección durante todo el día.
+  const now=new Date();
+  const y=now.getFullYear();
+  const m=String(now.getMonth()+1).padStart(2,'0');
+  const d=String(now.getDate()).padStart(2,'0');
+  return `${y}-${m}-${d}`;
+}
+
+function sabiasHash(str){
+  let h=2166136261;
+  for(let i=0;i<str.length;i++){
+    h^=str.charCodeAt(i);
+    h=Math.imul(h,16777619);
+  }
+  return h>>>0;
+}
+
+function sabiasDailyItems(type,count=4){
+  const pool=SABIAS_QUE_DATA.filter(x=>x.type===type);
+  if(pool.length<=count)return pool;
+
+  // Orden determinista por fecha + categoría. Cambia automáticamente cada día.
+  const key=sabiasDayKey();
+  return [...pool]
+    .map((item,index)=>({
+      item,
+      score:sabiasHash(`${key}|${type}|${index}|${item.title}`)
+    }))
+    .sort((a,b)=>a.score-b.score)
+    .slice(0,count)
+    .map(x=>x.item);
+}
+
+function renderSabiasQue(filter='reglas'){
   const grid=document.getElementById('sq-grid');
   if(!grid)return;
-  const items=SABIAS_QUE_DATA.filter(x=>filter==='all'||x.type===filter);
+
+  const items=sabiasDailyItems(filter,4);
+  grid.dataset.filter=filter;
+
   grid.innerHTML=items.map((x,i)=>`
-    <article class="sq-card ${x.featured?'sq-card-featured':''}">
+    <article class="sq-card">
       <div class="sq-top">
         <div class="sq-type">${x.icon} ${x.type==='reglas'?'Regla':x.type==='leyendas'?'Leyenda':'Historia'}</div>
         <div class="sq-year">${x.year||''}</div>
@@ -1059,7 +1130,7 @@ function show(id,btn){
   }
 
   if(id==='sabiasque'){
-    renderSabiasQue('all');
+    renderSabiasQue('reglas');
   }
 }
 
