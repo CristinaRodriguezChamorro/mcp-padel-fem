@@ -1042,33 +1042,32 @@ def _norm_person_name(value: str) -> str:
 
 async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
     """
-    EN JUEGO ONLY — v39
+    FIP Results/Female extractor without Groq.
 
-    Objetivo: recuperar TODOS los partidos finalizados del torneo hasta hoy.
+    v28 proved Chromium works but the visible Female control did not switch the DOM:
+      female=False, female_hits=0, inputs=3
 
-    Estrategia:
-      1. Abrir Results.
-      2. Leer el estado por defecto.
-      3. Activar Female con asociación label->input cuando exista.
-      4. Leer el cuadro femenino completo.
-      5. Recorrer todos los días disponibles.
-      6. Detectar contenedores mínimos que incluyan 4 jugadoras del ranking
-         y celdas numéricas de marcador.
-      7. El backend decide ganador/perdedor y deduplica.
-
-    Groq no interviene.
+    v29 does not depend on that visual switch. It:
+    1) captures XHR/fetch payloads triggered by every candidate gender control;
+    2) searches those payloads for women's-ranking names;
+    3) also searches HIDDEN DOM containers, because FIP can preload both genders
+       and hide one with CSS;
+    4) returns whichever source is positively verified as female.
     """
     diag = {
         "playwright": False,
-        "female_control_found": False,
-        "female_control_activated": False,
-        "states_scanned": 0,
-        "candidate_blocks": 0,
-        "female_blocks": 0,
-        "source_mode": "KNOWN-GOOD-v81-ROLLBACK",
+        "female_clicked": False,
+        "female_verified": False,
+        "visible_female_hits": 0,
+        "hidden_female_hits": 0,
+        "network_female_hits": 0,
+        "network_payloads": 0,
+        "inputs": 0,
+        "source_mode": "",
     }
 
     if async_playwright is None:
+        print("  FIP browser: Playwright no disponible")
         return "", diag
 
     url = event.get("url", "")
@@ -1076,16 +1075,22 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
         return "", diag
 
     try:
-        ranking_names = await get_womens_ranking_names(limit=250)
+        ranking_names = await get_womens_ranking_names(limit=200)
     except Exception:
         ranking_names = []
 
-    ranking_profiles = _player_schedule_profiles(ranking_names)
-    if not ranking_profiles:
-        return "", diag
+    ranking_norm = [_norm_person_name(x) for x in ranking_names if x]
+
+    def count_hits(text: str) -> int:
+        norm = _norm_person_name(text)
+        padded = f" {norm} "
+        return len({
+            name for name in ranking_norm
+            if name and f" {name} " in padded
+        })
 
     browser = None
-    collected = []
+    network_payloads = []
 
     try:
         async with async_playwright() as p:
@@ -1096,334 +1101,262 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
             diag["playwright"] = True
 
             page = await browser.new_page(
-                viewport={"width": 1600, "height": 2200},
+                viewport={"width": 1440, "height": 1400},
                 locale="en-US",
             )
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            await page.wait_for_timeout(1600)
 
-            # Results tab.
+            # Capture XHR/fetch from the start. We later keep only payloads verified
+            # by women's ranking names, so male bootstrap data is harmless.
+            async def on_response(response):
+                try:
+                    if response.request.resource_type not in {"xhr", "fetch"}:
+                        return
+                    ct = (response.headers.get("content-type") or "").lower()
+                    if not any(x in ct for x in ("json", "text", "html")):
+                        return
+                    body = await response.text()
+                    if body and 20 < len(body) < 500000:
+                        network_payloads.append(
+                            {"url": response.url, "body": body}
+                        )
+                except Exception:
+                    pass
+
+            page.on("response", on_response)
+
+            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+            await page.wait_for_timeout(1800)
+
+            # Activate Results with several strategies.
             for label in ("Results", "Resultados"):
                 try:
                     loc = page.get_by_text(label, exact=True).first
                     if await loc.count():
-                        await loc.click(force=True, timeout=2500)
+                        await loc.click(force=True, timeout=3000)
                         await page.wait_for_timeout(900)
                         break
                 except Exception:
                     pass
 
-            async def collect_state(tag: str):
-                diag["states_scanned"] += 1
+            try:
+                await page.evaluate(r"""
+                () => {
+                  const norm = s => (s || '').replace(/\s+/g,' ').trim().toLowerCase();
+                  const els = Array.from(document.querySelectorAll('a,button,[role=tab],[role=button],li,div,span'));
+                  for (const el of els) {
+                    if (['results','resultados'].includes(norm(el.textContent))) {
+                      try {
+                        el.click();
+                        el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                      } catch(e) {}
+                    }
+                  }
+                }
+                """)
+                await page.wait_for_timeout(900)
+            except Exception:
+                pass
+
+            # Visible body baseline.
+            try:
+                visible = await page.locator("body").inner_text(timeout=6000)
+            except Exception:
+                visible = ""
+            diag["visible_female_hits"] = count_hits(visible)
+
+            # ----------------------------------------------------------
+            # Hidden DOM inspection BEFORE touching the gender selector.
+            # innerText misses display:none; textContent does not.
+            # ----------------------------------------------------------
+            try:
+                hidden_candidates = await page.evaluate(r"""
+                () => {
+                  const out = [];
+                  const nodes = Array.from(document.querySelectorAll('body *'));
+                  for (const el of nodes) {
+                    const text = (el.textContent || '').replace(/\s+/g,' ').trim();
+                    if (text.length < 40 || text.length > 30000) continue;
+                    const style = getComputedStyle(el);
+                    const hidden =
+                      style.display === 'none' ||
+                      style.visibility === 'hidden' ||
+                      el.hidden ||
+                      el.getAttribute('aria-hidden') === 'true';
+                    if (hidden) out.push(text);
+                  }
+                  return [...new Set(out)].slice(0,300);
+                }
+                """)
+            except Exception:
+                hidden_candidates = []
+
+            best_hidden = ""
+            best_hidden_hits = 0
+            for text in hidden_candidates:
+                hits = count_hits(text)
+                if hits > best_hidden_hits:
+                    best_hidden_hits = hits
+                    best_hidden = text
+
+            diag["hidden_female_hits"] = best_hidden_hits
+
+            # ----------------------------------------------------------
+            # Probe every plausible input/control and collect network.
+            # ----------------------------------------------------------
+            try:
+                input_count = await page.locator("input").count()
+            except Exception:
+                input_count = 0
+            diag["inputs"] = input_count
+
+            # First click text/labels with force.
+            for label in ("Female", "Women", "Femenino", "Femenina"):
                 try:
-                    state = await page.evaluate(
-                        r"""
-                        ({profiles, tag}) => {
-                          const norm = s => (s || '')
-                            .normalize('NFD')
-                            .replace(/[\u0300-\u036f]/g,'')
-                            .toLowerCase()
-                            .replace(/[^a-z0-9]+/g,' ')
-                            .replace(/\s+/g,' ')
-                            .trim();
-
-                          const clean = s => (s || '').replace(/\s+/g,' ').trim();
-                          const all = Array.from(document.querySelectorAll('body *'));
-
-                          const leafNodes = el => Array.from(el.querySelectorAll('*'))
-                            .filter(x => x.children.length === 0);
-
-                          const scoreValues = el => leafNodes(el)
-                            .map(x => clean(x.textContent))
-                            .filter(x => /^\d{1,2}$/.test(x))
-                            .map(Number)
-                            .filter(n => n >= 0 && n <= 20);
-
-                          const profileMatchIn = textValue => {
-                            const text = ' ' + norm(textValue) + ' ';
-                            const hits = [];
-                            for (const p of profiles) {
-                              let bestIndex = -1;
-                              let matchedAlias = '';
-                              for (const alias of (p.aliases || [])) {
-                                if (!alias || alias.length < 4) continue;
-                                const idx = text.indexOf(' ' + alias + ' ');
-                                if (idx >= 0 && (bestIndex < 0 || idx < bestIndex)) {
-                                  bestIndex = idx;
-                                  matchedAlias = alias;
-                                }
-                              }
-                              if (bestIndex >= 0) {
-                                hits.push({
-                                  canonical: p.canonical,
-                                  display: p.display,
-                                  index: bestIndex,
-                                  alias: matchedAlias
-                                });
-                              }
-                            }
-                            return hits;
-                          };
-
-                          const candidates = [];
-
-                          for (const el of all) {
-                            const text = clean(el.innerText);
-                            if (!text || text.length < 25 || text.length > 2200) continue;
-
-                            const players = profileMatchIn(text);
-                            const unique = [];
-                            const seenCanon = new Set();
-                            for (const p of players.sort((a,b)=>a.index-b.index)) {
-                              if (!seenCanon.has(p.canonical)) {
-                                seenCanon.add(p.canonical);
-                                unique.push(p);
-                              }
-                            }
-                            if (unique.length !== 4) continue;
-
-                            const scores = scoreValues(el);
-                            if (scores.length < 4 || scores.length > 12) continue;
-
-                            candidates.push({
-                              el,
-                              tag,
-                              text,
-                              players: unique,
-                              scores
-                            });
-                          }
-
-                          const minimal = candidates.filter(c =>
-                            !candidates.some(o => o !== c && c.el.contains(o.el))
-                          );
-
-                          const out = [];
-                          const seen = new Set();
-
-                          for (const c of minimal) {
-                            // Order by actual appearance of any accepted alias.
-                            const ordered = [...c.players]
-                              .sort((a,b)=>a.index-b.index)
-                              .map(x=>x.display);
-
-                            if (ordered.length !== 4) continue;
-
-                            const key = ordered.join('|') + '::' + c.scores.join(',');
-                            if (seen.has(key)) continue;
-                            seen.add(key);
-
-                            out.push({
-                              tag: c.tag,
-                              text: c.text.slice(0,1600),
-                              players: ordered,
-                              scores: c.scores,
-                              aliases: c.players.map(x=>x.alias)
-                            });
-                          }
-
-                          return {
-                            candidateCount: candidates.length,
-                            blocks: out
-                          };
-                        }
-                        """,
-                        {"profiles": ranking_profiles, "tag": tag},
-                    )
-                    diag["candidate_blocks"] += int(state.get("candidateCount", 0))
-                    collected.extend(state.get("blocks", []) or [])
-                except Exception as exc:
-                    print(f"  v39 collect error {tag}: {type(exc).__name__}: {exc}")
-
-            async def collect_dates(prefix: str):
-                # Selects that actually look like date selectors.
-                try:
-                    selects = page.locator("select")
-                    for si in range(await selects.count()):
-                        sel = selects.nth(si)
-                        opts = sel.locator("option")
-                        count = await opts.count()
-                        if not 2 <= count <= 16:
-                            continue
-
-                        labels = []
-                        for oi in range(count):
-                            try:
-                                labels.append(re.sub(r"\s+", " ", (await opts.nth(oi).inner_text()).strip()))
-                            except Exception:
-                                labels.append("")
-
-                        looks_date = any(re.search(
-                            r"(?:\bMon\b|\bTue\b|\bWed\b|\bThu\b|\bFri\b|\bSat\b|\bSun\b|"
-                            r"\bMonday\b|\bTuesday\b|\bWednesday\b|\bThursday\b|\bFriday\b|\bSaturday\b|\bSunday\b|"
-                            r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9})",
-                            lab, re.I
-                        ) for lab in labels)
-                        if not looks_date:
-                            continue
-
-                        for oi, label in enumerate(labels):
-                            if not label:
-                                continue
-                            try:
-                                value = await opts.nth(oi).get_attribute("value")
-                                if value is not None:
-                                    await sel.select_option(value=value)
-                                else:
-                                    await sel.select_option(label=label)
-                                await page.wait_for_timeout(700)
-                                await collect_state(f"{prefix}|date:{label}")
-                            except Exception:
-                                pass
-                except Exception:
-                    pass
-
-                # Date buttons/chips.
-                try:
-                    buttons = page.locator("button, [role=button], [role=tab], [class*=date], [class*=day]")
-                    seen = set()
-                    for bi in range(min(await buttons.count(), 180)):
-                        el = buttons.nth(bi)
+                    locs = page.get_by_text(label, exact=True)
+                    for i in range(await locs.count()):
                         try:
-                            label = re.sub(r"\s+", " ", (await el.inner_text()).strip())
-                            if not label or label in seen:
-                                continue
-                            if not re.search(
-                                r"(?:\bMon\b|\bTue\b|\bWed\b|\bThu\b|\bFri\b|\bSat\b|\bSun\b|"
-                                r"\bMonday\b|\bTuesday\b|\bWednesday\b|\bThursday\b|\bFriday\b|\bSaturday\b|\bSunday\b|"
-                                r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9})",
-                                label, re.I
-                            ):
-                                continue
-                            if not await el.is_visible():
-                                continue
-                            seen.add(label)
-                            await el.click(force=True, timeout=1800)
-                            await page.wait_for_timeout(700)
-                            await collect_state(f"{prefix}|date:{label}")
+                            await locs.nth(i).click(force=True, timeout=1500)
+                            await page.wait_for_timeout(1000)
+                            diag["female_clicked"] = True
                         except Exception:
                             pass
                 except Exception:
                     pass
 
-            # Estado inicial (por si FIP precarga datos).
-            await collect_state("default")
-            await collect_dates("default")
-
-            # ----------------------------------------------------------
-            # Activación precisa de Female.
-            # ----------------------------------------------------------
-            activated = False
-
-            # A) label exacto + atributo for.
-            try:
-                labels = page.locator("label")
-                for li in range(await labels.count()):
-                    lab = labels.nth(li)
-                    text = re.sub(r"\s+", " ", (await lab.inner_text()).strip()).lower()
-                    if text not in {"female", "women", "femenino", "femenina"}:
-                        continue
-
-                    diag["female_control_found"] = True
-                    target_id = await lab.get_attribute("for")
-                    if target_id:
-                        inp = page.locator(f"#{target_id}")
-                        if await inp.count():
-                            try:
-                                await inp.check(force=True, timeout=2500)
-                            except Exception:
-                                await inp.click(force=True, timeout=2500)
-                            activated = True
-                    if not activated:
-                        await lab.click(force=True, timeout=2500)
-                        activated = True
-                    if activated:
-                        break
-            except Exception:
-                pass
-
-            # B) texto Female -> ancestro con input.
-            if not activated:
+            # Then probe each input and its associated label/siblings.
+            for idx in range(min(input_count, 15)):
                 try:
-                    result = await page.evaluate(
-                        r"""
-                        () => {
-                          const clean = s => (s || '').replace(/\s+/g,' ').trim().toLowerCase();
-                          const all = Array.from(document.querySelectorAll('body *'));
-                          const node = all.find(el =>
-                            ['female','women','femenino','femenina'].includes(clean(el.textContent))
-                          );
-                          if (!node) return false;
+                    await page.evaluate(r"""
+                    (idx) => {
+                      const el = document.querySelectorAll('input')[idx];
+                      if (!el) return;
+                      const targets = [
+                        el,
+                        el.closest('label'),
+                        el.parentElement,
+                        el.previousElementSibling,
+                        el.nextElementSibling
+                      ].filter(Boolean);
 
-                          let cur = node;
-                          for (let up=0; up<6 && cur; up++, cur=cur.parentElement) {
-                            const input = cur.matches('input') ? cur : cur.querySelector('input');
-                            if (input) {
-                              try { input.click(); } catch(e) {}
-                              try { input.checked = true; } catch(e) {}
-                              input.dispatchEvent(new Event('input',{bubbles:true}));
-                              input.dispatchEvent(new Event('change',{bubbles:true}));
-                              return true;
-                            }
-                          }
+                      for (const t of targets) {
+                        try { t.click(); } catch(e) {}
+                        try {
+                          t.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
+                        } catch(e) {}
+                      }
 
-                          try {
-                            node.click();
-                            node.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                            return true;
-                          } catch(e) {}
-                          return false;
-                        }
-                        """
-                    )
-                    activated = bool(result)
-                    diag["female_control_found"] = diag["female_control_found"] or activated
+                      try { el.checked = !el.checked; } catch(e) {}
+                      try { el.dispatchEvent(new Event('input',{bubbles:true})); } catch(e) {}
+                      try { el.dispatchEvent(new Event('change',{bubbles:true})); } catch(e) {}
+                    }
+                    """, idx)
+                    await page.wait_for_timeout(1000)
                 except Exception:
-                    pass
+                    continue
 
-            if activated:
-                diag["female_control_activated"] = True
-                await page.wait_for_timeout(1400)
-                await collect_state("female")
-                await collect_dates("female")
+            # Give asynchronous requests time to complete.
+            await page.wait_for_timeout(1200)
+
+            # Check visible DOM after probing.
+            try:
+                visible_after = await page.locator("body").inner_text(timeout=6000)
+            except Exception:
+                visible_after = ""
+
+            visible_hits_after = count_hits(visible_after)
+            diag["visible_female_hits"] = max(
+                diag["visible_female_hits"], visible_hits_after
+            )
+
+            # Re-scan hidden DOM after controls were toggled.
+            try:
+                all_text_candidates = await page.evaluate(r"""
+                () => {
+                  const out = [];
+                  const nodes = Array.from(document.querySelectorAll('body *'));
+                  for (const el of nodes) {
+                    const text = (el.textContent || '').replace(/\s+/g,' ').trim();
+                    if (text.length >= 40 && text.length <= 40000) out.push(text);
+                  }
+                  return [...new Set(out)].slice(0,600);
+                }
+                """)
+            except Exception:
+                all_text_candidates = []
+
+            best_dom = ""
+            best_dom_hits = 0
+            for text in all_text_candidates:
+                hits = count_hits(text)
+                if hits > best_dom_hits:
+                    best_dom_hits = hits
+                    best_dom = text
+
+            diag["hidden_female_hits"] = max(
+                diag["hidden_female_hits"], best_dom_hits
+            )
+
+            # Verify captured network responses.
+            best_network = ""
+            best_network_hits = 0
+            best_network_url = ""
+
+            for payload in network_payloads:
+                hits = count_hits(payload["body"])
+                if hits > best_network_hits:
+                    best_network_hits = hits
+                    best_network = payload["body"]
+                    best_network_url = payload["url"]
+
+            diag["network_payloads"] = len(network_payloads)
+            diag["network_female_hits"] = best_network_hits
+
+            # ----------------------------------------------------------
+            # Choose positively verified female source.
+            # Prefer network JSON/API, then full/hidden DOM, then visible DOM.
+            # ----------------------------------------------------------
+            source = ""
+
+            if best_network_hits >= 2:
+                source = f"=== FEMALE NETWORK {best_network_url} ===\n{best_network}"
+                diag["female_verified"] = True
+                diag["source_mode"] = "network"
+            elif best_dom_hits >= 2:
+                source = f"=== FEMALE DOM ===\n{best_dom}"
+                diag["female_verified"] = True
+                diag["source_mode"] = "hidden-or-full-dom"
+            elif visible_hits_after >= 2:
+                source = f"=== FEMALE VISIBLE ===\n{visible_after}"
+                diag["female_verified"] = True
+                diag["source_mode"] = "visible-dom"
+
+            if diag["female_verified"]:
+                diag["female_clicked"] = True
 
             await browser.close()
             browser = None
 
+            print(
+                "  FIP female probe:",
+                f"verified={diag['female_verified']}",
+                f"mode={diag['source_mode'] or '-'}",
+                f"visible_hits={diag['visible_female_hits']}",
+                f"hidden_hits={diag['hidden_female_hits']}",
+                f"network_hits={diag['network_female_hits']}",
+                f"xhr={diag['network_payloads']}",
+                f"inputs={diag['inputs']}",
+            )
+
+            return source[:350000], diag
+
     except Exception as exc:
-        print(f"  FIP v39 capture error: {type(exc).__name__}: {exc}")
+        print(f"  FIP female probe error: {type(exc).__name__}: {exc}")
         if browser is not None:
             try:
                 await browser.close()
             except Exception:
                 pass
         return "", diag
-
-    # Dedupe after scanning all states/dates.
-    unique = []
-    seen = set()
-    for block in collected:
-        key = (
-            tuple(block.get("players", [])),
-            tuple(block.get("scores", [])),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        unique.append(block)
-
-    diag["female_blocks"] = len(unique)
-
-    print(
-        "  FIP v39:",
-        f"female_control={diag['female_control_found']}",
-        f"activated={diag['female_control_activated']}",
-        f"states={diag['states_scanned']}",
-        f"candidates={diag['candidate_blocks']}",
-        f"blocks={diag['female_blocks']}",
-    )
-
-    return json.dumps({"blocks": unique, "diag": diag}, ensure_ascii=False), diag
 
 
 async def _womens_ranking_validation_sets() -> tuple[set[str], set[str], bool]:
@@ -1512,837 +1445,187 @@ def _round_from_snapshot(snapshot: str, event: dict) -> str:
     return "Partidos"
 
 
-async def _browser_fip_flat_results_fallback(event: dict) -> list:
-    """
-    Fallback SOLO si el extractor v39 devuelve cero bloques.
-
-    Lee los nodos visibles en orden DOM después de abrir Results + Female.
-    En vez de exigir un contenedor perfecto con 4 jugadoras, usa el ✓ como ancla
-    y busca las cuatro jugadoras del ranking más cercanas y los números de score.
-    """
-    if async_playwright is None:
-        return []
-
-    url = event.get("url", "")
-    if not url:
-        return []
-
-    try:
-        ranking_names = await get_womens_ranking_names(limit=250)
-    except Exception:
-        ranking_names = []
-
-    ranking_profiles = _player_schedule_profiles(ranking_names)
-    if not ranking_profiles:
-        return []
-
-    browser = None
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
-            )
-            page = await browser.new_page(
-                viewport={"width": 1600, "height": 2200},
-                locale="en-US",
-            )
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            await page.wait_for_timeout(1400)
-
-            # Results
-            for label in ("Results", "Resultados"):
-                try:
-                    loc = page.get_by_text(label, exact=True).first
-                    if await loc.count():
-                        await loc.click(force=True, timeout=2200)
-                        await page.wait_for_timeout(800)
-                        break
-                except Exception:
-                    pass
-
-            # Female
-            activated = False
-            try:
-                labels = page.locator("label")
-                for i in range(await labels.count()):
-                    lab = labels.nth(i)
-                    txt = re.sub(r"\s+"," ",(await lab.inner_text()).strip()).lower()
-                    if txt not in {"female","women","femenino","femenina"}:
-                        continue
-                    target = await lab.get_attribute("for")
-                    if target:
-                        inp = page.locator(f"#{target}")
-                        if await inp.count():
-                            try:
-                                await inp.check(force=True, timeout=2000)
-                            except Exception:
-                                await inp.click(force=True, timeout=2000)
-                            activated = True
-                    if not activated:
-                        await lab.click(force=True, timeout=2000)
-                        activated = True
-                    break
-            except Exception:
-                pass
-
-            if not activated:
-                for label in ("Female","Women","Femenino","Femenina"):
-                    try:
-                        loc=page.get_by_text(label, exact=True).first
-                        if await loc.count():
-                            await loc.click(force=True, timeout=2000)
-                            activated=True
-                            break
-                    except Exception:
-                        pass
-
-            await page.wait_for_timeout(1200)
-
-            blocks = await page.evaluate(
-                r"""
-                (ranking) => {
-                  const norm=s=>(s||'')
-                    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-                    .toLowerCase().replace(/[^a-z0-9]+/g,' ')
-                    .replace(/\s+/g,' ').trim();
-                  const clean=s=>(s||'').replace(/\s+/g,' ').trim();
-
-                  const leaves=Array.from(document.querySelectorAll('body *'))
-                    .filter(el=>el.children.length===0)
-                    .filter(el=>{
-                      const st=getComputedStyle(el);
-                      return st.display!=='none' && st.visibility!=='hidden';
-                    })
-                    .map((el,i)=>({i,el,text:clean(el.textContent),n:norm(el.textContent)}))
-                    .filter(x=>x.text);
-
-                  const playerAt = x => {
-                    for(const p of ranking){
-                      if(!p)continue;
-                      if(x.n===p || x.n.includes(p) || p.includes(x.n)){
-                        // avoid tiny fragments matching long player names
-                        if(x.n.length<4) continue;
-                        return p;
-                      }
-                    }
-                    return null;
-                  };
-
-                  const playerHits=leaves.map(x=>({...x,player:playerAt(x)})).filter(x=>x.player);
-                  const ticks=leaves.filter(x=>x.text.includes('✓'));
-                  const out=[];
-                  const seen=new Set();
-
-                  for(const tick of ticks){
-                    const near=playerHits
-                      .map(p=>({...p,dist:Math.abs(p.i-tick.i)}))
-                      .filter(p=>p.dist<=120)
-                      .sort((a,b)=>a.dist-b.dist);
-
-                    const chosen=[];
-                    for(const p of near){
-                      if(!chosen.some(c=>c.player===p.player)) chosen.push(p);
-                      if(chosen.length===4) break;
-                    }
-                    if(chosen.length!==4) continue;
-
-                    chosen.sort((a,b)=>a.i-b.i);
-                    const minI=Math.min(...chosen.map(x=>x.i),tick.i)-35;
-                    const maxI=Math.max(...chosen.map(x=>x.i),tick.i)+35;
-                    const scores=leaves
-                      .filter(x=>x.i>=minI && x.i<=maxI && /^\d{1,2}$/.test(x.text))
-                      .map(x=>Number(x.text))
-                      .filter(n=>n>=0&&n<=20);
-
-                    if(scores.length<4) continue;
-
-                    const players=chosen.map(x=>x.player);
-                    const key=players.join('|')+'::'+scores.slice(0,8).join(',');
-                    if(seen.has(key))continue;
-                    seen.add(key);
-
-                    const context=leaves
-                      .filter(x=>x.i>=Math.max(0,minI) && x.i<=maxI)
-                      .map(x=>x.text).join(' ').slice(0,1600);
-
-                    out.push({
-                      tag:'flat-fallback',
-                      text:context,
-                      players,
-                      scores:scores.slice(0,8)
-                    });
-                  }
-                  return out;
-                }
-                """,
-                [_norm_person_name(x.get("display","")) for x in ranking_profiles],
-            )
-
-            await browser.close()
-            browser = None
-
-            print(f"  FIP flat fallback: blocks={len(blocks or [])}")
-            return blocks or []
-
-    except Exception as exc:
-        print(f"  FIP flat fallback error: {type(exc).__name__}: {exc}")
-        if browser is not None:
-            try:
-                await browser.close()
-            except Exception:
-                pass
-        return []
-
-
-async def _browser_fip_womens_draw_blocks(event: dict) -> tuple[list[dict], dict]:
-    """
-    Primary production extractor for completed women's main-draw matches.
-
-    Instead of trying to infer the round from dates/results pages, this reads
-    FIP's DRAW itself. The draw has visible column headings (ROUND 16,
-    QUARTER-FINALS, SEMI-FINALS, FINAL). We assign every detected match card
-    to the nearest heading by horizontal position.
-
-    This directly matches the bracket UI shown by FIP and is much harder to
-    misclassify than date-based inference.
-    """
-    diag = {
-        "playwright": False,
-        "female_activated": False,
-        "main_activated": False,
-        "headings": [],
-        "candidates": 0,
-        "blocks": 0,
-    }
-
-    if async_playwright is None:
-        return [], diag
-
-    url = event.get("url", "")
-    if not url:
-        return [], diag
-
-    try:
-        ranking_names = await get_womens_ranking_names(limit=250)
-    except Exception:
-        ranking_names = []
-
-    profiles = _player_schedule_profiles(ranking_names)
-    if not profiles:
-        return [], diag
-
-    browser = None
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
-            )
-            diag["playwright"] = True
-
-            page = await browser.new_page(
-                viewport={"width": 2200, "height": 1800},
-                locale="en-US",
-            )
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            await page.wait_for_timeout(1400)
-
-            # Open Draws.
-            for label in ("Draws", "Cuadros"):
-                try:
-                    loc = page.get_by_text(label, exact=True).first
-                    if await loc.count() and await loc.is_visible():
-                        await loc.click(force=True, timeout=2500)
-                        await page.wait_for_timeout(1000)
-                        break
-                except Exception:
-                    pass
-
-            # Activate Female/Women.
-            try:
-                labels = page.locator("label")
-                for li in range(await labels.count()):
-                    lab = labels.nth(li)
-                    text = re.sub(r"\s+", " ", (await lab.inner_text()).strip()).lower()
-                    if text not in {"female", "women", "femenino", "femenina"}:
-                        continue
-                    target_id = await lab.get_attribute("for")
-                    if target_id:
-                        inp = page.locator(f"#{target_id}")
-                        if await inp.count():
-                            try:
-                                await inp.check(force=True, timeout=2200)
-                            except Exception:
-                                await inp.click(force=True, timeout=2200)
-                            diag["female_activated"] = True
-                    if not diag["female_activated"]:
-                        await lab.click(force=True, timeout=2200)
-                        diag["female_activated"] = True
-                    break
-            except Exception:
-                pass
-
-            if not diag["female_activated"]:
-                try:
-                    activated = await page.evaluate(
-                        r"""
-                        () => {
-                          const clean=s=>(s||'').replace(/\s+/g,' ').trim().toLowerCase();
-                          const all=Array.from(document.querySelectorAll('body *'));
-
-                          // Find the exact Female/Women text node.
-                          const node=all.find(el=>{
-                            const own=clean(el.innerText||el.textContent);
-                            return ['female','women','femenino','femenina'].includes(own);
-                          });
-                          if(!node)return false;
-
-                          // Proven strategy from v39: walk ancestors and click/check
-                          // the input structurally associated with the Female label.
-                          let cur=node;
-                          for(let up=0; up<7 && cur; up++,cur=cur.parentElement){
-                            const inputs=[
-                              ...(cur.matches && cur.matches('input') ? [cur] : []),
-                              ...Array.from(cur.querySelectorAll ? cur.querySelectorAll('input') : [])
-                            ];
-
-                            // If the container has multiple radio inputs, prefer the one
-                            // whose nearby text contains female/women.
-                            for(const input of inputs){
-                              const parentText=clean(
-                                (input.parentElement && (input.parentElement.innerText||input.parentElement.textContent)) || ''
-                              );
-                              if(
-                                inputs.length===1 ||
-                                /\b(female|women|femenin)/.test(parentText)
-                              ){
-                                try{ input.click(); }catch(e){}
-                                try{ input.checked=true; }catch(e){}
-                                input.dispatchEvent(new Event('input',{bubbles:true}));
-                                input.dispatchEvent(new Event('change',{bubbles:true}));
-                                return true;
-                              }
-                            }
-                          }
-
-                          // Last resort: click the exact text node itself.
-                          try{
-                            node.click();
-                            node.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                            return true;
-                          }catch(e){}
-                          return false;
-                        }
-                        """
-                    )
-                    diag["female_activated"] = bool(activated)
-                except Exception:
-                    pass
-
-            await page.wait_for_timeout(1400)
-
-            # Verify that the female draw is REALLY loaded, not merely that a click fired.
-            try:
-                body_probe = re.sub(
-                    r"\s+",
-                    " ",
-                    (await page.locator("body").inner_text()).strip()
-                )
-                body_norm = _norm_person_name(body_probe)
-                female_probe_names = [
-                    _norm_person_name(x.get("display",""))
-                    for x in profiles[:40]
-                    if x.get("display")
-                ]
-                female_hits = sum(
-                    1 for name in female_probe_names
-                    if name and name in body_norm
-                )
-                diag["female_player_hits"] = female_hits
-
-                # If the click fired but no ranked women appear, force a second structural toggle.
-                if female_hits < 2:
-                    forced = await page.evaluate(
-                        r"""
-                        () => {
-                          const clean=s=>(s||'').replace(/\s+/g,' ').trim().toLowerCase();
-                          const inputs=Array.from(document.querySelectorAll('input'));
-                          for(const input of inputs){
-                            let cur=input.parentElement;
-                            let txt='';
-                            for(let up=0; up<4 && cur; up++,cur=cur.parentElement){
-                              txt += ' ' + clean(cur.innerText||cur.textContent);
-                            }
-                            if(/\b(female|women|femenin)/.test(txt)){
-                              try{input.click();}catch(e){}
-                              try{input.checked=true;}catch(e){}
-                              input.dispatchEvent(new Event('input',{bubbles:true}));
-                              input.dispatchEvent(new Event('change',{bubbles:true}));
-                              return true;
-                            }
-                          }
-                          return false;
-                        }
-                        """
-                    )
-                    if forced:
-                        await page.wait_for_timeout(1400)
-                        diag["female_activated"] = True
-
-                        body_probe = re.sub(
-                            r"\s+",
-                            " ",
-                            (await page.locator("body").inner_text()).strip()
-                        )
-                        body_norm = _norm_person_name(body_probe)
-                        female_hits = sum(
-                            1 for name in female_probe_names
-                            if name and name in body_norm
-                        )
-                        diag["female_player_hits"] = female_hits
-            except Exception:
-                diag["female_player_hits"] = 0
-
-            # Activate Main draw if a Qualify/Main selector exists.
-            try:
-                result = await page.evaluate(
-                    r"""
-                    () => {
-                      const clean=s=>(s||'').replace(/\s+/g,' ').trim().toLowerCase();
-                      const nodes=Array.from(document.querySelectorAll('label,button,[role=button],[role=tab]'));
-                      const el=nodes.find(x=>['main','main draw','cuadro principal'].includes(clean(x.innerText||x.textContent)));
-                      if(!el)return false;
-                      el.click();
-                      el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                      return true;
-                    }
-                    """
-                )
-                diag["main_activated"] = bool(result)
-            except Exception:
-                pass
-
-            await page.wait_for_timeout(1000)
-
-            result = await page.evaluate(
-                r"""
-                (profiles) => {
-                  const norm=s=>(s||'')
-                    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-                    .toLowerCase().replace(/[^a-z0-9]+/g,' ')
-                    .replace(/\s+/g,' ').trim();
-                  const clean=s=>(s||'').replace(/\s+/g,' ').trim();
-
-                  const visible=el=>{
-                    const st=getComputedStyle(el);
-                    const r=el.getBoundingClientRect();
-                    return st.display!=='none' && st.visibility!=='hidden' &&
-                           r.width>0 && r.height>0;
-                  };
-
-                  const roundName=text=>{
-                    const t=clean(text).toLowerCase();
-                    if(/\bround\s*16\b|\br16\b/.test(t)) return 'Octavos de final';
-                    if(/quarter[\s-]*final|1\/4\s*final|cuartos?/.test(t)) return 'Cuartos de final';
-                    if(/semi[\s-]*final|semifinal/.test(t)) return 'Semifinales';
-                    if(/\bfinal\b/.test(t) && !/semi|quarter|cuarto/.test(t)) return 'Final';
-                    if(/\bround\s*32\b|\br32\b/.test(t)) return 'Primera ronda';
-                    return '';
-                  };
-
-                  const matchPlayer=text=>{
-                    const n=norm(text);
-                    if(!n || n.length<3)return null;
-                    for(const p of profiles){
-                      for(const alias of (p.aliases||[])){
-                        if(!alias || alias.length<4)continue;
-                        if(n===alias || n.includes(alias) || alias.includes(n))return p;
-                      }
-                    }
-                    return null;
-                  };
-
-                  const all=Array.from(document.querySelectorAll('body *')).filter(visible);
-
-                  const headings=[];
-                  for(const el of all){
-                    const txt=clean(el.innerText||el.textContent);
-                    if(!txt || txt.length>70)continue;
-                    const round=roundName(txt);
-                    if(!round)continue;
-                    const r=el.getBoundingClientRect();
-                    headings.push({round,x:r.left+r.width/2,text:txt});
-                  }
-
-                  const hd=[];
-                  for(const h of headings.sort((a,b)=>a.x-b.x)){
-                    if(!hd.some(x=>x.round===h.round && Math.abs(x.x-h.x)<90))hd.push(h);
-                  }
-
-                  const playerLeaves=[];
-                  const scoreLeaves=[];
-
-                  for(const el of all){
-                    if(el.children.length!==0)continue;
-                    const txt=clean(el.textContent);
-                    if(!txt)continue;
-
-                    const r=el.getBoundingClientRect();
-                    const x=r.left+r.width/2;
-                    const y=r.top+r.height/2;
-
-                    const p=matchPlayer(txt);
-                    if(p){
-                      playerLeaves.push({
-                        canonical:p.canonical,
-                        display:p.display,
-                        x,y
-                      });
-                      continue;
-                    }
-
-                    if(/^\d{1,2}$/.test(txt)){
-                      const value=Number(txt);
-                      if(value>=0 && value<=20)scoreLeaves.push({value,x,y});
-                    }
-                  }
-
-                  const players=[];
-                  for(const p of playerLeaves.sort((a,b)=>a.x-b.x || a.y-b.y)){
-                    if(!players.some(q=>
-                      q.canonical===p.canonical &&
-                      Math.abs(q.x-p.x)<25 &&
-                      Math.abs(q.y-p.y)<15
-                    )){
-                      players.push(p);
-                    }
-                  }
-
-                  const rawBlocks=[];
-
-                  for(let hi=0; hi<hd.length; hi++){
-                    const heading=hd[hi];
-                    const left=hi===0 ? -Infinity : (hd[hi-1].x+heading.x)/2;
-                    const right=hi===hd.length-1 ? Infinity : (heading.x+hd[hi+1].x)/2;
-
-                    const colPlayers=players
-                      .filter(p=>p.x>=left && p.x<right)
-                      .sort((a,b)=>a.y-b.y);
-
-                    if(colPlayers.length<4)continue;
-
-                    // Find candidate teams from adjacent player names.
-                    const teams=[];
-                    for(let i=0;i<colPlayers.length-1;i++){
-                      const a=colPlayers[i], b=colPlayers[i+1];
-                      if(a.canonical===b.canonical)continue;
-                      const dy=b.y-a.y;
-                      if(dy>=0 && dy<=72){
-                        teams.push({
-                          players:[a,b],
-                          top:a.y,
-                          bottom:b.y,
-                          center:(a.y+b.y)/2
-                        });
-                      }
-                    }
-
-                    // Two consecutive teams form a match. Avoid overlapping reuse.
-                    const usedTeam=new Set();
-                    for(let ti=0;ti<teams.length-1;ti++){
-                      if(usedTeam.has(ti))continue;
-                      const ta=teams[ti];
-                      let bestJ=-1;
-                      let bestGap=Infinity;
-
-                      for(let tj=ti+1;tj<teams.length;tj++){
-                        if(usedTeam.has(tj))continue;
-                        const tb=teams[tj];
-
-                        // Do not pair teams that share a player.
-                        const aCanon=new Set(ta.players.map(x=>x.canonical));
-                        if(tb.players.some(x=>aCanon.has(x.canonical)))continue;
-
-                        const gap=tb.top-ta.bottom;
-                        if(gap>=12 && gap<=175 && gap<bestGap){
-                          bestGap=gap;
-                          bestJ=tj;
-                        }
-                      }
-
-                      if(bestJ<0)continue;
-                      const tb=teams[bestJ];
-                      const top=ta.top-40;
-                      const bottom=tb.bottom+40;
-
-                      const scores=scoreLeaves
-                        .filter(sc=>
-                          sc.x>=left && sc.x<right &&
-                          sc.y>=top && sc.y<=bottom
-                        )
-                        .sort((a,b)=>a.y-b.y || a.x-b.x)
-                        .map(sc=>sc.value);
-
-                      if(scores.length>=4 && scores.length<=12){
-                        rawBlocks.push({
-                          tag:'draw:'+heading.round,
-                          text:[...ta.players,...tb.players].map(x=>x.display).join(' | '),
-                          players:[...ta.players,...tb.players].map(x=>x.display),
-                          scores,
-                          roundHint:heading.round
-                        });
-                        usedTeam.add(ti);
-                        usedTeam.add(bestJ);
-                      }
-                    }
-                  }
-
-                  const blocks=[];
-                  const seen=new Set();
-                  for(const b of rawBlocks){
-                    const key=b.roundHint+'|'+b.players.join('|')+'|'+b.scores.join(',');
-                    if(seen.has(key))continue;
-                    seen.add(key);
-                    blocks.push(b);
-                  }
-
-                  return {
-                    headings:hd,
-                    playerLeaves:players.length,
-                    scoreLeaves:scoreLeaves.length,
-                    candidateCount:rawBlocks.length,
-                    blocks
-                  };
-                }
-                """,
-                profiles,
-            )
-
-            await browser.close()
-            browser = None
-
-            diag["headings"] = result.get("headings", []) or []
-            diag["candidates"] = int(result.get("candidateCount", 0) or 0)
-            diag["player_leaves"] = int(result.get("playerLeaves", 0) or 0)
-            diag["score_leaves"] = int(result.get("scoreLeaves", 0) or 0)
-            blocks = result.get("blocks", []) or []
-            diag["blocks"] = len(blocks)
-
-            print(
-                "  FIP draw:",
-                f"female={diag['female_activated']}",
-                f"female_hits={diag.get('female_player_hits',0)}",
-                f"main={diag['main_activated']}",
-                f"headings={[x.get('round') for x in diag['headings']]}",
-                f"players={diag.get('player_leaves',0)}",
-                f"scores={diag.get('score_leaves',0)}",
-                f"candidates={diag['candidates']}",
-                f"blocks={diag['blocks']}",
-            )
-
-            return blocks, diag
-
-    except Exception as exc:
-        print(f"  FIP draw error: {type(exc).__name__}: {exc}")
-        if browser is not None:
-            try:
-                await browser.close()
-            except Exception:
-                pass
-        return [], diag
-
-
 async def _extract_official_results(event: dict, gender: str = "female") -> list:
     """
-    EN JUEGO ONLY — v39
+    Results parser v29.
 
-    Recibe bloques con 4 jugadoras + scores de todos los estados/días.
-    Reconstruye pareja ganadora, perdedora, marcador, fecha y ronda.
+    Accepts verified female source from:
+      - XHR/fetch JSON/text,
+      - hidden/preloaded DOM,
+      - visible DOM.
+
+    It never uses Groq.
     """
-    try:
-        source, capture_diag = await _browser_fip_womens_results_text(event)
-    except Exception as exc:
-        print(f"  v39 live-source error: {type(exc).__name__}: {exc}")
-        source, capture_diag = "", {}
+    gender = (gender or "female").strip().lower()
+    if gender in {"women", "woman"}:
+        gender = "female"
 
-    try:
-        blocks = json.loads(source).get("blocks", []) if source else []
-    except Exception:
-        blocks = []
+    source = ""
+    browser_diag = {}
 
-    if not blocks:
-        for attempt in range(1, 3):
-            print(f"  live results: v39 devolvió 0 bloques; reintento {attempt}/2")
-            await asyncio.sleep(1.2 * attempt)
-            try:
-                retry_source, retry_diag = await _browser_fip_womens_results_text(event)
-                retry_blocks = json.loads(retry_source).get("blocks", []) if retry_source else []
-            except Exception as exc:
-                print(f"  live retry {attempt} error: {type(exc).__name__}: {exc}")
-                retry_blocks = []
+    if gender == "female":
+        try:
+            source, browser_diag = await _browser_fip_womens_results_text(event)
+        except Exception as exc:
+            print(f"  live source error: {type(exc).__name__}: {exc}")
 
-            if retry_blocks:
-                blocks = retry_blocks
-                capture_diag = retry_diag
-                print(f"  live retry {attempt}: recuperados {len(blocks)} bloques")
+    if not source:
+        _LIVE_DEBUG_STATE.update({
+            "browser": browser_diag,
+            "parser": "female-source-v29",
+            "parsed_results": 0,
+            "valid_results": 0,
+            "source_chars": 0,
+            "groq_used": False,
+        })
+        return []
+
+    ranking_full, ranking_surnames, _ = await _womens_ranking_validation_sets()
+
+    def match_player(text: str) -> str | None:
+        norm = _norm_person_name(text)
+        if not norm:
+            return None
+        if norm in ranking_full:
+            return norm
+        candidates = [name for name in ranking_full if name and name in norm]
+        return max(candidates, key=len) if candidates else None
+
+    # ----------------------------------------------------------
+    # Convert network JSON to an ordered scalar stream.
+    # ----------------------------------------------------------
+    scalar_lines = []
+
+    raw_payload = source.split("\n", 1)[1] if "\n" in source else source
+
+    if browser_diag.get("source_mode") == "network":
+        try:
+            obj = json.loads(raw_payload)
+
+            def walk(value):
+                if isinstance(value, dict):
+                    # Preserve insertion order from response.
+                    for k, v in value.items():
+                        # Keys can carry semantic hints like score/player/round.
+                        scalar_lines.append(str(k))
+                        walk(v)
+                elif isinstance(value, list):
+                    for item in value:
+                        walk(item)
+                elif value is not None:
+                    scalar_lines.append(str(value))
+
+            walk(obj)
+        except Exception:
+            # Network response may be HTML/text instead of JSON.
+            scalar_lines = raw_payload.splitlines()
+    else:
+        scalar_lines = raw_payload.splitlines()
+
+    lines = [re.sub(r"\s+", " ", str(x)).strip() for x in scalar_lines]
+    lines = [x for x in lines if x]
+
+    round_aliases = [
+        (r"\bsemi[- ]?finals?\b|\bsf\b", "Semifinales"),
+        (r"\bquarter[- ]?finals?\b|\bqf\b", "Cuartos de final"),
+        (r"\bround of 16\b|\br16\b", "Octavos de final"),
+        (r"\b2nd round\b|\bsecond round\b|\br2\b", "Segunda ronda"),
+        (r"\b1st round\b|\bfirst round\b|\br1\b", "Primera ronda"),
+        (r"\bfinal\b", "Final"),
+        (r"\bqual", "Clasificación"),
+    ]
+
+    # Identify player hits in stream.
+    hits = []
+    current_round = "Partidos"
+    round_at_index = {}
+
+    for idx, line in enumerate(lines):
+        low = line.lower()
+        for pat, label in round_aliases:
+            if re.search(pat, low):
+                current_round = label
                 break
+        round_at_index[idx] = current_round
 
-    if not blocks:
-        print("  live results: reintentos v39 sin datos; activando flat fallback")
-        blocks = await _browser_fip_flat_results_fallback(event)
+        player = match_player(line)
+        if player:
+            if not hits or not (hits[-1][1] == player and hits[-1][0] == idx - 1):
+                hits.append((idx, player))
 
-    month_map = {
-        "jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,
-        "jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12,
-        "ene":1,"abr":4,"ago":8,"dic":12,
-    }
-
-    def date_from_tag(tag: str) -> str:
-        raw = str(tag or "")
-        year = date.today().year
-
-        m = re.search(r"\b(\d{1,2})[/-](\d{1,2})(?:[/-](20\d{2}))?\b", raw)
-        if m:
-            d, mo = int(m.group(1)), int(m.group(2))
-            y = int(m.group(3) or year)
-            try:
-                return date(y, mo, d).isoformat()
-            except Exception:
-                pass
-
-        m = re.search(r"\b(\d{1,2})\s+([A-Za-z]{3,12})\b", raw)
-        if m:
-            d = int(m.group(1))
-            mo = month_map.get(m.group(2).lower()[:3])
-            if mo:
-                try:
-                    return date(year, mo, d).isoformat()
-                except Exception:
-                    pass
-        return ""
-
-    def infer_round(context: str, match_date: str) -> str:
-        low = context.lower()
-        if re.search(r"semi[- ]?final", low): return "Semifinales"
-        if re.search(r"quarter[- ]?final", low): return "Cuartos de final"
-        if re.search(r"round of 16|octav", low): return "Octavos de final"
-        if re.search(r"\bfinal\b", low): return "Final"
-        if re.search(r"\bqual|clasif", low): return "Clasificación"
-        if re.search(r"2nd round|second round|segunda", low): return "Segunda ronda"
-        if re.search(r"1st round|first round|primera", low): return "Primera ronda"
-
-        # London P1 / standard Premier Padel end-of-week cadence.
-        raw_dates = str(event.get("dates", "") or "")
-        m = re.search(
-            r"(\d{1,2})\s*[-–]\s*(\d{1,2})\s+([A-Za-z]{3,12})(?:\s+(20\d{2}))?",
-            raw_dates, re.I
-        )
-        if m and match_date:
-            end_day = int(m.group(2))
-            mo = month_map.get(m.group(3).lower()[:3])
-            y = int(m.group(4) or date.today().year)
-            if mo:
-                try:
-                    end_dt = date(y, mo, end_day)
-                    md = date.fromisoformat(match_date)
-                    delta = (end_dt - md).days
-                    if delta == 0: return "Final"
-                    if delta == 1: return "Semifinales"
-                    if delta == 2: return "Cuartos de final"
-                    if delta == 3: return "Octavos de final"
-                    if delta in {4,5}: return "Primera ronda"
-                    if delta >= 6: return "Clasificación"
-                except Exception:
-                    pass
-
-        return "Partidos"
+    # Numeric score cell helper.
+    def nums_between(a: int, b: int):
+        vals = []
+        for line in lines[a:b]:
+            # Standalone score cells only.
+            if re.fullmatch(r"\d{1,2}", line):
+                n = int(line)
+                if 0 <= n <= 20:
+                    vals.append(n)
+        return vals
 
     parsed = []
+    pos = 0
 
-    for block in blocks:
-        players = list(block.get("players", []))
-        scores = [int(x) for x in block.get("scores", []) if str(x).isdigit()]
+    while pos + 3 < len(hits):
+        i1, p1 = hits[pos]
+        i2, p2 = hits[pos + 1]
+        i3, p3 = hits[pos + 2]
+        i4, p4 = hits[pos + 3]
+        nxt = hits[pos + 4][0] if pos + 4 < len(hits) else len(lines)
 
-        if len(players) != 4 or len(scores) < 4:
+        a_scores = nums_between(i2 + 1, i3)
+        b_scores = nums_between(i4 + 1, nxt)
+
+        # JSON APIs often emit all set scores after the four players.
+        if min(len(a_scores), len(b_scores)) < 2:
+            combined = nums_between(i4 + 1, nxt)
+            if len(combined) in {4, 6}:
+                half = len(combined) // 2
+                a_scores = combined[:half]
+                b_scores = combined[half:]
+
+        count = min(len(a_scores), len(b_scores), 3)
+        if count < 2:
+            pos += 1
             continue
 
-        # FIP puede ordenar score por pareja o por set.
-        layouts = []
-        for n in (6,4):
-            if len(scores) >= n:
-                chunk = scores[:n]
-                half = n // 2
-                layouts.extend([
-                    (chunk[:half], chunk[half:]),
-                    (chunk[0::2], chunk[1::2]),
-                ])
+        a_scores = a_scores[:count]
+        b_scores = b_scores[:count]
 
-        chosen = None
-        for a_sc, b_sc in layouts:
-            if len(a_sc) != len(b_sc) or len(a_sc) < 2:
-                continue
+        a_sets = sum(1 for a,b in zip(a_scores,b_scores) if a>b)
+        b_sets = sum(1 for a,b in zip(a_scores,b_scores) if b>a)
 
-            a_sets = b_sets = 0
-            plausible = True
-
-            for a,b in zip(a_sc,b_sc):
-                hi, lo = max(a,b), min(a,b)
-
-                # Normal set / tie-break set.
-                if not ((hi == 6 and 0 <= lo <= 4) or (hi == 7 and lo in {5,6})):
-                    plausible = False
-                    break
-
-                if a>b: a_sets += 1
-                elif b>a: b_sets += 1
-                else:
-                    plausible = False
-                    break
-
-            if plausible and a_sets != b_sets and max(a_sets,b_sets) >= 2:
-                chosen = (a_sc,b_sc,a_sets,b_sets)
-                break
-
-        if not chosen:
+        if a_sets == b_sets:
+            pos += 1
             continue
 
-        a_sc,b_sc,a_sets,b_sets = chosen
-        p1,p2,p3,p4 = [str(x).title() for x in players]
-        pair_a = f"{p1} / {p2}"
-        pair_b = f"{p3} / {p4}"
+        rnd = round_at_index.get(i1, "Partidos")
+        pair_a = f"{p1.title()} / {p2.title()}"
+        pair_b = f"{p3.title()} / {p4.title()}"
 
         if a_sets > b_sets:
             winner, loser = pair_a, pair_b
-            display = list(zip(a_sc,b_sc))
+            score = "  ".join(f"{a}-{b}" for a,b in zip(a_scores,b_scores))
         else:
             winner, loser = pair_b, pair_a
-            display = list(zip(b_sc,a_sc))
-
-        match_date = date_from_tag(block.get("tag",""))
-        if match_date:
-            try:
-                if date.fromisoformat(match_date) > date.today():
-                    continue
-            except Exception:
-                pass
-
-        context = str(block.get("text","")) + " " + str(block.get("tag",""))
-        rnd = infer_round(context, match_date)
+            score = "  ".join(f"{b}-{a}" for a,b in zip(a_scores,b_scores))
 
         parsed.append({
             "round": rnd,
             "winner": winner,
             "loser": loser,
-            "score": "  ".join(f"{a}-{b}" for a,b in display),
-            "date": match_date,
+            "score": score,
+            "date": "",
         })
+        pos += 4
 
-    # Dedupe all tournament results.
+    # Dedupe
     valid = []
     seen = set()
     for item in parsed:
         key = (
+            item["round"],
             item["winner"].casefold(),
             item["loser"].casefold(),
             item["score"],
@@ -2353,1480 +1636,64 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         valid.append(item)
 
     valid.sort(
-        key=lambda x: (
-            x.get("date",""),
-            ROUND_ORDER.get(x.get("round","Partidos"),0),
-        ),
+        key=lambda x: ROUND_ORDER.get(x["round"], 0),
         reverse=True,
     )
 
-    dates = sorted({x.get("date","") for x in valid if x.get("date")}, reverse=True)
-
     _LIVE_DEBUG_STATE.update({
-        "browser": capture_diag,
-        "parser": "KNOWN-GOOD-v81-ROLLBACK",
-        "raw_blocks": len(blocks),
+        "browser": browser_diag,
+        "parser": "female-source-v29",
+        "female_player_hits": len(hits),
         "parsed_results": len(parsed),
         "valid_results": len(valid),
-        "result_dates": dates,
+        "ranking_players_seen": len(ranking_full),
+        "source_chars": len(source),
         "groq_used": False,
     })
 
     print(
-        "  live v39:",
-        f"blocks={len(blocks)}",
+        "  live parser:",
+        f"source={browser_diag.get('source_mode') or '-'}",
+        f"female_hits={len(hits)}",
         f"parsed={len(parsed)}",
         f"valid={len(valid)}",
-        f"dates={len(dates)}",
     )
-
-    global _LAST_GOOD_LIVE_RESULTS
-
-    if valid:
-        _LAST_GOOD_LIVE_RESULTS = {
-            "results": [dict(x) for x in valid],
-            "ts": time.time(),
-        }
-        return valid
-
-    cached = _LAST_GOOD_LIVE_RESULTS.get("results") or []
-    age = time.time() - float(_LAST_GOOD_LIVE_RESULTS.get("ts") or 0)
-    if cached and age <= 6 * 60 * 60:
-        print(f"  live stale-cache: usando {len(cached)} resultados previos · age={int(age)}s")
-        return [dict(x) for x in cached]
-
     return valid
-
-
-def _round_pair_signature(pair: str) -> tuple[str, ...]:
-    players = [x.strip() for x in re.split(r"\s*/\s*", pair or "") if x.strip()]
-    sig = []
-    for player in players:
-        parts = _norm_person_name(player).split()
-        if len(parts) >= 2:
-            sig.append(parts[1])
-        elif parts:
-            sig.append(parts[0])
-    return tuple(sorted(sig))
-
-
-def _validate_explicit_rounds(results: list) -> list:
-    """
-    Production integrity guard for the knockout draw.
-
-    In women's singles-style knockout structure:
-      Final            -> max 1 match
-      Semifinales      -> max 2
-      Cuartos de final -> max 4
-      Octavos de final -> max 8
-
-    Also prevents the same pair from appearing twice in one knockout round.
-    Any conflicting/overflow item is kept, but moved to generic "Partidos"
-    instead of publishing an impossible bracket.
-    """
-    capacities = {
-        "Final": 1,
-        "Semifinales": 2,
-        "Cuartos de final": 4,
-        "Octavos de final": 8,
-    }
-
-    seen_by_round = {rnd: set() for rnd in capacities}
-    count_by_round = {rnd: 0 for rnd in capacities}
-    out = []
-
-    for item in results or []:
-        row = dict(item)
-        rnd = row.get("round") or "Partidos"
-
-        if rnd not in capacities:
-            out.append(row)
-            continue
-
-        w = _round_pair_signature(str(row.get("winner","")))
-        l = _round_pair_signature(str(row.get("loser","")))
-
-        duplicate_pair = (
-            (w and w in seen_by_round[rnd]) or
-            (l and l in seen_by_round[rnd])
-        )
-        overflow = count_by_round[rnd] >= capacities[rnd]
-
-        if duplicate_pair or overflow:
-            reason = "duplicate-pair" if duplicate_pair else "round-capacity"
-            print(
-                "  ROUND CONFLICT:",
-                f"reason={reason}",
-                f"round={rnd}",
-                f"{row.get('winner','')} vs {row.get('loser','')}",
-                "-> movido a Partidos",
-            )
-            row["round"] = "Partidos"
-            row["round_source"] = f"conflict-guard:{reason}"
-        else:
-            count_by_round[rnd] += 1
-            if w:
-                seen_by_round[rnd].add(w)
-            if l:
-                seen_by_round[rnd].add(l)
-
-        out.append(row)
-
-    print(
-        "  round counts:",
-        " ".join(f"{rnd}={count_by_round[rnd]}" for rnd in capacities),
-    )
-    return out
-
-
-def _normalize_scoreboard_result(item: dict) -> dict | None:
-    """Normaliza un partido finalizado para el cuadro visual de En juego."""
-    if not isinstance(item, dict):
-        return None
-
-    winner = re.sub(r"\s+", " ", str(item.get("winner", ""))).strip()
-    loser = re.sub(r"\s+", " ", str(item.get("loser", ""))).strip()
-    rnd = re.sub(r"\s+", " ", str(item.get("round", "Partidos"))).strip() or "Partidos"
-    raw_score = str(item.get("score", "")).strip()
-
-    if not winner or not loser or not raw_score:
-        return None
-
-    sets = re.findall(r"(\d{1,2})\s*[-–]\s*(\d{1,2})", raw_score)
-    if len(sets) < 2:
-        return None
-
-    return {
-        "round": rnd,
-        "winner": winner,
-        "loser": loser,
-        "score": "  ".join(f"{a}–{b}" for a, b in sets[:3]),
-        "date": str(item.get("date", "") or ""),
-        "status": "finalizado",
-        "round_source": str(item.get("round_source", "") or ""),
-    }
-
-
-def _normalize_next_match(item: dict | None) -> dict | None:
-    """Normaliza el próximo partido para el cuadro visual de En juego."""
-    if not isinstance(item, dict):
-        return None
-
-    pair1 = re.sub(r"\s+", " ", str(item.get("pair1", ""))).strip()
-    pair2 = re.sub(r"\s+", " ", str(item.get("pair2", ""))).strip()
-
-    if not pair1 or not pair2:
-        return None
-
-    return {
-        "round": re.sub(r"\s+", " ", str(item.get("round", "Próximo partido"))).strip() or "Próximo partido",
-        "pair1": pair1,
-        "pair2": pair2,
-        "when": str(item.get("when", "") or "Horario por confirmar"),
-        "date": str(item.get("date", "") or ""),
-        "iso_madrid": str(item.get("iso_madrid", "") or ""),
-        "status": "próximo",
-    }
-
-
-def _event_end_date_from_dates(event: dict) -> date | None:
-    """Parsea la fecha final del torneo sin tocar la extracción FIP."""
-    raw = str(event.get("dates", "") or "")
-    month_map = {
-        "jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,
-        "jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12,
-        "ene":1,"abr":4,"ago":8,"dic":12,
-    }
-
-    # 02/08/2026 - 09/08/2026
-    nums = re.findall(r"\b(\d{1,2})[/-](\d{1,2})[/-](20\d{2})\b", raw)
-    if nums:
-        d, mo, y = nums[-1]
-        try:
-            return date(int(y), int(mo), int(d))
-        except Exception:
-            pass
-
-    # 2-9 August 2026 / 2–9 Aug 2026
-    m = re.search(
-        r"(\d{1,2})\s*[-–]\s*(\d{1,2})\s+([A-Za-zÁÉÍÓÚáéíóú]{3,14})(?:\s+(20\d{2}))?",
-        raw, re.I
-    )
-    if m:
-        end_day = int(m.group(2))
-        mon = _norm_person_name(m.group(3)).split()[0][:3]
-        mo = month_map.get(mon)
-        y = int(m.group(4) or date.today().year)
-        if mo:
-            try:
-                return date(y, mo, end_day)
-            except Exception:
-                pass
-
-    return None
-
-
-def _stage_from_event(event: dict) -> str:
-    """
-    Fase del torneo según fecha.
-    Premier Padel termina normalmente en domingo:
-      domingo Final
-      sábado Semifinales
-      viernes Cuartos
-      jueves Octavos
-    """
-    end_dt = _event_end_date_from_dates(event)
-    if not end_dt:
-        return "Partidos"
-
-    delta = (end_dt - date.today()).days
-    if delta <= 0:
-        return "Final"
-    if delta == 1:
-        return "Semifinales"
-    if delta == 2:
-        return "Cuartos de final"
-    if delta == 3:
-        return "Octavos de final"
-    return "Primera ronda"
-
-
-def _round_capacity(round_name: str) -> int:
-    return {
-        "Final": 1,
-        "Semifinales": 2,
-        "Cuartos de final": 4,
-        "Octavos de final": 8,
-    }.get(round_name, 0)
-
-
-def _annotate_result_rounds(results: list, next_match: dict | None, event: dict) -> list:
-    """
-    NO toca la captura. Solo etiqueta los resultados ya extraídos.
-
-    Regla:
-    - si FIP ya dio ronda, se respeta;
-    - los que llegan como "Partidos" se reparten desde el final del cuadro;
-    - si el próximo partido es de la ronda actual, asumimos que aún queda al menos
-      un partido de esa ronda y no marcamos todos como completados.
-    """
-    if not results:
-        return results
-
-    unresolved = [r for r in results if (r.get("round") or "Partidos") == "Partidos"]
-    if not unresolved:
-        return results
-
-    stage = _stage_from_event(event)
-    next_round = (next_match or {}).get("round") or ""
-
-    # Complete previous rounds in every case.
-    round_chain = ["Octavos de final", "Cuartos de final", "Semifinales", "Final"]
-    stage_idx = round_chain.index(stage) if stage in round_chain else -1
-
-    completed_before = []
-    if stage_idx >= 0:
-        completed_before = round_chain[:stage_idx]
-
-    # Current-round completed matches:
-    # - if next_match is still same round, at most capacity-1 are complete;
-    # - if next_match already points to next round, current round is complete;
-    # - otherwise infer conservatively from available tail.
-    current_capacity = _round_capacity(stage)
-    if current_capacity:
-        if next_round == stage:
-            current_done_max = max(0, current_capacity - 1)
-        elif next_round and next_round != stage:
-            current_done_max = current_capacity
-        else:
-            # No reliable OOP: do not force a full current round.
-            current_done_max = max(0, current_capacity - 1)
-    else:
-        current_done_max = 0
-
-    # Number of slots occupied by fully-completed later rounds before current stage.
-    previous_sizes = sum(_round_capacity(r) for r in completed_before)
-
-    n = len(unresolved)
-
-    # The earliest leftover block is Primera ronda.
-    # Allocate from the END backwards, because v39 returns cumulative draw order.
-    allocations = []
-    if current_capacity:
-        # At least zero, at most current_done_max.
-        current_done = min(current_done_max, max(0, n - previous_sizes))
-    else:
-        current_done = 0
-
-    # Reserve full completed rounds immediately before current stage.
-    tail_needed = previous_sizes + current_done
-    first_count = max(0, n - tail_needed)
-
-    pos = 0
-    if first_count:
-        allocations.append(("Primera ronda", first_count))
-        pos += first_count
-
-    for rnd in completed_before:
-        size = _round_capacity(rnd)
-        if size:
-            allocations.append((rnd, size))
-            pos += size
-
-    if current_done:
-        allocations.append((stage, current_done))
-        pos += current_done
-
-    # Anything remaining belongs to the current stage, but only if we have evidence
-    # that the current round is already complete / next round has started.
-    if pos < n and next_round and next_round != stage:
-        allocations.append((stage, n - pos))
-        pos = n
-
-    # Apply in source order.
-    cursor = 0
-    for rnd, count in allocations:
-        end = min(n, cursor + count)
-        for item in unresolved[cursor:end]:
-            item["round"] = rnd
-        cursor = end
-
-    # If some remain unresolved, label them with the current stage instead of the
-    # meaningless "Partidos" ONLY when today's stage is known.
-    if stage != "Partidos":
-        for item in unresolved[cursor:]:
-            item["round"] = stage
-
-    _LIVE_DEBUG_STATE["round_annotation"] = {
-        "stage_today": stage,
-        "next_round": next_round,
-        "unresolved_before": n,
-        "allocations": allocations,
-    }
-
-    return results
-
-
-def _repair_current_round_from_previous(results: list, event: dict) -> list:
-    """
-    Repair round labels using bracket membership, not DOM wording.
-
-    On semifinal day, any completed match whose two pairs are both quarterfinal
-    winners is a semifinal. This lets us recognize that BOTH semifinals are done
-    even when FIP's stale OOP still points at one of them.
-    """
-    stage = _stage_from_event(event)
-    previous_round = _round_before(stage)
-    if stage not in {"Cuartos de final", "Semifinales", "Final"} or not previous_round:
-        return results
-
-    previous = [x for x in results if x.get("round") == previous_round]
-    previous_winners = [
-        str(x.get("winner", "") or "").strip()
-        for x in previous
-        if _concrete_pair(str(x.get("winner", "") or ""))
-    ]
-
-    if len(previous_winners) < 2:
-        return results
-
-    repaired = 0
-    for item in results:
-        winner = str(item.get("winner", "") or "").strip()
-        loser = str(item.get("loser", "") or "").strip()
-        if not (_concrete_pair(winner) and _concrete_pair(loser)):
-            continue
-
-        winner_from_prev = any(_same_pair(winner, p) for p in previous_winners)
-        loser_from_prev = any(_same_pair(loser, p) for p in previous_winners)
-
-        if winner_from_prev and loser_from_prev and item.get("round") != stage:
-            item["round"] = stage
-            repaired += 1
-
-    if repaired:
-        print(f"  round repair: {repaired} partidos relabelados como {stage}")
-
-    return results
-
-
-def _pair_key(value: str) -> str:
-    """Canonical full pair key, independent of accents/order spacing."""
-    parts = [
-        _norm_person_name(x)
-        for x in re.split(r"\s*/\s*", value or "")
-        if _norm_person_name(x)
-    ]
-    return " / ".join(parts)
-
-
-def _player_first_surname(value: str) -> str:
-    """
-    Stable identity for FIP/ranking name variants.
-
-    Examples:
-      Claudia Fernandez Sanchez -> fernandez
-      Claudia Fernandez         -> fernandez
-      Gemma Triay Pons          -> triay
-      Gemma Triay               -> triay
-    """
-    parts = _norm_person_name(value).split()
-    if len(parts) >= 2:
-        return parts[1]
-    return parts[0] if parts else ""
-
-
-def _pair_signature(value: str) -> tuple[str, ...]:
-    """
-    Compare a pair by the two first surnames, ignoring player order and
-    extra civil surnames. This is much more robust than full-string equality.
-    """
-    players = [
-        x.strip()
-        for x in re.split(r"\s*/\s*", value or "")
-        if x.strip()
-    ]
-    surnames = [_player_first_surname(x) for x in players]
-    surnames = [x for x in surnames if x]
-    return tuple(sorted(surnames))
-
-
-def _same_pair(a: str, b: str) -> bool:
-    sa = _pair_signature(a)
-    sb = _pair_signature(b)
-    return bool(len(sa) == 2 and sa == sb)
-
-
-def _concrete_pair(value: str) -> bool:
-    """True only when a real pair is known, not a placeholder."""
-    key = _pair_key(value)
-    return bool(key and "confirmar" not in key and len(key.split("/")) >= 2)
-
-
-def _next_round_after(round_name: str) -> str | None:
-    chain = [
-        "Octavos de final",
-        "Cuartos de final",
-        "Semifinales",
-        "Final",
-    ]
-    try:
-        idx = chain.index(round_name)
-    except ValueError:
-        return None
-    return chain[idx + 1] if idx + 1 < len(chain) else None
-
-
-def _round_before(round_name: str) -> str | None:
-    chain = [
-        "Octavos de final",
-        "Cuartos de final",
-        "Semifinales",
-        "Final",
-    ]
-    try:
-        idx = chain.index(round_name)
-    except ValueError:
-        return None
-    return chain[idx - 1] if idx > 0 else None
-
-
-def _match_already_completed(results: list, match: dict | None) -> bool:
-    """
-    True if both proposed pairs already appear together in a completed result.
-
-    Pair comparison uses first-surname signatures, so:
-      Gemma Triay Pons / Delfina Brea Senesi
-    matches:
-      Gemma Triay / Delfina Brea
-    """
-    if not match:
-        return False
-
-    p1 = str(match.get("pair1", "") or "").strip()
-    p2 = str(match.get("pair2", "") or "").strip()
-    if not (_concrete_pair(p1) and _concrete_pair(p2)):
-        return False
-
-    for item in results or []:
-        winner = str(item.get("winner", "") or "").strip()
-        loser = str(item.get("loser", "") or "").strip()
-        if not (_concrete_pair(winner) and _concrete_pair(loser)):
-            continue
-
-        same_order = _same_pair(p1, winner) and _same_pair(p2, loser)
-        swapped = _same_pair(p1, loser) and _same_pair(p2, winner)
-
-        if same_order or swapped:
-            return True
-
-    return False
-
-
-def _derive_next_match_from_bracket(results: list, event: dict) -> dict | None:
-    """
-    Deterministic fallback based on completed FIP results.
-
-    This avoids depending on FIP Order-of-Play DOM, which has proved unstable.
-
-    Example on semifinal day:
-      - 4 quarterfinal winners are known.
-      - 1 semifinal is already completed.
-      - The 2 quarterfinal winners not present in that completed semifinal
-        MUST be the remaining semifinal.
-
-    When the whole current round is complete, the winners form the next round.
-    """
-    if not results:
-        return None
-
-    stage = _stage_from_event(event)
-    if stage not in {"Cuartos de final", "Semifinales", "Final"}:
-        return None
-
-    current = [x for x in results if (x.get("round") or "") == stage]
-    capacity = _round_capacity(stage)
-
-    # If today's round is already complete, derive the next round from its winners.
-    if capacity and len(current) >= capacity:
-        next_round = _next_round_after(stage)
-        if not next_round:
-            return None
-
-        winners = []
-        seen = set()
-        for item in current:
-            pair = str(item.get("winner", "") or "").strip()
-            key = _pair_key(pair)
-            if _concrete_pair(pair) and key not in seen:
-                seen.add(key)
-                winners.append(pair)
-
-        if len(winners) >= 2:
-            tomorrow = date.today() + timedelta(days=1)
-            return {
-                "round": next_round,
-                "pair1": winners[0],
-                "pair2": winners[1],
-                "date": tomorrow.isoformat(),
-                "time": "",
-                "time_type": "unknown",
-                "when": "Mañana · horario por confirmar (hora de España)",
-                "iso_madrid": "",
-                "source": "cuadro FIP · ganadoras de la ronda anterior",
-                "derived_from_bracket": True,
-            }
-        return None
-
-    previous_round = _round_before(stage)
-    if not previous_round:
-        return None
-
-    previous = [x for x in results if (x.get("round") or "") == previous_round]
-    previous_capacity = _round_capacity(previous_round)
-    if previous_capacity and len(previous) < previous_capacity:
-        return None
-
-    prev_winners = []
-    seen = set()
-    for item in previous:
-        pair = str(item.get("winner", "") or "").strip()
-        key = _pair_key(pair)
-        if _concrete_pair(pair) and key not in seen:
-            seen.add(key)
-            prev_winners.append(pair)
-
-    if len(prev_winners) < 2:
-        return None
-
-    # Remove every pair that has already appeared in a completed current-round
-    # match. Compare by first surnames so FIP full-name variants still match.
-    used_pairs = []
-    for item in current:
-        for field in ("winner", "loser"):
-            pair = str(item.get(field, "") or "").strip()
-            if _concrete_pair(pair):
-                used_pairs.append(pair)
-
-    remaining = [
-        p for p in prev_winners
-        if not any(_same_pair(p, used) for used in used_pairs)
-    ]
-
-    print(
-        "  bracket derive:",
-        f"stage={stage}",
-        f"prev_winners={len(prev_winners)}",
-        f"current_done={len(current)}",
-        f"used={len(used_pairs)}",
-        f"remaining={len(remaining)}",
-        "remaining_pairs=" + " || ".join(remaining),
-    )
-
-    # Best case: only two pairs remain -> the next match is unambiguous.
-    if len(remaining) == 2:
-        print(f"  bracket next CONFIRMADO: {remaining[0]} vs {remaining[1]}")
-        return {
-            "round": stage,
-            "pair1": remaining[0],
-            "pair2": remaining[1],
-            "date": date.today().isoformat(),
-            "time": "",
-            "time_type": "unknown",
-            "when": "Hoy · horario por confirmar (hora de España)",
-            "iso_madrid": "",
-            "source": "cuadro FIP · cruce restante",
-            "derived_from_bracket": True,
-        }
-
-    # If no current match has finished yet, bracket order is deterministic:
-    # QF1/QF2 feed SF1, QF3/QF4 feed SF2; same principle for later rounds.
-    if not current and len(prev_winners) >= 2:
-        pairings = [
-            (prev_winners[i], prev_winners[i + 1])
-            for i in range(0, len(prev_winners) - 1, 2)
-        ]
-        if pairings:
-            p1, p2 = pairings[0]
-            return {
-                "round": stage,
-                "pair1": p1,
-                "pair2": p2,
-                "date": date.today().isoformat(),
-                "time": "",
-                "time_type": "unknown",
-                "when": "Hoy · horario por confirmar (hora de España)",
-                "iso_madrid": "",
-                "source": "cuadro FIP · siguiente cruce",
-                "derived_from_bracket": True,
-            }
-
-    return None
-
-
-def _fallback_next_match(results: list, next_match: dict | None, event: dict) -> dict | None:
-    """
-    Si Order of Play no devuelve nada, la web sigue diciendo al menos:
-    - qué ronda toca;
-    - si es hoy/mañana;
-    - que el horario exacto está por confirmar.
-
-    No inventa parejas.
-    """
-    if next_match:
-        return next_match
-
-    stage = _stage_from_event(event)
-    if stage == "Partidos":
-        return None
-
-    end_dt = _event_end_date_from_dates(event)
-    today = date.today()
-
-    if end_dt:
-        delta = (end_dt - today).days
-        if stage == "Final":
-            day_label = "Hoy" if delta == 0 else "Próximamente"
-        else:
-            day_label = "Hoy"
-    else:
-        day_label = "Hoy"
-
-    return {
-        "round": stage,
-        "pair1": "Pareja por confirmar",
-        "pair2": "Pareja por confirmar",
-        "date": today.isoformat(),
-        "time": "",
-        "time_type": "unknown",
-        "when": f"{day_label} · horario por confirmar (hora de España)",
-        "iso_madrid": "",
-        "source": "fase del torneo",
-    }
-
-
-def _player_schedule_profiles(names: list[str]) -> list[dict]:
-    """
-    Build aliases that also match abbreviated FIP names:
-      Claudia Fernandez Sanchez -> "c fernandez sanchez"
-      Paula Josemaria Martin     -> "p josemaria martin"
-    """
-    out = []
-    seen = set()
-    for raw in names or []:
-        canon = _norm_person_name(raw)
-        parts = canon.split()
-        if len(parts) < 2 or canon in seen:
-            continue
-        seen.add(canon)
-
-        aliases = {canon}
-        first_initial = parts[0][:1]
-        if first_initial:
-            aliases.add(" ".join([first_initial] + parts[1:]))
-            aliases.add(f"{first_initial} {parts[1]}")
-
-        # Public/sporting name.
-        aliases.add(" ".join(parts[:2]))
-
-        out.append({
-            "canonical": canon,
-            "display": re.sub(r"\s+", " ", raw).strip(),
-            "aliases": sorted(aliases, key=len, reverse=True),
-        })
-    return out
-
-
-async def _scan_fip_schedule_frames(page, profiles: list[dict]) -> tuple[list[dict], list[dict]]:
-    """
-    FIP's Order of Play can render inside an iframe/widget rather than in the
-    event page DOM. Scan every frame, including cross-page iframe documents.
-    Returns (cards, diagnostics).
-    """
-    diagnostics = []
-    all_cards = []
-
-    parser_js = r"""
-    (profiles) => {
-      const norm=s=>(s||'')
-        .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-        .toLowerCase().replace(/[^a-z0-9]+/g,' ')
-        .replace(/\s+/g,' ').trim();
-      const clean=s=>(s||'').replace(/\s+/g,' ').trim();
-
-      const matchPlayer = text => {
-        const n=norm(text);
-        if(!n || n.length<3)return null;
-        for(const p of profiles){
-          for(const a of p.aliases){
-            if(n===a || n.includes(a) || a.includes(n)){
-              if(Math.min(n.length,a.length)>=4)return p;
-            }
-          }
-        }
-        return null;
-      };
-
-      const visible=el=>{
-        const st=getComputedStyle(el);
-        const r=el.getBoundingClientRect();
-        return st.display!=='none' && st.visibility!=='hidden' &&
-               r.width>0 && r.height>0;
-      };
-
-      const all=Array.from(document.querySelectorAll('body *')).filter(visible);
-      const candidates=[];
-
-      for(const el of all){
-        const text=clean(el.innerText);
-        if(!text || text.length<28 || text.length>2200)continue;
-
-        // Match either explicit WOMEN/FEMALE or a 4-player card made entirely
-        // from known female ranking players.
-        const leaves=Array.from(el.querySelectorAll('*'))
-          .filter(x=>x.children.length===0 && visible(x))
-          .map(x=>{
-            const r=x.getBoundingClientRect();
-            return {
-              text:clean(x.textContent),
-              n:norm(x.textContent),
-              y:r.top+r.height/2,
-              x:r.left+r.width/2
-            };
-          })
-          .filter(x=>x.text);
-
-        const hits=[];
-        for(const leaf of leaves){
-          const p=matchPlayer(leaf.text);
-          if(p && !hits.some(h=>h.canonical===p.canonical)){
-            hits.push({...p,y:leaf.y,x:leaf.x,leafText:leaf.text});
-          }
-        }
-
-        const explicitWomen=/\b(women|female|femenin)\b/i.test(text);
-        if(!explicitWomen && hits.length!==4)continue;
-        if(hits.length<2 || hits.length>4)continue;
-
-        const scoreLeaves=leaves
-          .filter(x=>/^\d{1,2}$/.test(x.text))
-          .map(x=>({...x,value:Number(x.text)}))
-          .filter(x=>x.value>=0 && x.value<=20);
-
-        const completed=/\b(completed|finished|finalizado|finalizada)\b/i.test(text);
-        const explicitLive=/\b(live|in progress|playing|on court|directo|en juego|en curso)\b/i.test(text);
-
-        const status=completed
-          ? 'completed'
-          : ((explicitLive || scoreLeaves.length>=2) ? 'live' : 'upcoming');
-
-        let round='Partido';
-        if(/\bsemi[- ]?finals?\b/i.test(text))round='Semifinales';
-        else if(/\bquarter[- ]?finals?\b/i.test(text))round='Cuartos de final';
-        else if(/\bround of 16\b|\boctav/i.test(text))round='Octavos de final';
-        else if(/\bfinal\b/i.test(text))round='Final';
-        else if(/\bsecond round\b|\b2nd round\b/i.test(text))round='Segunda ronda';
-        else if(/\bfirst round\b|\b1st round\b/i.test(text))round='Primera ronda';
-        else if(/\bqual/i.test(text))round='Clasificación';
-
-        candidates.push({el,text,hits,scoreLeaves,status,round});
-      }
-
-      const minimal=candidates.filter(c=>
-        !candidates.some(o=>o!==c && c.el.contains(o.el))
-      );
-
-      const out=[];
-      const seen=new Set();
-
-      for(const c of minimal){
-        const ordered=[...c.hits].sort((a,b)=>a.y-b.y || a.x-b.x);
-
-        let teamA=[],teamB=[];
-        if(ordered.length>=4){
-          teamA=ordered.slice(0,2);
-          teamB=ordered.slice(2,4);
-        }else{
-          teamA=ordered.slice(0,2);
-        }
-
-        const pair1=teamA.map(x=>x.display).join(' / ');
-        const pair2=teamB.length
-          ? teamB.map(x=>x.display).join(' / ')
-          : 'Pareja por confirmar';
-
-        let aScores=[],bScores=[];
-        if(teamA.length && teamB.length && c.scoreLeaves.length){
-          const ay=teamA.reduce((a,x)=>a+x.y,0)/teamA.length;
-          const by=teamB.reduce((a,x)=>a+x.y,0)/teamB.length;
-
-          aScores=c.scoreLeaves
-            .filter(sc=>Math.abs(sc.y-ay)<=Math.abs(sc.y-by))
-            .sort((a,b)=>a.x-b.x)
-            .map(sc=>sc.value);
-
-          bScores=c.scoreLeaves
-            .filter(sc=>Math.abs(sc.y-by)<Math.abs(sc.y-ay))
-            .sort((a,b)=>a.x-b.x)
-            .map(sc=>sc.value);
-        }
-
-        const key=[c.round,pair1,pair2,c.status,aScores.join(','),bScores.join(',')].join('|');
-        if(seen.has(key))continue;
-        seen.add(key);
-
-        out.push({
-          round:c.round,
-          pair1,pair2,
-          status:c.status,
-          team_a_scores:aScores,
-          team_b_scores:bScores,
-          raw:c.text.slice(0,1400)
-        });
-      }
-
-      return out;
-    }
-    """
-
-    for idx, frame in enumerate(page.frames):
-        try:
-            body = re.sub(r"\s+", " ", (await frame.locator("body").inner_text()).strip())
-        except Exception:
-            body = ""
-
-        diag = {
-            "index": idx,
-            "url": frame.url,
-            "chars": len(body),
-            "women": bool(re.search(r"\b(women|female|femenin)", body, re.I)),
-            "completed": "completed" in body.lower(),
-            "semifinals": "semifinals" in body.lower(),
-        }
-
-        try:
-            cards = await frame.evaluate(parser_js, profiles)
-        except Exception as exc:
-            cards = []
-            diag["error"] = f"{type(exc).__name__}: {exc}"
-
-        diag["cards"] = len(cards or [])
-        diagnostics.append(diag)
-        all_cards.extend(cards or [])
-
-    # Dedupe cards across parent frame + iframe(s).
-    deduped = []
-    seen = set()
-    for card in all_cards:
-        key = (
-            card.get("round",""),
-            card.get("pair1",""),
-            card.get("pair2",""),
-            card.get("status",""),
-            tuple(card.get("team_a_scores") or []),
-            tuple(card.get("team_b_scores") or []),
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(card)
-
-    return deduped, diagnostics
-
-
-async def _extract_fip_today_womens_cards(event: dict) -> list[dict]:
-    """
-    Read today's WOMEN match cards directly from FIP.
-
-    FIP exposes cards such as:
-      WOMEN / SEMIFINALS
-      C. Fernandez Sanchez / M. Calvo
-      6 6
-      P. Josemaria Martin / B. Gonzalez Fernandez
-      2 4
-      COMPLETED
-
-    We use that card itself as source of truth for:
-      - round
-      - COMPLETED / LIVE / UPCOMING
-      - pairs
-      - current score / final score
-
-    No LLM and no score inference from unrelated page text.
-    """
-    if async_playwright is None:
-        return []
-
-    url = event.get("url", "")
-    if not url:
-        return []
-
-    try:
-        ranking_names = await get_womens_ranking_names(limit=250)
-    except Exception:
-        ranking_names = []
-
-    profiles = _player_schedule_profiles(ranking_names)
-    if not profiles:
-        return []
-
-    madrid_now = datetime.now(ZoneInfo("Europe/Madrid"))
-    event_tz = ZoneInfo(_event_timezone(event.get("place", "")))
-    local_now = madrid_now.astimezone(event_tz)
-
-    browser = None
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
-            )
-            page = await browser.new_page(
-                viewport={"width": 1600, "height": 2400},
-                locale="en-US",
-            )
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            await page.wait_for_timeout(1400)
-
-            # Open Order of Play robustly. FIP changes the tab markup often,
-            # so do not depend on exact visible text.
-            oop_clicked = False
-            try:
-                oop_clicked = await page.evaluate(
-                    r"""
-                    () => {
-                      const clean=s=>(s||'').replace(/\s+/g,' ').trim().toLowerCase();
-                      const nodes=Array.from(document.querySelectorAll(
-                        'a,button,[role=button],[role=tab],li,label,div'
-                      ));
-                      const wanted=[
-                        'order of play','order ofplay','schedule','matches',
-                        'orden de juego','partidos'
-                      ];
-                      // Prefer clickable/small nodes, not page wrappers.
-                      const matches=nodes.filter(el=>{
-                        const t=clean(el.innerText||el.textContent);
-                        if(!t || t.length>80)return false;
-                        return wanted.some(w=>t===w || t.includes(w));
-                      });
-                      const el=matches.find(x=>x.matches('a,button,[role=button],[role=tab]')) || matches[0];
-                      if(!el)return false;
-                      el.click();
-                      el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true,view:window}));
-                      return true;
-                    }
-                    """
-                )
-                if oop_clicked:
-                    await page.wait_for_timeout(1200)
-            except Exception:
-                pass
-
-            # If the tab is a real link and the JS click did not expose the
-            # schedule, follow an href containing order/schedule/matches.
-            try:
-                body_probe = (await page.locator("body").inner_text()).lower()
-            except Exception:
-                body_probe = ""
-            if not any(x in body_probe for x in ("women", "semifinals", "quarterfinals", "completed")):
-                try:
-                    href = await page.evaluate(
-                        r"""
-                        () => {
-                          const links=Array.from(document.querySelectorAll('a[href]'));
-                          const a=links.find(x=>/order[-_ ]?of[-_ ]?play|schedule|matches/i.test(
-                            (x.innerText||'')+' '+(x.getAttribute('href')||'')
-                          ));
-                          return a ? a.href : '';
-                        }
-                        """
-                    )
-                    if href:
-                        await page.goto(href, wait_until="domcontentloaded", timeout=45000)
-                        await page.wait_for_timeout(1200)
-                except Exception:
-                    pass
-
-            # Select today's date if date buttons are exposed.
-            today_tokens = [
-                local_now.strftime("%b").upper() + " " + str(local_now.day),
-                local_now.strftime("%b").upper() + " " + f"{local_now.day:02d}",
-                str(local_now.day) + " " + local_now.strftime("%b").upper(),
-            ]
-            try:
-                clicked_today = await page.evaluate(
-                    r"""
-                    (tokens) => {
-                      const clean=s=>(s||'').replace(/\s+/g,' ').trim().toUpperCase();
-                      const nodes=Array.from(document.querySelectorAll(
-                        'button,a,[role=button],[role=tab],label'
-                      ));
-                      const el=nodes.find(x=>{
-                        const t=clean(x.innerText||x.textContent);
-                        return tokens.some(tok=>t.includes(tok));
-                      });
-                      if(!el)return false;
-                      el.click();
-                      el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                      return true;
-                    }
-                    """,
-                    today_tokens,
-                )
-                if clicked_today:
-                    await page.wait_for_timeout(900)
-            except Exception:
-                pass
-
-            try:
-                probe_text = re.sub(r"\s+", " ", (await page.locator("body").inner_text()).strip())
-                print(
-                    "  FIP today probe:",
-                    f"oop_clicked={oop_clicked}",
-                    f"url={page.url}",
-                    f"women={'women' in probe_text.lower()}",
-                    f"completed={'completed' in probe_text.lower()}",
-                    f"semifinals={'semifinals' in probe_text.lower()}",
-                    f"chars={len(probe_text)}",
-                    f"frames={len(page.frames)}",
-                )
-            except Exception:
-                pass
-
-            cards, frame_diag = await _scan_fip_schedule_frames(page, profiles)
-
-            for fd in frame_diag:
-                print(
-                    "  FIP frame probe:",
-                    f"idx={fd.get('index')}",
-                    f"cards={fd.get('cards',0)}",
-                    f"women={fd.get('women')}",
-                    f"completed={fd.get('completed')}",
-                    f"semifinals={fd.get('semifinals')}",
-                    f"chars={fd.get('chars',0)}",
-                    f"url={fd.get('url','')[:180]}",
-                )
-
-
-            await browser.close()
-            browser = None
-
-            # Normalize and make score strings.
-            normalized = []
-            for card in cards or []:
-                a = [int(x) for x in card.get("team_a_scores", [])]
-                b = [int(x) for x in card.get("team_b_scores", [])]
-                score = ""
-                if a and b:
-                    n = min(len(a), len(b))
-                    score = "  ".join(f"{a[i]}-{b[i]}" for i in range(n))
-
-                normalized.append({
-                    "round": card.get("round") or "Partido",
-                    "pair1": card.get("pair1") or "",
-                    "pair2": card.get("pair2") or "Pareja por confirmar",
-                    "status": card.get("status") or "upcoming",
-                    "score": score,
-                    "team_a_scores": a,
-                    "team_b_scores": b,
-                    "raw": card.get("raw",""),
-                })
-
-            status_counts = {
-                st: len([x for x in normalized if x.get("status")==st])
-                for st in ("completed","live","upcoming")
-            }
-            print(
-                "  FIP today cards:",
-                f"total={len(normalized)}",
-                f"completed={status_counts['completed']}",
-                f"live={status_counts['live']}",
-                f"upcoming={status_counts['upcoming']}",
-            )
-            return normalized
-
-    except Exception as exc:
-        print(f"  FIP today cards error: {type(exc).__name__}: {exc}")
-        if browser is not None:
-            try:
-                await browser.close()
-            except Exception:
-                pass
-        return []
-
-
-def _completed_card_to_result(card: dict) -> dict | None:
-    """Convert a FIP completed card into the existing results schema."""
-    if not card or card.get("status") != "completed":
-        return None
-
-    pair_a = card.get("pair1","")
-    pair_b = card.get("pair2","")
-    a = card.get("team_a_scores") or []
-    b = card.get("team_b_scores") or []
-    if not pair_a or not pair_b or not a or not b:
-        return None
-
-    n=min(len(a),len(b))
-    if not n:
-        return None
-
-    a_sets=sum(1 for i in range(n) if a[i]>b[i])
-    b_sets=sum(1 for i in range(n) if b[i]>a[i])
-    if a_sets==b_sets:
-        return None
-
-    if a_sets>b_sets:
-        winner,loser=pair_a,pair_b
-        display=[(a[i],b[i]) for i in range(n)]
-    else:
-        winner,loser=pair_b,pair_a
-        display=[(b[i],a[i]) for i in range(n)]
-
-    return {
-        "round": card.get("round") or "Partido",
-        "winner": winner,
-        "loser": loser,
-        "score": "  ".join(f"{x}-{y}" for x,y in display),
-        "date": date.today().isoformat(),
-    }
-
-
-def _card_to_top_match(card: dict) -> dict | None:
-    if not card:
-        return None
-
-    status=card.get("status")
-    if status=="live":
-        return {
-            "status":"live",
-            "status_label":"EN DIRECTO",
-            "round":card.get("round") or "Partido",
-            "pair1":card.get("pair1") or "Pareja por confirmar",
-            "pair2":card.get("pair2") or "Pareja por confirmar",
-            "score":card.get("score") or "",
-            "when":"Ahora · hora de España",
-            "iso_madrid":datetime.now(ZoneInfo("Europe/Madrid")).isoformat(),
-            "status_detail":"Partido en curso · al finalizar pasará automáticamente a resultados.",
-            "source":"FIP Order of Play",
-        }
-
-    if status=="upcoming":
-        return {
-            "round":card.get("round") or "Próximo partido",
-            "pair1":card.get("pair1") or "Pareja por confirmar",
-            "pair2":card.get("pair2") or "Pareja por confirmar",
-            "when":"Horario por confirmar",
-            "iso_madrid":"",
-            "source":"FIP Order of Play",
-        }
-
-    return None
-
-
-async def _extract_current_womens_match(event: dict) -> dict | None:
-    """
-    Consulta exclusivamente Live Score de FIP.
-
-    Solo devuelve un partido como EN DIRECTO si hay evidencia explícita de que el
-    bloque está en curso. No deduce "live" por la hora.
-    """
-    if async_playwright is None:
-        return None
-
-    url = event.get("url", "")
-    if not url:
-        return None
-
-    try:
-        ranking_names = await get_womens_ranking_names(limit=250)
-    except Exception:
-        ranking_names = []
-
-    ranking_norm = [_norm_person_name(x) for x in ranking_names if x]
-    if not ranking_norm:
-        return None
-
-    browser = None
-    try:
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
-            )
-            page = await browser.new_page(
-                viewport={"width": 1440, "height": 1600},
-                locale="en-US",
-            )
-            await page.goto(url, wait_until="domcontentloaded", timeout=45000)
-            await page.wait_for_timeout(1200)
-
-            # Open Live Score.
-            live_opened = False
-            for label in ("Live Score", "Live", "Marcador en directo", "Directo"):
-                try:
-                    loc = page.get_by_text(label, exact=True).first
-                    if await loc.count() and await loc.is_visible():
-                        await loc.click(force=True, timeout=2500)
-                        await page.wait_for_timeout(900)
-                        live_opened = True
-                        break
-                except Exception:
-                    pass
-
-            if not live_opened:
-                try:
-                    live_opened = await page.evaluate(
-                        r"""
-                        () => {
-                          const clean=s=>(s||'').replace(/\s+/g,' ').trim().toLowerCase();
-                          const nodes=Array.from(document.querySelectorAll('a,button,[role=tab],[role=button]'));
-                          const el=nodes.find(x=>['live score','live','directo','marcador en directo'].includes(clean(x.textContent)));
-                          if(!el)return false;
-                          el.click();
-                          el.dispatchEvent(new MouseEvent('click',{bubbles:true,cancelable:true}));
-                          return true;
-                        }
-                        """
-                    )
-                    if live_opened:
-                        await page.wait_for_timeout(900)
-                except Exception:
-                    pass
-
-            # Female only inside this probe.
-            for label in ("Female", "Women", "Femenino", "Femenina"):
-                try:
-                    loc = page.get_by_text(label, exact=True).first
-                    if await loc.count() and await loc.is_visible():
-                        await loc.click(force=True, timeout=2200)
-                        await page.wait_for_timeout(800)
-                        break
-                except Exception:
-                    pass
-
-            state = await page.evaluate(
-                r"""
-                (ranking) => {
-                  const norm=s=>(s||'')
-                    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')
-                    .toLowerCase().replace(/[^a-z0-9]+/g,' ')
-                    .replace(/\s+/g,' ').trim();
-                  const clean=s=>(s||'').replace(/\s+/g,' ').trim();
-
-                  const liveRx=/\b(live|in progress|playing|on court|court \d+|set \d+|directo|en juego|en curso)\b/i;
-                  const finishedRx=/\b(finalizado|finished|completed|winner|ganador)\b/i;
-
-                  const all=Array.from(document.querySelectorAll('body *'));
-                  const candidates=[];
-
-                  for(const el of all){
-                    const style=getComputedStyle(el);
-                    if(style.display==='none'||style.visibility==='hidden')continue;
-
-                    const text=clean(el.innerText);
-                    if(!text||text.length<25||text.length>1800)continue;
-                    if(!liveRx.test(text) || finishedRx.test(text))continue;
-
-                    const nt=' '+norm(text)+' ';
-                    const players=[...new Set(ranking.filter(p=>p && nt.includes(' '+p+' ')))];
-                    if(players.length!==4)continue;
-
-                    const scoreCells=Array.from(el.querySelectorAll('*'))
-                      .filter(x=>x.children.length===0)
-                      .map(x=>clean(x.textContent))
-                      .filter(x=>/^\d{1,2}$/.test(x))
-                      .map(Number)
-                      .filter(n=>n>=0&&n<=20);
-
-                    candidates.push({el,text,players,scores:scoreCells});
-                  }
-
-                  const minimal=candidates.filter(c=>
-                    !candidates.some(o=>o!==c && c.el.contains(o.el))
-                  );
-
-                  if(!minimal.length)return null;
-
-                  // Prefer the most compact true-live block.
-                  minimal.sort((a,b)=>a.text.length-b.text.length);
-                  const c=minimal[0];
-
-                  const nt=' '+norm(c.text)+' ';
-                  const ordered=c.players
-                    .map(p=>({p,i:nt.indexOf(' '+p+' ')}))
-                    .filter(x=>x.i>=0)
-                    .sort((a,b)=>a.i-b.i)
-                    .map(x=>x.p);
-
-                  return {text:c.text,players:ordered,scores:c.scores};
-                }
-                """,
-                [_norm_person_name(x.get("display","")) for x in ranking_profiles],
-            )
-
-            await browser.close()
-            browser = None
-
-            if not state or len(state.get("players", [])) != 4:
-                print("  live-score: no hay partido femenino en directo confirmado")
-                return None
-
-            players = [str(x).title() for x in state["players"]]
-            text = str(state.get("text", ""))
-            scores = [int(x) for x in state.get("scores", []) if str(x).isdigit()]
-
-            pair1 = f"{players[0]} / {players[1]}"
-            pair2 = f"{players[2]} / {players[3]}"
-
-            score_text = ""
-            if len(scores) >= 2:
-                if len(scores) % 2 == 0:
-                    score_text = "  ".join(
-                        f"{scores[i]}-{scores[i+1]}"
-                        for i in range(0, min(len(scores), 6), 2)
-                    )
-                else:
-                    score_text = " · ".join(str(x) for x in scores[:6])
-
-            low = text.lower()
-            if re.search(r"semi[- ]?final", low):
-                rnd = "Semifinales"
-            elif re.search(r"quarter[- ]?final", low):
-                rnd = "Cuartos de final"
-            elif re.search(r"round of 16|octav", low):
-                rnd = "Octavos de final"
-            elif re.search(r"\bfinal\b", low):
-                rnd = "Final"
-            else:
-                rnd = _stage_from_event(event)
-
-            print(f"  live-score CONFIRMADO: {pair1} vs {pair2} · {rnd} · {score_text or 'sin score visible'}")
-
-            return {
-                "status": "live",
-                "status_label": "EN DIRECTO",
-                "round": rnd,
-                "pair1": pair1,
-                "pair2": pair2,
-                "score": score_text,
-                "when": "Ahora · hora de España",
-                "iso_madrid": datetime.now(ZoneInfo("Europe/Madrid")).isoformat(),
-                "status_detail": "Partido en curso · al finalizar pasará automáticamente a resultados.",
-                "source": "FIP Live Score",
-            }
-
-    except Exception as exc:
-        print(f"  live-score probe error: {type(exc).__name__}: {exc}")
-        if browser is not None:
-            try:
-                await browser.close()
-            except Exception:
-                pass
-
-    return None
 
 
 async def get_tournament_now(gender: str = "female") -> dict:
     """
-    Results-only En juego.
-
-    The page now shows only completed women's matches.
-    No Live Score probe, no next-match inference, no Order of Play dependency.
+    Torneo actual + resultados femeninos acumulados mientras el torneo está en curso.
+    No se espera a la final: cada partido terminado se muestra en cuanto FIP lo publica.
     """
     today_str = date.today().strftime("%d/%m/%Y")
     event = await _get_official_live_event()
-
     if not event:
         return {
-            "active": False,
-            "name": "",
-            "place": "",
-            "dates": "",
-            "watch": [],
-            "results": [],
-            "next_match": None,
-            "current_match": None,
-            "updated": today_str,
+            "active": False, "name": "", "place": "", "dates": "",
+            "watch": [], "results": [], "next_match": None, "updated": today_str,
             "gender": gender,
-            "source": "FIP",
-            "source_url": FIP_PREMIER_CALENDAR_URL.format(year=date.today().year),
+            "source": "FIP", "source_url": FIP_PREMIER_CALENDAR_URL.format(year=date.today().year),
         }
 
     parts = await asyncio.gather(
         _get_watch_official(),
         _extract_official_results(event, gender),
+        _extract_next_womens_match(event) if gender in {"female", "women", "woman"} else asyncio.sleep(0, result=None),
         return_exceptions=True,
     )
 
-    watch, results = parts
+    watch, results, next_match = parts
 
     if isinstance(watch, Exception):
         print(f"  live watch error: {watch}")
         watch = []
-
     if isinstance(results, Exception):
         print(f"  live results error: {results}")
         results = []
-
-    # IMPORTANT: rounds already come from explicit FIP DOM/text.
-    # Never reconstruct them from match counts or today's tournament stage.
-    results = _validate_explicit_rounds(results or [])
-
-    normalized_results = []
-    for result in (results or []):
-        normalized = _normalize_scoreboard_result(result)
-        if normalized:
-            normalized_results.append(normalized)
-
-    _LIVE_DEBUG_STATE["mode"] = "results-only"
-    _LIVE_DEBUG_STATE["results_count"] = len(normalized_results)
-
-    print(
-        "  live results-only:",
-        f"results={len(normalized_results)}",
-        f"stage={_stage_from_event(event)}",
-    )
+    if isinstance(next_match, Exception):
+        print(f"  live next-match error: {next_match}")
+        next_match = None
 
     return {
         "active": True,
@@ -3834,9 +1701,8 @@ async def get_tournament_now(gender: str = "female") -> dict:
         "place": event["place"],
         "dates": event["dates"],
         "watch": watch or [],
-        "results": normalized_results,
-        "next_match": None,
-        "current_match": None,
+        "results": results or [],
+        "next_match": next_match,
         "updated": today_str,
         "gender": gender,
         "source": "FIP · Premier Padel",
