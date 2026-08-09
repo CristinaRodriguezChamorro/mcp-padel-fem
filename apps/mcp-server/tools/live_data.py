@@ -1784,6 +1784,48 @@ async def _browser_fip_flat_results_fallback(event: dict) -> list:
         return []
 
 
+def _pair_is_womens_ranking_pair(
+    pair: str,
+    ranking_full: set[str],
+    ranking_surnames: set[str],
+) -> bool:
+    """
+    Valida las 2 jugadoras de una pareja contra ranking100.
+
+    Acepta:
+    - nombre completo;
+    - nombre parcial contenido en el ranking;
+    - primer apellido;
+    - último apellido como fallback.
+    """
+    pieces = [p.strip() for p in str(pair or "").split("/") if p.strip()]
+    if len(pieces) != 2:
+        return False
+
+    for piece in pieces:
+        norm = _norm_person_name(piece)
+        if not norm:
+            return False
+
+        # Full/partial name match.
+        if any(
+            norm == full or norm in full or full in norm
+            for full in ranking_full
+        ):
+            continue
+
+        parts = norm.split()
+        if len(parts) >= 2 and parts[1] in ranking_surnames:
+            continue
+
+        if parts and parts[-1] in ranking_surnames:
+            continue
+
+        return False
+
+    return True
+
+
 async def _extract_official_results(event: dict, gender: str = "female") -> list:
     """
     EN JUEGO ONLY — v39
@@ -2178,6 +2220,13 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         ranking_says_women = (
             _pair_is_womens_ranking_pair(pair_probe_a, ranking_full, ranking_surnames)
             and _pair_is_womens_ranking_pair(pair_probe_b, ranking_full, ranking_surnames)
+        )
+
+        print(
+            "  ranking100 check:",
+            f"pairA={pair_probe_a}",
+            f"pairB={pair_probe_b}",
+            f"ok={ranking_says_women}",
         )
 
         # FILTRO DE GÉNERO DESPUÉS DEL PARSEO.
