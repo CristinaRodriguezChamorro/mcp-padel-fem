@@ -1405,8 +1405,8 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
       3. Activar Female con asociación label->input cuando exista.
       4. Leer el cuadro femenino completo.
       5. Recorrer todos los días disponibles.
-      6. Detectar contenedores mínimos que incluyan 4 jugadoras del ranking
-         y celdas numéricas de marcador.
+      6. Detectar primero contenedores de resultado por su marcador.
+      7. Filtrar por género después, en Python.
       7. El backend decide ganador/perdedor y deduplica.
 
     Groq no interviene.
@@ -1418,7 +1418,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
         "states_scanned": 0,
         "candidate_blocks": 0,
         "female_blocks": 0,
-        "source_mode": "event-page-results-click-v106",
+        "source_mode": "results-first-gender-later-v107",
     }
 
     if async_playwright is None:
@@ -1468,6 +1468,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
 
             async def collect_state(tag: str):
                 diag["states_scanned"] += 1
+                diag.setdefault("state_tags", []).append(tag)
                 try:
                     state = await page.evaluate(
                         r"""
@@ -1566,13 +1567,17 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
 
                           for (const el of all) {
                             const text = clean(el.innerText);
-                            if (!text || text.length < 25 || text.length > 2200) continue;
+                            if (!text || text.length < 18 || text.length > 2600) continue;
 
                             const leaves = leafData(el);
+                            const scores = scoreValues(leaves);
+
+                            // v107: PRIMERO detectar un resultado por su estructura
+                            // de marcador. NO exigimos todavía 4 jugadoras femeninas.
+                            if (scores.length < 4 || scores.length > 12) continue;
+
                             const players = playerHitsFromLeaves(leaves);
 
-                            // Fallback only for detection if FIP wraps a player name in
-                            // a non-leaf node. Pair ordering below still prefers geometry.
                             let unique = players;
                             if (unique.length !== 4) {
                               const textPlayers = profileMatchIn(text);
@@ -1585,11 +1590,6 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                                 }
                               }
                             }
-
-                            if (unique.length !== 4) continue;
-
-                            const scores = scoreValues(leaves);
-                            if (scores.length < 4 || scores.length > 12) continue;
 
                             candidates.push({
                               el,
@@ -1609,41 +1609,38 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                           const seen = new Set();
 
                           for (const c of minimal) {
-                            // Pair players by REAL card geometry:
-                            // top row/pair first, then bottom row/pair.
-                            // This prevents combinations of players who never played
-                            // together when FIP's flattened DOM text is interleaved.
                             const positioned = (c.geometryPlayers || [])
                               .filter(x => Number.isFinite(x.y) && Number.isFinite(x.x));
 
-                            let orderedPlayers;
+                            let orderedPlayers = [];
                             if (positioned.length === 4) {
                               orderedPlayers = [...positioned]
                                 .sort((a,b) => {
                                   const dy = a.y - b.y;
                                   return Math.abs(dy) > 8 ? dy : a.x - b.x;
                                 });
-                            } else {
-                              // Conservative fallback: preserve previous behaviour only
-                              // if geometry is genuinely unavailable.
+                            } else if ((c.players || []).length === 4) {
                               orderedPlayers = [...c.players]
-                                .sort((a,b)=>a.index-b.index);
+                                .sort((a,b)=>(a.index||0)-(b.index||0));
                             }
 
                             const ordered = orderedPlayers.map(x=>x.display);
-                            if (ordered.length !== 4) continue;
 
-                            const key = ordered.join('|') + '::' + c.scores.join(',');
+                            // v107: aunque todavía no sepamos quiénes son las 4
+                            // jugadoras, conservamos el resultado bruto.
+                            const key = clean(c.text).slice(0,240) + '::' + c.scores.join(',');
                             if (seen.has(key)) continue;
                             seen.add(key);
 
                             out.push({
                               tag: c.tag,
-                              text: c.text.slice(0,1600),
+                              text: c.text.slice(0,2200),
                               players: ordered,
                               scores: c.scores,
-                              aliases: c.players.map(x=>x.alias),
-                              pairing_mode: positioned.length === 4 ? 'geometry' : 'text-fallback'
+                              aliases: (c.players || []).map(x=>x.alias),
+                              pairing_mode: positioned.length === 4
+                                ? 'geometry'
+                                : (ordered.length === 4 ? 'text-fallback' : 'raw-unresolved')
                             });
                           }
 
@@ -1845,7 +1842,8 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
         f"activated={diag['female_control_activated']}",
         f"states={diag['states_scanned']}",
         f"candidates={diag['candidate_blocks']}",
-        f"blocks={diag['female_blocks']}",
+        f"raw_blocks={diag['female_blocks']}",
+        f"days={diag.get('state_tags', [])[:30]}",
     )
 
     return json.dumps({"blocks": unique, "diag": diag}, ensure_ascii=False), diag
@@ -2159,6 +2157,32 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         print("  live results: reintentos v39 sin datos; activando flat fallback")
         blocks = await _browser_fip_flat_results_fallback(event)
 
+    # EN JUEGO: la frontera de género es el ranking femenino de 100 jugadoras.
+    # Primero traemos TODOS los resultados; después sólo se acepta un partido
+    # si podemos resolver sus cuatro jugadoras dentro de estas 100.
+    try:
+        _ranking_display_names = await get_womens_ranking_names(limit=100)
+    except Exception:
+        _ranking_display_names = []
+
+    ranking_full = {
+        _norm_person_name(name)
+        for name in _ranking_display_names
+        if name
+    }
+    ranking_surnames = {
+        parts[1]
+        for name in ranking_full
+        if len(parts := name.split()) >= 2
+    }
+    strict_ranking = len(ranking_full) >= 40
+
+    ranking_display = {
+        _norm_person_name(name): name
+        for name in _ranking_display_names
+        if name
+    }
+
     month_map = {
         "jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,
         "jul":7,"aug":8,"sep":9,"oct":10,"nov":11,"dec":12,
@@ -2227,12 +2251,96 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     parsed = []
 
-    for block_idx, block in enumerate(blocks):
-        players = list(block.get("players", []))
-        scores = [int(x) for x in block.get("scores", []) if str(x).isdigit()]
+    raw_parsed_count = 0
+    female_filtered_count = 0
 
-        if len(players) != 4 or len(scores) < 4:
+    def _resolve_womens_players_from_raw(block: dict) -> list[str]:
+        """
+        Resolver hasta 4 jugadoras DESPUÉS de haber recogido el resultado bruto.
+        Usa nombres completos y, como fallback, primer apellido.
+        """
+        existing = [str(x).strip() for x in (block.get("players") or []) if str(x).strip()]
+        if len(existing) == 4:
+            return existing
+
+        raw = re.sub(r"\s+", " ", str(block.get("text", ""))).strip()
+        norm_raw = f" {_norm_person_name(raw)} "
+
+        hits = []
+
+        # 1) Nombre completo.
+        for norm_name, display in ranking_display.items():
+            if norm_name and f" {norm_name} " in norm_raw:
+                hits.append((norm_raw.index(f" {norm_name} "), len(norm_name), display))
+
+        # 2) Si faltan, primer apellido de cada jugadora del ranking.
+        if len({x[2].casefold() for x in hits}) < 4:
+            for norm_name, display in ranking_display.items():
+                parts = norm_name.split()
+                if len(parts) < 2:
+                    continue
+                first_surname = parts[1]
+                if len(first_surname) < 4:
+                    continue
+                token = f" {first_surname} "
+                if token in norm_raw:
+                    hits.append((norm_raw.index(token), len(first_surname), display))
+
+        # Orden de aparición y dedupe por jugadora.
+        resolved = []
+        seen = set()
+        for _, _, display in sorted(hits, key=lambda x: (x[0], -x[1])):
+            key = display.casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            resolved.append(display)
+            if len(resolved) == 4:
+                break
+
+        return resolved
+
+    for block_idx, block in enumerate(blocks):
+        scores = [int(x) for x in block.get("scores", []) if str(x).isdigit()]
+        if len(scores) < 4:
             continue
+
+        # PRIMERO parseamos el resultado bruto.
+        raw_parsed_count += 1
+
+        players = _resolve_womens_players_from_raw(block)
+        if len(players) != 4:
+            # Resultado real detectado, pero no podemos atribuirlo con seguridad
+            # al cuadro femenino. No inventamos nombres.
+            continue
+
+        pair_probe_a = f"{players[0]} / {players[1]}"
+        pair_probe_b = f"{players[2]} / {players[3]}"
+
+        raw_norm = _norm_person_name(str(block.get("text", "")))
+        explicit_female = bool(re.search(
+            r"\b(female|women|woman|femenino|femenina|mujeres)\b",
+            raw_norm,
+        ))
+        explicit_male = bool(re.search(
+            r"\b(male|men|masculino|hombres)\b",
+            raw_norm,
+        ))
+
+        ranking_says_women = (
+            _pair_is_womens_ranking_pair(pair_probe_a, ranking_full, ranking_surnames)
+            and _pair_is_womens_ranking_pair(pair_probe_b, ranking_full, ranking_surnames)
+        )
+
+        # FILTRO DE GÉNERO DESPUÉS DEL PARSEO.
+        # Regla v108: si las CUATRO jugadoras no pueden validarse contra
+        # las 100 jugadoras del ranking femenino, el partido no se muestra.
+        # No usamos ya "female/women" como salvoconducto: esas palabras sirven
+        # para diagnóstico, pero no sustituyen la validación por nombre.
+        if strict_ranking and not ranking_says_women:
+            continue
+
+        female_filtered_count += 1
 
         # FIP puede ordenar score por pareja o por set.
         layouts = []
@@ -2330,6 +2438,9 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         "browser": capture_diag,
         "parser": "full-draw-proximity-v39",
         "raw_blocks": len(blocks),
+        "raw_parsed_before_gender": raw_parsed_count,
+        "female_after_filter": female_filtered_count,
+        "ranking_filter_size": len(ranking_full),
         "parsed_results": len(parsed),
         "valid_results": len(valid),
         "result_dates": dates,
@@ -2342,8 +2453,10 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     print(
         "  live v39:",
-        f"blocks={len(blocks)}",
-        f"parsed={len(parsed)}",
+        f"raw_blocks={len(blocks)}",
+        f"raw_parsed={raw_parsed_count}",
+        f"female_after_filter={female_filtered_count}",
+        f"ranking100={len(ranking_full)}",
         f"valid={len(valid)}",
         f"dates={len(dates)}",
     )
