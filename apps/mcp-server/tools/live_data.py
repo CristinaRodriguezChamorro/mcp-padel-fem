@@ -1897,119 +1897,259 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     def _snapshot_blocks_after_get(snaps: list[dict]) -> list[dict]:
         """
-        Los snapshots YA están descargados.
-        Aquí empieza el filtrado/interpretación con ranking100.
+        Parsear TODOS los partidos desde snapshots YA descargados.
 
-        Busca el contenedor HTML mínimo que contenga exactamente cuatro
-        jugadoras del ranking + un marcador plausible.
+        Regla principal:
+        FIP enlaza las jugadoras a perfiles `/player/...`.
+        Un partido real debe tener un ancestro mínimo con exactamente
+        cuatro perfiles de jugador.
+
+        No usamos coincidencias globales de apellidos para decidir
+        la estructura del partido.
         """
-        out=[]
-        seen=set()
+        out = []
+        seen = set()
+
+        def _display_from_player_anchor(anchor) -> str:
+            # 1) texto del link
+            text = re.sub(r"\s+", " ", anchor.get_text(" ", strip=True)).strip()
+            if text and len(text) >= 3:
+                return text
+
+            # 2) alt/title
+            for attr in ("title", "aria-label"):
+                value = re.sub(r"\s+", " ", str(anchor.get(attr, "") or "")).strip()
+                if value and len(value) >= 3:
+                    return value
+
+            img = anchor.find("img")
+            if img:
+                alt = re.sub(r"\s+", " ", str(img.get("alt", "") or "")).strip()
+                if alt and len(alt) >= 3:
+                    return alt
+
+            # 3) slug /player/name-surname/
+            href = str(anchor.get("href", "") or "")
+            m = re.search(r"/player/([^/?#]+)/?", href, re.I)
+            if m:
+                slug = re.sub(r"[-_]+", " ", m.group(1)).strip()
+                return " ".join(x.capitalize() for x in slug.split())
+
+            return ""
+
+        def _resolve_to_ranking100(raw_name: str) -> str:
+            norm_raw = _norm_person_name(raw_name)
+            if not norm_raw:
+                return ""
+
+            # Exact/full containment first.
+            best = None
+            for norm_name, display in ranking_display.items():
+                if (
+                    norm_raw == norm_name
+                    or norm_raw in norm_name
+                    or norm_name in norm_raw
+                ):
+                    score = len(norm_name)
+                    if best is None or score > best[0]:
+                        best = (score, display)
+
+            if best:
+                return best[1]
+
+            # First surname fallback.
+            raw_tokens = set(norm_raw.split())
+            for norm_name, display in ranking_display.items():
+                parts = norm_name.split()
+                if len(parts) < 2:
+                    continue
+                surname = parts[1]
+                if len(surname) >= 4 and surname in raw_tokens:
+                    score = len(surname)
+                    if best is None or score > best[0]:
+                        best = (score, display)
+
+            return best[1] if best else ""
+
+        def _numeric_score_leaves(container) -> list[int]:
+            """
+            Marcadores dentro del contenedor del partido.
+            Acepta números en hojas HTML y también atributos/value.
+            """
+            scores = []
+
+            for node in container.find_all(True):
+                # Sólo nodos hoja para no duplicar.
+                if node.find(True):
+                    continue
+
+                raw = re.sub(r"\s+", " ", node.get_text(" ", strip=True)).strip()
+                if re.fullmatch(r"\d{1,2}", raw):
+                    n = int(raw)
+                    if 0 <= n <= 20:
+                        scores.append(n)
+                        continue
+
+                value = str(node.get("value", "") or "").strip()
+                if re.fullmatch(r"\d{1,2}", value):
+                    n = int(value)
+                    if 0 <= n <= 20:
+                        scores.append(n)
+
+            # fallback: score-like data attributes
+            if len(scores) < 4:
+                for node in container.find_all(True):
+                    for attr, value in node.attrs.items():
+                        if not re.search(r"score|set|game", str(attr), re.I):
+                            continue
+                        if isinstance(value, list):
+                            vals = value
+                        else:
+                            vals = [value]
+                        for val in vals:
+                            for token in re.findall(r"(?<!\d)(\d{1,2})(?!\d)", str(val)):
+                                n = int(token)
+                                if 0 <= n <= 20:
+                                    scores.append(n)
+
+            return scores[:12]
 
         for snap in snaps:
-            html=str(snap.get("html","") or "")
-            tag=str(snap.get("tag","") or "")
+            html = str(snap.get("html", "") or "")
+            tag = str(snap.get("tag", "") or "")
             if not html:
                 continue
 
-            soup=BeautifulSoup(html,"html.parser")
+            soup = BeautifulSoup(html, "html.parser")
 
-            candidates=[]
-            for el in soup.find_all(True):
-                text=re.sub(r"\s+"," ",el.get_text(" ",strip=True)).strip()
-                if not text or len(text)<20 or len(text)>2600:
+            player_links = [
+                a for a in soup.find_all("a", href=True)
+                if re.search(r"/player/[^/?#]+", str(a.get("href", "")), re.I)
+            ]
+
+            # Dedupe duplicated anchors pointing to same profile at same DOM spot.
+            candidates = []
+            visited_containers = set()
+
+            for anchor in player_links:
+                cur = anchor
+                chosen = None
+
+                # Walk up until the smallest ancestor that contains 4 unique
+                # player profile URLs. A larger ancestor with 8/16 players is
+                # a round/section, not an individual match.
+                for _ in range(9):
+                    cur = cur.parent
+                    if cur is None or not getattr(cur, "find_all", None):
+                        break
+
+                    links = [
+                        x for x in cur.find_all("a", href=True)
+                        if re.search(r"/player/[^/?#]+", str(x.get("href", "")), re.I)
+                    ]
+
+                    hrefs = []
+                    for x in links:
+                        href = str(x.get("href", "") or "")
+                        m = re.search(r"/player/([^/?#]+)", href, re.I)
+                        if not m:
+                            continue
+                        slug = m.group(1).lower()
+                        if slug not in hrefs:
+                            hrefs.append(slug)
+
+                    if len(hrefs) == 4:
+                        chosen = cur
+                        break
+
+                    if len(hrefs) > 4:
+                        break
+
+                if chosen is None:
                     continue
 
-                norm_text=f" {_norm_person_name(text)} "
+                cid = id(chosen)
+                if cid in visited_containers:
+                    continue
+                visited_containers.add(cid)
 
-                hits=[]
-                for norm_name,display in ranking_display.items():
-                    if not norm_name:
+                links = [
+                    x for x in chosen.find_all("a", href=True)
+                    if re.search(r"/player/[^/?#]+", str(x.get("href", "")), re.I)
+                ]
+
+                raw_players = []
+                seen_slugs = set()
+
+                for link in links:
+                    href = str(link.get("href", "") or "")
+                    m = re.search(r"/player/([^/?#]+)", href, re.I)
+                    if not m:
                         continue
 
-                    token=f" {norm_name} "
-                    if token in norm_text:
-                        hits.append((norm_text.index(token),len(norm_name),display))
+                    slug = m.group(1).lower()
+                    if slug in seen_slugs:
                         continue
+                    seen_slugs.add(slug)
 
-                    parts=norm_name.split()
-                    if len(parts)>=2 and len(parts[1])>=4:
-                        surname=parts[1]
-                        stoken=f" {surname} "
-                        if stoken in norm_text:
-                            hits.append((norm_text.index(stoken),len(surname),display))
+                    display = _display_from_player_anchor(link)
+                    if display:
+                        raw_players.append(display)
 
-                resolved=[]
-                seen_players=set()
-                for pos,length,display in sorted(hits,key=lambda x:(x[0],-x[1])):
-                    k=display.casefold()
-                    if k in seen_players:
-                        continue
-                    seen_players.add(k)
-                    resolved.append(display)
-
-                if len(resolved)!=4:
+                if len(raw_players) != 4:
                     continue
 
-                # Numeric leaves only.
-                scores=[]
-                for leaf in el.find_all(True):
-                    if leaf.find(True):
-                        continue
-                    t=re.sub(r"\s+"," ",leaf.get_text(" ",strip=True)).strip()
-                    if re.fullmatch(r"\d{1,2}",t):
-                        n=int(t)
-                        if 0<=n<=20:
-                            scores.append(n)
+                resolved = [_resolve_to_ranking100(name) for name in raw_players]
 
-                if len(scores)<4 or len(scores)>12:
+                # IMPORTANT: the GET is already complete at this point.
+                # Here, and only here, we filter by ranking100.
+                if len(resolved) != 4 or any(not x for x in resolved):
                     continue
 
-                candidates.append((el,resolved,scores,text))
+                if len({x.casefold() for x in resolved}) != 4:
+                    continue
 
-            # Keep smallest candidate containers.
-            minimal=[]
-            for el,players,scores,text in candidates:
-                contains_smaller=False
-                for other,_,_,_ in candidates:
-                    if other is el:
-                        continue
-                    try:
-                        if other in el.descendants:
-                            contains_smaller=True
-                            break
-                    except Exception:
-                        pass
-                if not contains_smaller:
-                    minimal.append((el,players,scores,text))
+                scores = _numeric_score_leaves(chosen)
+                if len(scores) < 4:
+                    continue
 
-            for _,players,scores,text in minimal:
-                key=(tuple(players),tuple(scores))
+                text = re.sub(r"\s+", " ", chosen.get_text(" ", strip=True)).strip()
+
+                candidates.append({
+                    "tag": tag,
+                    "text": text[:3000],
+                    "players": resolved,
+                    "raw_players": raw_players,
+                    "scores": scores,
+                    "pairing_mode": "player-links-postfilter",
+                    "source": "snapshot",
+                })
+
+            for item in candidates:
+                key = (
+                    tuple(x.casefold() for x in item["players"]),
+                    tuple(item["scores"]),
+                )
                 if key in seen:
                     continue
                 seen.add(key)
-                out.append({
-                    "tag":tag,
-                    "text":text[:2600],
-                    "players":players,
-                    "scores":scores,
-                    "pairing_mode":"snapshot-postfilter",
-                    "source":"snapshot",
-                })
-
-                print(
-                    "  snapshot match:",
-                    " / ".join(players),
-                    f"scores={scores}",
-                )
+                out.append(item)
 
         return out
 
     # GET terminado. AHORA sí filtramos contra ranking100.
     snapshot_blocks=_snapshot_blocks_after_get(snapshots)
     if snapshot_blocks:
-        print(f"  snapshot parse after GET: {len(snapshot_blocks)} bloques candidatos")
+        print(f"  snapshot parse after GET: {len(snapshot_blocks)} partidos reales candidatos")
+        for preview in snapshot_blocks[:12]:
+            print(
+                "  snapshot card:",
+                f"{' / '.join(preview.get('players', []))}",
+                f"scores={preview.get('scores', [])}",
+            )
         blocks.extend(snapshot_blocks)
+    else:
+        print("  snapshot parse after GET: 0 tarjetas con 4 player-links + marcador")
 
     month_map = {
         "jan":1,"feb":2,"mar":3,"apr":4,"may":5,"jun":6,
@@ -2333,7 +2473,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     _LIVE_DEBUG_STATE.update({
         "browser": capture_diag,
-        "parser": "snapshots-first-ranking100-v112",
+        "parser": "player-links-snapshot-v115",
         "raw_blocks": len(blocks),
         "raw_parsed_before_gender": raw_parsed_count,
         "female_after_filter": female_filtered_count,
