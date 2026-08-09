@@ -1115,6 +1115,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
 
             async def collect_state(tag: str):
                 diag["states_scanned"] += 1
+                diag.setdefault("state_tags", []).append(tag)
                 try:
                     state = await page.evaluate(
                         r"""
@@ -1294,7 +1295,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                         looks_date = any(re.search(
                             r"(?:\bMon\b|\bTue\b|\bWed\b|\bThu\b|\bFri\b|\bSat\b|\bSun\b|"
                             r"\bMonday\b|\bTuesday\b|\bWednesday\b|\bThursday\b|\bFriday\b|\bSaturday\b|\bSunday\b|"
-                            r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9})",
+                            r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9}|[A-Za-z]{3,9}\s+\d{1,2})",
                             lab, re.I
                         ) for lab in labels)
                         if not looks_date:
@@ -1329,7 +1330,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
                             if not re.search(
                                 r"(?:\bMon\b|\bTue\b|\bWed\b|\bThu\b|\bFri\b|\bSat\b|\bSun\b|"
                                 r"\bMonday\b|\bTuesday\b|\bWednesday\b|\bThursday\b|\bFriday\b|\bSaturday\b|\bSunday\b|"
-                                r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9})",
+                                r"\d{1,2}[/-]\d{1,2}|\d{1,2}\s+[A-Za-z]{3,9}|[A-Za-z]{3,9}\s+\d{1,2})",
                                 label, re.I
                             ):
                                 continue
@@ -1459,6 +1460,7 @@ async def _browser_fip_womens_results_text(event: dict) -> tuple[str, dict]:
         f"states={diag['states_scanned']}",
         f"candidates={diag['candidate_blocks']}",
         f"blocks={diag['female_blocks']}",
+        f"tags={diag.get('state_tags', [])[:20]}",
     )
 
     return json.dumps({"blocks": unique, "diag": diag}, ensure_ascii=False), diag

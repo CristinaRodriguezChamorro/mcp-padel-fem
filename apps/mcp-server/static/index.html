@@ -321,6 +321,178 @@ nav {
   background:transparent;
 }
 
+
+/* ── AGRUPACIÓN DE RESULTADOS POR RONDA ───────────────────────── */
+.round-group{
+  margin:0 0 22px;
+  border:1px solid #30394a;
+  border-radius:14px;
+  overflow:hidden;
+  background:#101725;
+}
+.round-heading{
+  padding:15px 20px;
+  background:#171d2b;
+  border-bottom:1px solid #30394a;
+  color:#ca75f2;
+  font-size:1.02em;
+  line-height:1;
+  font-weight:950;
+  text-transform:uppercase;
+  letter-spacing:.045em;
+}
+.round-group .result-row + .result-row{
+  border-top:1px solid #30394a;
+}
+.round-group .round-empty{
+  margin:0;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  text-align:left;
+  padding:18px 20px;
+}
+
+/* ── CUADRO ELIMINATORIO ───────────────────────────────────────── */
+.knockout-section{
+  margin:20px 0 28px;
+}
+.knockout-head{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-end;
+  gap:16px;
+  margin-bottom:12px;
+}
+.knockout-head strong{
+  color:#fff;
+  font-size:1.02em;
+  font-weight:950;
+  text-transform:uppercase;
+  letter-spacing:.035em;
+}
+.knockout-head span{
+  color:#888492;
+  font-size:.78em;
+  font-weight:700;
+}
+.knockout-scroll{
+  width:100%;
+  overflow-x:auto;
+  overflow-y:hidden;
+  -webkit-overflow-scrolling:touch;
+  padding:4px 2px 10px;
+}
+.knockout-board{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(250px,1fr));
+  gap:28px;
+  min-width:1120px;
+  min-height:620px;
+  align-items:stretch;
+}
+.knockout-round{
+  min-width:0;
+  display:flex;
+  flex-direction:column;
+}
+.knockout-round-title{
+  flex:0 0 auto;
+  padding:11px 14px;
+  margin-bottom:10px;
+  background:#171d2b;
+  border:1px solid #303748;
+  color:#c978ef;
+  border-radius:11px;
+  font-size:.83em;
+  font-weight:950;
+  text-align:center;
+  text-transform:uppercase;
+  letter-spacing:.045em;
+}
+.knockout-matches{
+  flex:1 1 auto;
+  display:flex;
+  flex-direction:column;
+  justify-content:space-around;
+  gap:12px;
+}
+.knockout-card{
+  position:relative;
+  background:linear-gradient(180deg,#121b2a 0%,#0d1521 100%);
+  border:1px solid #354054;
+  border-radius:11px;
+  overflow:visible;
+}
+.knockout-card:not(.last-round)::after{
+  content:"";
+  position:absolute;
+  top:50%;
+  right:-29px;
+  width:29px;
+  height:1px;
+  background:#4a5872;
+}
+.knockout-card-row{
+  display:flex;
+  justify-content:space-between;
+  gap:10px;
+  align-items:flex-start;
+  padding:10px 11px;
+}
+.knockout-card-row + .knockout-card-row{
+  border-top:1px solid #2c3546;
+}
+.knockout-card-row.winner{
+  color:#fff;
+  font-weight:850;
+}
+.knockout-card-row.loser{
+  color:#9995a2;
+}
+.knockout-pair{
+  min-width:0;
+  font-size:.78em;
+  line-height:1.28;
+  overflow-wrap:anywhere;
+}
+.knockout-score{
+  flex:0 0 auto;
+  color:#ca75f2;
+  font-size:.8em;
+  font-weight:950;
+  white-space:nowrap;
+}
+.knockout-empty{
+  padding:13px 12px;
+  color:#777381;
+  font-size:.76em;
+  text-align:center;
+}
+.knockout-note{
+  margin-top:7px;
+  color:#777381;
+  font-size:.72em;
+}
+
+@media(max-width:700px){
+  .knockout-head{
+    align-items:flex-start;
+    flex-direction:column;
+    gap:3px;
+  }
+  .knockout-board{
+    grid-template-columns:repeat(4,225px);
+    min-width:max-content;
+    min-height:560px;
+    gap:24px;
+  }
+  .knockout-card:not(.last-round)::after{
+    right:-25px;
+    width:25px;
+  }
+}
+
 /* ── EN JUEGO ── */
 
 .live-tournament{
@@ -1028,14 +1200,28 @@ async function loadEnJuego(){
       .map(x=>`<span class="live-watch-chip">📺 ${x}</span>`)
       .join('');
 
+    const canonicalRound=(raw='')=>{
+      const s=String(raw).trim().toLowerCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+
+      if(/\b(final|finals)\b/.test(s) && !/(semi|quarter|cuarto)/.test(s)) return 'Final';
+      if(/semi|semifinal|round\s*4|\br4\b/.test(s)) return 'Semifinales';
+      if(/quarter|cuartos?|round\s*8|\br8\b/.test(s)) return 'Cuartos de final';
+      if(/octavos?|round\s*16|\br16\b|1\/8/.test(s)) return 'Octavos de final';
+      if(/round\s*32|\br32\b|segunda ronda/.test(s)) return 'Segunda ronda';
+      if(/round\s*64|\br64\b|primera ronda/.test(s)) return 'Primera ronda';
+      if(/qual|clasific/.test(s)) return 'Clasificación';
+      return raw||'Partidos';
+    };
+
     const groups={};
     (d.results||[]).forEach(r=>{
-      const round=r.round||'Partidos';
-      (groups[round]??=[]).push(r);
+      const round=canonicalRound(r.round);
+      (groups[round]??=[]).push({...r,round});
     });
 
     const roundOrder=[
-      'Final','Semifinales','Cuartos de final','Octavos de final',
+      'Octavos de final','Cuartos de final','Semifinales','Final',
       'Segunda ronda','Primera ronda','Clasificación','Partidos'
     ];
     const ordered=[
@@ -1043,8 +1229,54 @@ async function loadEnJuego(){
       ...Object.keys(groups).filter(r=>!roundOrder.includes(r))
     ];
 
-    const resultsHtml=ordered.map(round=>{
-      const matches=groups[round].map(r=>`
+
+    const bracketRounds=[
+      'Octavos de final',
+      'Cuartos de final',
+      'Semifinales',
+      'Final'
+    ];
+
+    const compactPair=name=>{
+      if(!name)return'';
+      return name.split('/').map(player=>{
+        const parts=player.trim().split(/\s+/).filter(Boolean);
+        if(parts.length<=2)return player.trim();
+        return `${parts[0]} ${parts[1]}`;
+      }).join(' / ');
+    };
+
+    const bracketHtml=bracketRounds.map((round,idx)=>{
+      const matches=groups[round]||[];
+      const cards=matches.length
+        ? matches.map(r=>`
+            <div class="knockout-card ${idx===bracketRounds.length-1?'last-round':''}">
+              <div class="knockout-card-row winner">
+                <span class="knockout-pair">🏆 ${compactPair(r.winner||'')}</span>
+                <span class="knockout-score">${r.score||''}</span>
+              </div>
+              <div class="knockout-card-row loser">
+                <span class="knockout-pair">${compactPair(r.loser||'')}</span>
+              </div>
+            </div>`).join('')
+        : `<div class="knockout-card ${idx===bracketRounds.length-1?'last-round':''}">
+             <div class="knockout-empty">Pendiente</div>
+           </div>`;
+
+      return `<div class="knockout-round">
+        <div class="knockout-round-title">${round}</div>
+        <div class="knockout-matches">${cards}</div>
+      </div>`;
+    }).join('');
+
+    const keyRounds=['Octavos de final','Cuartos de final','Semifinales','Final'];
+    const extraRounds=ordered.filter(round=>!keyRounds.includes(round));
+
+    const renderRoundGroup=(round,force=false)=>{
+      const roundMatches=groups[round]||[];
+      if(!force && !roundMatches.length)return '';
+
+      const matches=roundMatches.map(r=>`
         <div class="result-row">
           <div class="result-card">
             <div class="result-winner">${r.winner||''}<span class="trophy">🏆</span></div>
@@ -1057,11 +1289,16 @@ async function loadEnJuego(){
           </div>
         </div>`).join('');
 
-      return `<div class="round-group">
+      return `<section class="round-group" data-round="${round}">
         <div class="round-heading">${round}</div>
-        ${matches}
-      </div>`;
-    }).join('');
+        ${matches||'<div class="live-empty round-empty">Todavía no hay partidos finalizados en esta ronda.</div>'}
+      </section>`;
+    };
+
+    const resultsHtml=[
+      ...keyRounds.map(round=>renderRoundGroup(round,true)),
+      ...extraRounds.map(round=>renderRoundGroup(round,false))
+    ].join('');
 
     el.innerHTML=`<div class="live-tournament">
       <div class="live-summary">
@@ -1076,6 +1313,19 @@ async function loadEnJuego(){
       <div class="live-watch">
         <div class="live-watch-label">Dónde verlo</div>
         ${watch||'<span class="live-watch-chip">Por confirmar</span>'}
+      </div>
+
+      <div class="knockout-section">
+        <div class="knockout-head">
+          <strong>Cuadro eliminatorio</strong>
+          <span>Octavos → Cuartos → Semifinales → Final</span>
+        </div>
+        <div class="knockout-scroll">
+          <div class="knockout-board">${bracketHtml}</div>
+        </div>
+        <div class="knockout-note">
+          Vista visual del cuadro construida con los partidos finalizados clasificados por FIP.
+        </div>
       </div>
 
       <div class="results-title">
