@@ -290,119 +290,35 @@ nav {
   border-right:0;
 }
 
-/* ── CUADRO DEL TORNEO ───────────────────────────────────────────── */
-.bracket-section{
-  margin:20px 0 26px;
-}
-.bracket-title{
-  display:flex;
-  align-items:flex-end;
-  justify-content:space-between;
-  gap:16px;
-  margin-bottom:12px;
-}
-.bracket-title strong{
-  color:#fff;
-  font-size:1.04em;
-  font-weight:950;
-  text-transform:uppercase;
-  letter-spacing:.03em;
-}
-.bracket-title span{
-  color:#86818e;
-  font-size:.78em;
-  font-weight:700;
-}
-.bracket-scroll{
-  width:100%;
-  overflow-x:auto;
-  overflow-y:hidden;
-  -webkit-overflow-scrolling:touch;
-  scrollbar-width:thin;
-  scrollbar-color:#69438c transparent;
-  padding-bottom:8px;
-}
-.bracket-grid{
-  display:grid;
-  grid-template-columns:repeat(4,minmax(245px,1fr));
-  gap:14px;
-  min-width:1050px;
-  align-items:start;
-}
-.bracket-column{
-  min-width:0;
+/* ── PARTIDOS FINALIZADOS AGRUPADOS POR RONDA ─────────────────── */
+.round-group{
+  margin:0 0 18px;
   border:1px solid #303748;
   border-radius:14px;
-  background:linear-gradient(180deg,#111a29 0%,#0d1522 100%);
   overflow:hidden;
+  background:linear-gradient(180deg,#111a29 0%,#0e1623 100%);
 }
-.bracket-column-title{
-  padding:11px 14px;
-  color:#ca75f2;
-  background:#141a29;
+.round-heading{
+  margin:0;
+  padding:14px 18px;
+  background:#151a28;
   border-bottom:1px solid #303748;
-  font-size:.83em;
+  color:#ca75f2;
+  font-size:1em;
   font-weight:950;
   text-transform:uppercase;
-  letter-spacing:.05em;
+  letter-spacing:.035em;
 }
-.bracket-match{
-  position:relative;
-  padding:12px 13px;
-  border-bottom:1px solid #283141;
+.round-group .result-row{
+  border-bottom:1px solid #293142;
 }
-.bracket-match:last-child{border-bottom:0}
-.bracket-pair{
-  display:flex;
-  justify-content:space-between;
-  gap:10px;
-  align-items:flex-start;
-  color:#9b98a5;
-  font-size:.82em;
-  line-height:1.3;
+.round-group .result-row:last-child{
+  border-bottom:0;
 }
-.bracket-pair + .bracket-pair{margin-top:6px}
-.bracket-pair.winner{
-  color:#fff;
-  font-weight:850;
-}
-.bracket-pair-name{
-  min-width:0;
-  overflow-wrap:anywhere;
-}
-.bracket-score{
-  flex:0 0 auto;
-  color:#c775f0;
-  font-weight:900;
-  white-space:nowrap;
-}
-.bracket-empty{
-  padding:15px 14px;
-  color:#777482;
-  font-size:.8em;
-}
-.bracket-note{
-  margin-top:8px;
-  color:#777482;
-  font-size:.72em;
-}
-
-@media(max-width:700px){
-  .bracket-section{margin:16px 0 22px}
-  .bracket-title{
-    align-items:flex-start;
-    flex-direction:column;
-    gap:4px;
-  }
-  .bracket-grid{
-    grid-template-columns:repeat(4,230px);
-    min-width:max-content;
-    gap:10px;
-  }
-  .bracket-column{border-radius:12px}
-  .bracket-column-title{padding:10px 12px}
-  .bracket-match{padding:10px 11px}
-  .bracket-pair{font-size:.78em}
+.round-group .result-card{
+  border:0;
+  border-radius:0;
+  background:transparent;
 }
 
 /* ── EN JUEGO ── */
@@ -1127,45 +1043,6 @@ async function loadEnJuego(){
       ...Object.keys(groups).filter(r=>!roundOrder.includes(r))
     ];
 
-
-    const bracketRounds=[
-      'Octavos de final',
-      'Cuartos de final',
-      'Semifinales',
-      'Final'
-    ];
-
-    const compactPair=name=>{
-      if(!name)return'';
-      return name.split('/').map(player=>{
-        const p=player.trim().split(/\s+/).filter(Boolean);
-        if(p.length<=2)return player.trim();
-        return `${p[0]} ${p[1]}`;
-      }).join(' / ');
-    };
-
-    const bracketHtml=bracketRounds.map(round=>{
-      const matches=groups[round]||[];
-
-      const rows=matches.length
-        ? matches.map(r=>`
-          <div class="bracket-match">
-            <div class="bracket-pair winner">
-              <span class="bracket-pair-name">🏆 ${compactPair(r.winner||'')}</span>
-              <span class="bracket-score">${r.score||''}</span>
-            </div>
-            <div class="bracket-pair">
-              <span class="bracket-pair-name">${compactPair(r.loser||'')}</span>
-            </div>
-          </div>`).join('')
-        : `<div class="bracket-empty">Sin partidos finalizados todavía</div>`;
-
-      return `<div class="bracket-column">
-        <div class="bracket-column-title">${round}</div>
-        ${rows}
-      </div>`;
-    }).join('');
-
     const resultsHtml=ordered.map(round=>{
       const matches=groups[round].map(r=>`
         <div class="result-row">
@@ -1201,20 +1078,8 @@ async function loadEnJuego(){
         ${watch||'<span class="live-watch-chip">Por confirmar</span>'}
       </div>
 
-
-      <div class="bracket-section">
-        <div class="bracket-title">
-          <strong>Cuadro del torneo</strong>
-          <span>Octavos → Cuartos → Semifinales → Final</span>
-        </div>
-        <div class="bracket-scroll">
-          <div class="bracket-grid">${bracketHtml}</div>
-        </div>
-        <div class="bracket-note">Se muestran únicamente partidos ya finalizados con la ronda identificada por FIP.</div>
-      </div>
-
       <div class="results-title">
-        <span>Partidos finalizados</span>
+        <span>Partidos finalizados por ronda</span>
         <span class="results-source">${(d.results||[]).length} partidos · Datos oficiales FIP</span>
       </div>
 
