@@ -2467,6 +2467,9 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
         seen.add(key)
         valid.append(item)
 
+    # Production fix: never trust broad DOM round labels for the closing draw.
+    # Rebuild Final/SF/QF/R16 from the full v39 sequence, then validate.
+    valid = _assign_knockout_rounds_from_tail(valid)
     valid = _validate_explicit_rounds(valid)
 
     valid.sort(
@@ -2481,7 +2484,7 @@ async def _extract_official_results(event: dict, gender: str = "female") -> list
 
     _LIVE_DEBUG_STATE.update({
         "browser": capture_diag,
-        "parser": "fip-draw-column-v92",
+        "parser": "v39-tail-rounds-v97",
         "raw_blocks": len(blocks),
         "parsed_results": len(parsed),
         "valid_results": len(valid),
@@ -2525,6 +2528,73 @@ def _round_pair_signature(pair: str) -> tuple[str, ...]:
         elif parts:
             sig.append(parts[0])
     return tuple(sorted(sig))
+
+
+def _assign_knockout_rounds_from_tail(results: list) -> list:
+    """
+    Rebuild the closing rounds from the COMPLETE v39 result order.
+
+    The bug we saw in production came from contaminated DOM text tagging an
+    early match as "Final". The capacity guard then kept that wrong match.
+
+    v39 consistently returns the complete cumulative result set in source order.
+    For the closing knockout rounds, the tail is deterministic:
+      last 1  -> Final
+      prev 2  -> Semifinales
+      prev 4  -> Cuartos de final
+      prev 8  -> Octavos de final
+    """
+    rows = [dict(x) for x in (results or [])]
+    if not rows:
+        return rows
+
+    # Remove unreliable knockout labels first.
+    for row in rows:
+        if row.get("round") in {
+            "Final", "Semifinales", "Cuartos de final", "Octavos de final"
+        }:
+            row["round"] = "Partidos"
+            row["round_source"] = "tail-reset"
+
+    cursor = len(rows)
+
+    for rnd, count in (
+        ("Final", 1),
+        ("Semifinales", 2),
+        ("Cuartos de final", 4),
+        ("Octavos de final", 8),
+    ):
+        start = max(0, cursor - count)
+        for row in rows[start:cursor]:
+            row["round"] = rnd
+            row["round_source"] = "v39-tail-order"
+        cursor = start
+
+    # Older matches are kept, but explicitly separated from R16 onwards.
+    for row in rows[:cursor]:
+        row["round"] = "Rondas anteriores"
+        row["round_source"] = "v39-tail-order"
+
+    final_rows = [r for r in rows if r.get("round") == "Final"]
+    if final_rows:
+        f = final_rows[0]
+        print(
+            "  FINAL ASIGNADA:",
+            f"{f.get('winner','')} vs {f.get('loser','')}",
+            f"score={f.get('score','')}",
+        )
+
+    print(
+        "  tail rounds:",
+        f"total={len(rows)}",
+        f"Final={sum(1 for r in rows if r.get('round')=='Final')}",
+        f"Semifinales={sum(1 for r in rows if r.get('round')=='Semifinales')}",
+        f"Cuartos={sum(1 for r in rows if r.get('round')=='Cuartos de final')}",
+        f"Octavos={sum(1 for r in rows if r.get('round')=='Octavos de final')}",
+        f"anteriores={sum(1 for r in rows if r.get('round')=='Rondas anteriores')}",
+    )
+
+    return rows
 
 
 def _validate_explicit_rounds(results: list) -> list:
@@ -3926,9 +3996,8 @@ async def get_tournament_now(gender: str = "female") -> dict:
         print(f"  live results error: {results}")
         results = []
 
-    # IMPORTANT: rounds already come from explicit FIP DOM/text.
-    # Never reconstruct them from match counts or today's tournament stage.
-    results = _validate_explicit_rounds(results or [])
+    # Rounds have already been rebuilt and validated in _extract_official_results.
+    results = results or []
 
     normalized_results = []
     for result in (results or []):

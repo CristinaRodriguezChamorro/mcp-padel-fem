@@ -1221,7 +1221,7 @@ async function loadEnJuego(){
     });
 
     const roundOrder=[
-      'Octavos de final','Cuartos de final','Semifinales','Final',
+      'Final','Semifinales','Cuartos de final','Octavos de final',
       'Segunda ronda','Primera ronda','Clasificación','Partidos'
     ];
     const ordered=[
@@ -1231,10 +1231,10 @@ async function loadEnJuego(){
 
 
     const bracketRounds=[
-      'Octavos de final',
-      'Cuartos de final',
+      'Final',
       'Semifinales',
-      'Final'
+      'Cuartos de final',
+      'Octavos de final'
     ];
 
     const compactPair=name=>{
@@ -1269,7 +1269,7 @@ async function loadEnJuego(){
       </div>`;
     }).join('');
 
-    const keyRounds=['Octavos de final','Cuartos de final','Semifinales','Final'];
+    const keyRounds=['Final','Semifinales','Cuartos de final','Octavos de final'];
     const extraRounds=ordered.filter(round=>!keyRounds.includes(round));
 
     const renderRoundGroup=(round,force=false)=>{
@@ -1321,7 +1321,7 @@ async function loadEnJuego(){
       <div class="knockout-section">
         <div class="knockout-head">
           <strong>Cuadro eliminatorio</strong>
-          <span>Octavos → Cuartos → Semifinales → Final</span>
+          <span>Final → Semifinales → Cuartos → Octavos</span>
         </div>
         <div class="knockout-scroll">
           <div class="knockout-board">${bracketHtml}</div>

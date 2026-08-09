@@ -591,7 +591,7 @@ async def resumen_diario_padel_femenino():
 
 @app.get("/api/version")
 async def api_version():
-    return {"version": "v95-draw-geometry-parser-2026-08-09"}
+    return {"version": "v97-final-real-from-v39-tail-2026-08-09"}
 
 @app.get("/")
 async def index():
@@ -601,7 +601,7 @@ async def index():
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
-            "X-App-Version": "v95-draw-geometry-parser-2026-08-09",
+            "X-App-Version": "v97-final-real-from-v39-tail-2026-08-09",
         },
     )
 
