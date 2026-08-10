@@ -54,7 +54,7 @@ async def api_news():
 
 @app.get("/api/ranking")
 async def api_ranking():
-    cached = cache_get("ranking", 6 * 60 * 60)
+    cached = cache_get("ranking", 12 * 60 * 60)
     if cached:
         return cached
     data = await get_ranking_live()

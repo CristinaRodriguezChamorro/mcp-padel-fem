@@ -32,6 +32,9 @@ COUNTRY_FLAGS = {
 
 _LAST_GOOD_LIVE_RESULTS = {"results": [], "ts": 0.0}
 
+_FIP_POINTS_CACHE = {"points": {}, "ts": 0.0}
+_FIP_POINTS_TTL = 12 * 60 * 60
+
 
 async def _fetch(url: str) -> str:
     try:
@@ -93,6 +96,120 @@ async def get_womens_ranking_names(limit: int = 200) -> list[str]:
 
     print(f"  ranking names: {len(names)} jugadoras disponibles para filtros")
     return names
+
+
+def _ranking_name_norm(value: str) -> str:
+    value = unicodedata.normalize("NFD", value or "")
+    value = "".join(ch for ch in value if unicodedata.category(ch) != "Mn")
+    return re.sub(r"[^a-z0-9]+", " ", value.lower()).strip()
+
+
+async def _get_fip_points_map(player_names: list[str]) -> dict[str, int]:
+    """
+    Devuelve SOLO los puntos oficiales FIP de las jugadoras solicitadas.
+
+    No cambia posición, nombre, foto, bandera ni pareja.
+    Cache interno: 12 horas.
+    """
+    now = time.time()
+    cached = _FIP_POINTS_CACHE.get("points") or {}
+    cached_ts = float(_FIP_POINTS_CACHE.get("ts") or 0.0)
+
+    if cached and (now - cached_ts) < _FIP_POINTS_TTL:
+        print(f"  ranking points FIP: cache 12h · {len(cached)} jugadoras")
+        return cached
+
+    urls = [
+        "https://www.padelfip.com/fip-rankings/?gender=Female",
+        "https://www.padelfip.com/es/fip-rankings/?gender=Female",
+    ]
+
+    html = ""
+    used_url = ""
+    for url in urls:
+        html = await _fetch(url)
+        if html:
+            used_url = url
+            break
+
+    if not html:
+        print("  ranking points FIP: no disponible; se mantienen puntos PadelSpeak")
+        return cached
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Extract readable text once. The official FIP page currently renders names
+    # followed by country and "Points/Puntos <number>". We match ONLY against
+    # the names already present in our ranking, so male rows cannot contaminate
+    # the result.
+    text = re.sub(r"\s+", " ", soup.get_text(" ", strip=True))
+
+    points: dict[str, int] = {}
+
+    for player_name in player_names:
+        display = re.sub(r"\s+", " ", player_name or "").strip()
+        if not display:
+            continue
+
+        # Exact displayed name first.
+        pattern = re.compile(
+            re.escape(display) +
+            r".{0,160}?(?:Points|Puntos)\s*[:\-]?\s*([0-9][0-9.\s,]*)",
+            re.I,
+        )
+        match = pattern.search(text)
+
+        # FIP can occasionally strip accents while the ranking source keeps them.
+        # Fallback: inspect text nodes and compare normalized player names.
+        if not match:
+            target_norm = _ranking_name_norm(display)
+            for node in soup.find_all(string=True):
+                raw = re.sub(r"\s+", " ", str(node)).strip()
+                if not raw:
+                    continue
+                if _ranking_name_norm(raw) != target_norm:
+                    continue
+
+                parent_text = re.sub(
+                    r"\s+", " ",
+                    node.parent.parent.get_text(" ", strip=True)
+                    if node.parent and node.parent.parent
+                    else node.parent.get_text(" ", strip=True)
+                    if node.parent
+                    else raw,
+                )
+                local_match = re.search(
+                    r"(?:Points|Puntos)\s*[:\-]?\s*([0-9][0-9.\s,]*)",
+                    parent_text,
+                    re.I,
+                )
+                if local_match:
+                    match = local_match
+                    break
+
+        if not match:
+            continue
+
+        raw_points = re.sub(r"[^\d]", "", match.group(1))
+        if not raw_points:
+            continue
+
+        try:
+            points[_ranking_name_norm(display)] = int(raw_points)
+        except Exception:
+            continue
+
+    if points:
+        _FIP_POINTS_CACHE["points"] = points
+        _FIP_POINTS_CACHE["ts"] = now
+        print(
+            f"  ranking points FIP: {len(points)}/{len(player_names)} actualizados "
+            f"· cache=12h · source={used_url}"
+        )
+        return points
+
+    print("  ranking points FIP: 0 coincidencias; se mantienen puntos PadelSpeak")
+    return cached
 
 
 async def get_ranking_live() -> list:
@@ -191,6 +308,25 @@ async def get_ranking_live() -> list:
     if len(ranking) < 5:
         print(f"  ranking: solo {len(ranking)} filas parseadas, usando fallback")
         return _fallback_ranking()
+
+    # Actualizar SOLAMENTE el contador de puntos desde FIP oficial.
+    # Orden, posición, nombres, fotos y parejas siguen viniendo del flujo existente.
+    try:
+        fip_points = await _get_fip_points_map([p.get("name", "") for p in ranking])
+        updated = 0
+        for player in ranking:
+            key = _ranking_name_norm(player.get("name", ""))
+            pts_num = fip_points.get(key)
+            if pts_num is None:
+                continue
+            player["pts"] = f"{pts_num:,}".replace(",", ".")
+            updated += 1
+        print(f"  ranking: puntos FIP aplicados={updated}/{len(ranking)}")
+    except Exception as exc:
+        print(
+            f"  ranking points FIP error: {type(exc).__name__}: {exc} "
+            "· se mantienen puntos PadelSpeak"
+        )
 
     _add_pairs(ranking)
     photos = sum(1 for p in ranking if p.get("photo"))
