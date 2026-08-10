@@ -154,7 +154,7 @@ async def _get_fip_points_map(player_names: list[str]) -> dict[str, int]:
         # Exact displayed name first.
         pattern = re.compile(
             re.escape(display) +
-            r".{0,160}?(?:Points|Puntos)\s*[:\-]?\s*([0-9][0-9.\s,]*)",
+            r".{0,160}?(?:Points|Puntos)\s*[:\-]?\s*([0-9]{1,3}(?:[.,][0-9]{3})+|[0-9]+)",
             re.I,
         )
         match = pattern.search(text)
@@ -179,7 +179,7 @@ async def _get_fip_points_map(player_names: list[str]) -> dict[str, int]:
                     else raw,
                 )
                 local_match = re.search(
-                    r"(?:Points|Puntos)\s*[:\-]?\s*([0-9][0-9.\s,]*)",
+                    r"(?:Points|Puntos)\s*[:\-]?\s*([0-9]{1,3}(?:[.,][0-9]{3})+|[0-9]+)",
                     parent_text,
                     re.I,
                 )
