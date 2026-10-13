@@ -1,0 +1,19 @@
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "github-token",
+      "description": "Token de GitHub (sin permisos) para el MCP de pádel femenino",
+      "password": true
+    }
+  ],
+  "servers": {
+    "padel-fem": {
+      "type": "http",
+      "url": "https://TU-APP.up.railway.app/ai/mcp",
+      "headers": {
+        "Authorization": "Bearer ${input:github-token}"
+      }
+    }
+  }
+}
