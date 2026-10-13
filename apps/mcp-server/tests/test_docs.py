@@ -181,6 +181,41 @@ class PadelApiIsVisibleAndSecretsStayOut(unittest.TestCase):
         self.assertIn("MCP_TOOLS=${MCP_TOOLS}", compose)
 
 
+class DeploymentFilesPointAtRealFiles(unittest.TestCase):
+    """Si una ruta de railway.toml o de un COPY no existe, el despliegue falla sin avisar antes."""
+    REPO = ROOT.parent.parent
+
+    @staticmethod
+    def copies(dockerfile: Path):
+        out = []
+        for line in dockerfile.read_text(encoding="utf-8").splitlines():
+            m = re.match(r"^\s*COPY\s+(?!--)(.+?)\s+(\S+)\s*$", line)
+            if m:
+                out.extend(m.group(1).split())
+        return out
+
+    def test_railway_toml_points_at_an_existing_dockerfile(self):
+        text = (self.REPO / "railway.toml").read_text(encoding="utf-8")
+        path = re.search(r'dockerfilePath\s*=\s*"([^"]+)"', text).group(1)
+        self.assertEqual(path, "apps/mcp-server/Dockerfile")
+        self.assertTrue((self.REPO / path).is_file(), path)
+
+    def test_dockerfile_copies_only_paths_that_exist_from_its_own_folder(self):
+        sources = self.copies(ROOT / "Dockerfile")
+        self.assertIn("requirements.txt", sources)
+        for src in sources:
+            self.assertTrue((ROOT / src).exists(), f"COPY {src}: no existe desde apps/mcp-server")
+
+    def test_dockerfile_starts_the_server_as_a_non_root_user(self):
+        text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn('CMD ["python", "server.py"]', text)
+        self.assertIn("USER appuser", text)
+        self.assertTrue((ROOT / "server.py").is_file())
+
+    def test_compose_builds_from_the_app_folder(self):
+        self.assertIn("build: ./apps/mcp-server", (self.REPO / "docker-compose.yml").read_text(encoding="utf-8"))
+
+
 class OutletNames(unittest.TestCase):
     def setUp(self):
         self.saved = os.environ.get("NEWS_RSS_FEEDS")
