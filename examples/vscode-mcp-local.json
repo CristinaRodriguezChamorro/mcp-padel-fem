@@ -1,0 +1,8 @@
+{
+  "servers": {
+    "padel-femenino": {
+      "type": "http",
+      "url": "http://localhost:8000/ai/mcp"
+    }
+  }
+}

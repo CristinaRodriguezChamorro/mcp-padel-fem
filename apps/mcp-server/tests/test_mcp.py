@@ -28,7 +28,6 @@ os.environ["DATA_DIR"] = DATA
 
 import httpx
 import uvicorn
-from aiohttp import web
 from fastmcp import Client
 
 import server
@@ -139,7 +138,7 @@ class AppEndToEnd(unittest.IsolatedAsyncioTestCase):
 
             ranking = (await h.get(f"{self.url}/api/ranking")).json()
             self.assertEqual(len(ranking), len(RANKING))
-            self.assertEqual(set(ranking[0]), {"pos", "name", "pair", "flag", "pts", "photo"})
+            self.assertEqual(set(ranking[0]), {"pos", "name", "pair", "flag", "pts"})
 
             calendar = (await h.get(f"{self.url}/api/calendar")).json()
             self.assertTrue({"day", "month", "name", "place", "badge", "badgeText", "tv", "live"} <= set(calendar[0]))
@@ -259,224 +258,20 @@ class AppEndToEnd(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(all(v["desactualizado"] for v in s["datasets"].values()))
             self.assertIn("fuentes", s["noticias"])
 
-    async def test_image_proxy_refuses_anything_that_is_not_wikimedia(self):
-        hits = []
 
-        async def handler(request):
-            hits.append(request.path)
-            return web.Response(body=b"x", content_type="image/png")
 
-        app = web.Application(); app.router.add_route("*", "/{tail:.*}", handler)
-        runner = web.AppRunner(app); await runner.setup()
-        site = web.TCPSite(runner, "127.0.0.1", 0); await site.start()
-        port = site._server.sockets[0].getsockname()[1]
-        try:
-            async with httpx.AsyncClient() as h:
-                for target in (f"http://127.0.0.1:{port}/a.png", f"https://127.0.0.1:{port}/a.png",
-                               "https://evilwikimedia.org/a.png", "https://wikimedia.org.evil.example/a.png",
-                               "file:///etc/passwd"):
-                    r = await h.get(f"{self.url}/api/photo", params={"url": target})
-                    self.assertEqual(r.status_code, 404, target)
-            self.assertEqual(hits, [], "el servidor no debe haber pedido nada a un host no permitido")
-        finally:
-            await runner.cleanup()
 
-    async def test_image_download_only_from_wikimedia_even_through_redirects(self):
-        def handler(request: httpx.Request) -> httpx.Response:
-            if request.url.host == "upload.wikimedia.org" and request.url.path == "/redirige":
-                return httpx.Response(302, headers={"Location": "https://evil.example/x.png"})
-            if request.url.host == "upload.wikimedia.org" and request.url.path == "/pagina":
-                return httpx.Response(200, headers={"content-type": "text/html"}, content=b"<html>")
-            return httpx.Response(200, headers={"content-type": "image/png"}, content=b"\x89PNG")
 
-        real = httpx.AsyncClient
-        server.httpx.AsyncClient = lambda **kw: real(transport=httpx.MockTransport(handler), **kw)
-        try:
-            ok = await server._download_wikimedia_image("https://upload.wikimedia.org/foto.png")
-            self.assertEqual(ok, (b"\x89PNG", "image/png"))
-            self.assertIsNone(await server._download_wikimedia_image("https://upload.wikimedia.org/redirige"),
-                              "una redirección fuera de Wikimedia debe descartarse")
-            self.assertIsNone(await server._download_wikimedia_image("https://upload.wikimedia.org/pagina"),
-                              "solo se sirven imágenes, nunca HTML")
-            self.assertIsNone(await server._download_wikimedia_image("http://upload.wikimedia.org/foto.png"),
-                              "solo https")
-        finally:
-            server.httpx.AsyncClient = real
 
-    def test_wikimedia_host_rule(self):
-        for ok in ("upload.wikimedia.org", "es.wikipedia.org", "commons.wikimedia.org", "wikipedia.org"):
-            self.assertTrue(server._is_wikimedia_host(ok), ok)
-        for bad in ("evilwikimedia.org", "wikimedia.org.evil.example", "padelfip.com", "", None):
-            self.assertFalse(server._is_wikimedia_host(bad), bad)
 
-    def test_photos_are_on_by_default_and_only_explicit_off_values_switch_them_off(self):
-        saved = os.environ.get("PLAYER_PHOTOS")
-        try:
-            os.environ.pop("PLAYER_PHOTOS", None)
-            self.assertTrue(server._photos_enabled())
-            for value, expected in (("", True), ("on", True), ("1", True), ("quizás", True),
-                                    ("off", False), ("OFF", False), ("0", False), ("false", False), ("no", False)):
-                os.environ["PLAYER_PHOTOS"] = value
-                self.assertEqual(server._photos_enabled(), expected, repr(value))
-        finally:
-            os.environ.pop("PLAYER_PHOTOS", None) if saved is None else os.environ.__setitem__("PLAYER_PHOTOS", saved)
 
-    async def test_when_switched_off_no_photo_is_served_and_wikimedia_is_not_asked(self):
-        os.environ["PLAYER_PHOTOS"] = "off"
-        asked = []
 
-        async def forbidden(*args, **kwargs):
-            asked.append(args)
-            return "https://upload.wikimedia.org/x.png"
 
-        real = server._wiki_player_photo
-        server._wiki_player_photo = forbidden
-        try:
-            async with httpx.AsyncClient(timeout=5) as h:
-                for path in ("/api/player-photo-image", "/api/sponsor-photo-image", "/api/player-photo-credit"):
-                    self.assertEqual((await h.get(f"{self.url}{path}", params={"name": "Gemma Triay"})).status_code, 404, path)
-                self.assertEqual((await h.get(f"{self.url}/api/player-photo", params={"name": "Gemma Triay"})).json(),
-                                 {"photo": None, "credito": None})
-                self.assertEqual((await h.get(f"{self.url}/api/photo", params={"url": "https://upload.wikimedia.org/x.png"})).status_code, 404)
-                self.assertFalse((await h.get(f"{self.url}/api/data-status")).json()["fotos"]["activas"])
-        finally:
-            server._wiki_player_photo = real
-        self.assertEqual(asked, [], "con las fotos apagadas no se debe consultar a Wikimedia")
 
-    # ── fotos con crédito ────────────────────────────────────────────────────
-    SRC = "https://upload.wikimedia.org/wikipedia/commons/thumb/a/ab/Gemma_Triay_2024.jpg/1000px-Gemma_Triay_2024.jpg"
-    FILE = "File:Gemma Triay 2024.jpg"
-    CREDIT = {"autor": "Foo Bar", "licencia": "CC BY-SA 4.0", "licencia_url": "https://creativecommons.org/licenses/by-sa/4.0",
-              "pagina": "https://commons.wikimedia.org/wiki/File:Gemma_Triay_2024.jpg", "archivo": "File:Gemma Triay 2024.jpg"}
 
-    class Wikimedia:
-        """Sustituye la búsqueda de fotos, la consulta de créditos y la descarga; cuenta las llamadas."""
-        def __init__(self, test, credit=None, reason="sin autor", file_known=True, src=None, per_name=False):
-            self.test, self.credit, self.reason, self.file_known = test, credit, reason, file_known
-            self.src, self.per_name = src or test.SRC, per_name
-            self.credit_calls, self.downloads = [], []
 
-        async def find(self, name, wiki_title=""):
-            src = self.src if not self.per_name else self.src.replace("Gemma_Triay", name.replace(" ", "_"))
-            if self.file_known:
-                server.cache_set(f"photo-file:{src}", self.test.FILE if not self.per_name else f"File:{name}.jpg")
-            return src
 
-        async def fetch_credit(self, file_title, client_factory=None):
-            self.credit_calls.append(file_title)
-            return (self.credit(file_title) if callable(self.credit) else self.credit), ("" if self.credit else self.reason)
 
-        async def download(self, src):
-            self.downloads.append(src)
-            return (b"\x89PNG", "image/png")
-
-        def __enter__(self):
-            self.saved = (server._wiki_player_photo, server.photos.fetch_credit, server._download_wikimedia_image)
-            server._wiki_player_photo, server.photos.fetch_credit, server._download_wikimedia_image = self.find, self.fetch_credit, self.download
-            server._cache.clear()
-            server._photo_stats.update(con_credito=0, sin_credito=0, motivos={})
-            os.environ.pop("PLAYER_PHOTOS", None)
-            return self
-
-        def __exit__(self, *exc):
-            server._wiki_player_photo, server.photos.fetch_credit, server._download_wikimedia_image = self.saved
-            server._cache.clear()
-
-    async def test_a_photo_with_a_verified_credit_is_served_and_the_credit_can_be_read(self):
-        with self.Wikimedia(self, credit=dict(self.CREDIT)) as w:
-            async with httpx.AsyncClient(timeout=5) as h:
-                r = await h.get(f"{self.url}/api/player-photo-image", params={"name": "Gemma Triay"})
-                self.assertEqual((r.status_code, r.headers["content-type"]), (200, "image/png"))
-                self.assertEqual(r.headers["x-photo-credit"], "Foo Bar | CC BY-SA 4.0")
-                c = (await h.get(f"{self.url}/api/player-photo-credit", params={"name": "Gemma Triay"})).json()
-                self.assertEqual((c["autor"], c["licencia"], c["archivo"]), ("Foo Bar", "CC BY-SA 4.0", self.FILE))
-                j = (await h.get(f"{self.url}/api/player-photo", params={"name": "Gemma Triay"})).json()
-                self.assertEqual((j["photo"], j["credito"]["autor"]), (self.SRC, "Foo Bar"))
-                self.assertEqual((await h.get(f"{self.url}/api/sponsor-photo-image", params={"name": "Gemma Triay"})).status_code, 200)
-                self.assertEqual((await h.get(f"{self.url}/api/photo", params={"url": self.SRC})).status_code, 200)
-                st = (await h.get(f"{self.url}/api/data-status")).json()["fotos"]
-            self.assertEqual(len(w.credit_calls), 1, "el crédito se consulta una vez y se recuerda")
-            self.assertTrue(st["activas"])
-            self.assertGreaterEqual(st["con_credito"], 4)
-
-    async def test_a_photo_whose_credit_cannot_be_verified_is_never_served(self):
-        with self.Wikimedia(self, credit=None, reason="sin autor") as w:
-            async with httpx.AsyncClient(timeout=5) as h:
-                for path in ("/api/player-photo-image", "/api/sponsor-photo-image", "/api/player-photo-credit"):
-                    self.assertEqual((await h.get(f"{self.url}{path}", params={"name": "Gemma Triay"})).status_code, 404, path)
-                j = (await h.get(f"{self.url}/api/player-photo", params={"name": "Gemma Triay"})).json()
-                self.assertEqual(j, {"photo": None, "credito": None})
-                self.assertEqual((await h.get(f"{self.url}/api/photo", params={"url": self.SRC})).status_code, 404)
-                st = (await h.get(f"{self.url}/api/data-status")).json()["fotos"]
-            self.assertEqual(w.downloads, [], "ni siquiera se descarga la imagen")
-            self.assertEqual(len(w.credit_calls), 1, "el rechazo también se recuerda un tiempo")
-            self.assertEqual(st["con_credito"], 0)
-            self.assertIn("sin autor", st["motivos"])
-
-    async def test_without_knowing_the_file_there_is_no_credit_and_so_no_photo(self):
-        with self.Wikimedia(self, credit=dict(self.CREDIT), file_known=False) as w:
-            async with httpx.AsyncClient(timeout=5) as h:
-                self.assertEqual((await h.get(f"{self.url}/api/player-photo-image", params={"name": "Gemma Triay"})).status_code, 404)
-            self.assertEqual((w.credit_calls, w.downloads), ([], []))
-
-    async def test_the_proxy_refuses_photos_that_were_never_credited(self):
-        with self.Wikimedia(self, credit=dict(self.CREDIT)) as w:
-            async with httpx.AsyncClient(timeout=5) as h:
-                r = await h.get(f"{self.url}/api/photo", params={"url": "https://upload.wikimedia.org/otra/foto.png"})
-            self.assertEqual(r.status_code, 404)
-            self.assertEqual(w.downloads, [])
-
-    async def test_credits_page_lists_each_photo_and_escapes_everything(self):
-        hostile = lambda title: {"autor": "<script>alert(1)</script> & \"Ana\"", "licencia": "CC BY 4.0",
-                                 "licencia_url": "javascript:alert(1)", "pagina": "https://evil.example/x?a=<b>",
-                                 "archivo": "File:<img src=x onerror=alert(2)>.jpg"}
-        with self.Wikimedia(self, credit=hostile, per_name=True):
-            async with httpx.AsyncClient(timeout=10) as h:
-                page = await h.get(f"{self.url}/creditos-fotos")
-        self.assertEqual(page.status_code, 200)
-        self.assertTrue(page.headers["content-type"].startswith("text/html"))
-        body = page.text
-        for dangerous in ("<script>alert(1)", "<img src=x", "javascript:", "evil.example"):
-            self.assertNotIn(dangerous, body)
-        self.assertIn("&lt;script&gt;", body)
-        self.assertIn("Gemma Triay", body)
-
-    async def test_credits_page_with_a_good_credit_links_to_the_licence_and_the_file_page(self):
-        with self.Wikimedia(self, credit=dict(self.CREDIT), per_name=True):
-            async with httpx.AsyncClient(timeout=10) as h:
-                body = (await h.get(f"{self.url}/creditos-fotos")).text
-        self.assertIn('href="https://creativecommons.org/licenses/by-sa/4.0"', body)
-        self.assertIn('href="https://commons.wikimedia.org/wiki/File:Gemma_Triay_2024.jpg"', body)
-        self.assertIn("Foo Bar", body)
-
-    async def test_a_player_without_a_photo_is_not_looked_up_again_on_every_page_view(self):
-        requests = []
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            requests.append(request.url.host)
-            return httpx.Response(200, json={"query": {"pages": {}}})
-
-        real = httpx.AsyncClient
-        server.httpx.AsyncClient = lambda **kw: real(transport=httpx.MockTransport(handler), **kw)
-        server._cache.clear()
-        try:
-            self.assertIsNone(await server._wiki_player_photo("Persona Sin Foto"))
-            first = len(requests)
-            self.assertGreater(first, 0)
-            for _ in range(5):
-                self.assertIsNone(await server._wiki_player_photo("Persona Sin Foto"))
-            self.assertEqual(len(requests), first, "los intentos fallidos se recuerdan")
-            self.assertIsNone(await server._wiki_player_photo("Otra Persona Sin Foto"))
-            self.assertGreater(len(requests), first, "otra jugadora sí se consulta")
-        finally:
-            server.httpx.AsyncClient = real
-            server._cache.clear()
-
-    async def test_credits_page_without_credited_photos_says_so(self):
-        with self.Wikimedia(self, credit=None):
-            async with httpx.AsyncClient(timeout=10) as h:
-                body = (await h.get(f"{self.url}/creditos-fotos")).text
-        self.assertIn("No hay fotos acreditadas", body)
 
     # ── MCP ──────────────────────────────────────────────────────────────────
     async def test_tools_are_listed_and_read_only(self):

@@ -15,6 +15,7 @@ from aiohttp import web
 from tools import news
 
 TOP = ["Gemma Triay", "Delfina Brea", "Marta Ortega"]
+MEN = ["Arturo Coello", "Agustin Tapia", "Alejandro Galan", "Federico Chingotto"]
 OKD = "https://okdiario.com/deportes/padel/feed"
 PADD = "https://www.padeladdict.com/feed/"
 MARCA = "https://e00-marca.uecdn.es/rss/padel.xml"
@@ -100,15 +101,20 @@ class PipelineBase(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self._env = os.environ.pop("GROQ_API_KEY", None)
         self._saved = (news._fetch_feed, news.get_top_player_names, news.Groq, news._is_groq_available,
-                       news.generar_noticia, news.generar_noticia_individual, os.environ.get("NEWS_RSS_FEEDS"))
+                       news.generar_noticia, news.generar_noticia_individual, os.environ.get("NEWS_RSS_FEEDS"),
+                       news.get_top_men_names)
 
         async def names():
             return list(TOP)
+
+        async def men():
+            return list(MEN)
         news.get_top_player_names = names
+        news.get_top_men_names = men
 
     async def asyncTearDown(self):
         (news._fetch_feed, news.get_top_player_names, news.Groq, news._is_groq_available,
-         news.generar_noticia, news.generar_noticia_individual, feeds) = self._saved
+         news.generar_noticia, news.generar_noticia_individual, feeds, news.get_top_men_names) = self._saved
         os.environ.pop("NEWS_RSS_FEEDS", None) if feeds is None else os.environ.__setitem__("NEWS_RSS_FEEDS", feeds)
         os.environ.pop("GROQ_API_KEY", None)
         if self._env:

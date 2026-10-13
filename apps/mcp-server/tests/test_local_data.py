@@ -44,7 +44,7 @@ class LocalDataTests(unittest.TestCase):
         ranking = run(ld.get_ranking_live())
         self.assertEqual(len(ranking), 20)
         self.assertEqual([r["pos"] for r in ranking[:3]], [1, 2, 3])
-        self.assertEqual(set(ranking[0]), {"pos", "name", "pair", "flag", "pts", "photo"})
+        self.assertEqual(set(ranking[0]), {"pos", "name", "pair", "flag", "pts"})
         self.assertEqual(len(run(ld.get_womens_ranking_names(limit=5))), 5)
 
     def test_missing_or_broken_files_give_empty_results_not_exceptions(self):

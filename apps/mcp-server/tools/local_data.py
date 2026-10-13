@@ -124,7 +124,6 @@ def _ranking_rows(limit: int = TOP_N) -> list:
             "pair": str(raw.get("pair") or ""),
             "flag": str(raw.get("flag") or ""),
             "pts": str(raw.get("pts") or ""),
-            "photo": "",   # las fotos se resuelven aparte (/api/player-photo-image)
         })
     rows.sort(key=lambda r: r["pos"])
     return rows[:limit]
@@ -145,6 +144,22 @@ async def get_womens_ranking_names(limit: int = 200) -> list[str]:
     except DataError as exc:
         print(f"  ranking names: {exc}")
         return []
+
+
+async def get_mens_ranking_names(limit: int = 50) -> list[str]:
+    """
+    Nombres del ranking masculino (archivo data/ranking_masculino.json, que escribe la tarea de actualización).
+    Solo sirven para que las noticias no mezclen a jugadores; no se muestran. Sin archivo, lista vacía.
+    """
+    try:
+        doc = _load("ranking_masculino")
+    except DataError:
+        return []
+    names = []
+    for row in doc.get("jugadores") or []:
+        if isinstance(row, dict) and isinstance(row.get("name"), str) and row["name"].strip():
+            names.append(row["name"].strip())
+    return names[:limit]
 
 
 # ── calendario ───────────────────────────────────────────────────────────────

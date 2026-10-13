@@ -53,11 +53,11 @@ class ExplanationMatchesTheCode(unittest.TestCase):
 
     def test_the_limits_it_admits_are_stated_plainly(self):
         for phrase in ("No enseña marcadores en directo", "No es una web oficial", "Solo enseña las finales",
-                       "Si no se puede comprobar quién hizo la foto, no se pone", "pedir permiso a la FIP"):
+                       "pedir permiso a la FIP"):
             self.assertIn(phrase, self.text, phrase)
 
     def test_every_source_is_named(self):
-        for phrase in ("Padel API", "Wikipedia", "Wikimedia", "periódicos", "marcador oficial", "Railway", "GitHub", "Docker", "MCP", "token"):
+        for phrase in ("Padel API", "Wikipedia", "periódicos", "marcador oficial", "Railway", "GitHub", "Docker", "MCP", "token"):
             self.assertIn(phrase, self.text, phrase)
 
     def test_internal_links_point_at_real_routes(self):
@@ -66,7 +66,7 @@ class ExplanationMatchesTheCode(unittest.TestCase):
         links = set(re.findall(r'href="(/[^"#]*)"', PAGE)) | set(re.findall(r"href='(/[^'#]*)'", INDEX))
         for link in links:
             self.assertTrue(link in routes or link.startswith("/static"), f"enlace roto: {link}")
-        for expected in ("/creditos-fotos", "/api/data-status", "/"):
+        for expected in ("/api/data-status", "/"):
             self.assertIn(expected, links)
         # el enlace del pie de la web hacia esta explicación también debe existir
         self.assertIn("/como-funciona", routes)
@@ -78,7 +78,7 @@ class ExplanationMatchesTheCode(unittest.TestCase):
         ns = "{http://www.w3.org/2000/svg}"
         _, _, width, height = (float(v) for v in root.attrib["viewBox"].split())
         rects = root.findall(f".//{ns}rect")
-        self.assertGreaterEqual(len(rects), 7)
+        self.assertGreaterEqual(len(rects), 6)
         for r in rects:
             x, y, w, h = (float(r.attrib[k]) for k in ("x", "y", "width", "height"))
             self.assertTrue(x >= 0 and y >= 0 and x + w <= width and y + h <= height, f"fuera del lienzo: {r.attrib}")
@@ -96,8 +96,8 @@ class ExplanationMatchesTheCode(unittest.TestCase):
 
 class SmallPrintInTheWeb(unittest.TestCase):
     def test_index_has_one_small_print_footer_with_every_source_and_the_disclaimer(self):
-        for needle in ("f.id='fuentes'", "font:10px", "Wikipedia", "Wikimedia Commons", "web oficial de la FIP",
-                       "Web no oficial, sin relación con la FIP ni con Premier Padel", "/como-funciona", "/creditos-fotos",
+        for needle in ("f.id='fuentes'", "font:10px", "Wikipedia", "web oficial de la FIP",
+                       "Web no oficial, sin relación con la FIP ni con Premier Padel", "/como-funciona",
                        "resúmenes automáticos de", "Cada noticia enlaza a su original",
                        "ni con las marcas mencionadas"):
             self.assertIn(needle, INDEX, needle)
@@ -179,6 +179,70 @@ class PadelApiIsVisibleAndSecretsStayOut(unittest.TestCase):
         compose = (ROOT.parent.parent / "docker-compose.yml").read_text(encoding="utf-8")
         self.assertIn("PADELAPI_TOKEN=${PADELAPI_TOKEN}", compose)
         self.assertIn("MCP_TOOLS=${MCP_TOOLS}", compose)
+
+
+class DeploymentFilesPointAtRealFiles(unittest.TestCase):
+    """Si una ruta de railway.toml o de un COPY no existe, el despliegue falla sin avisar antes."""
+    REPO = ROOT.parent.parent
+
+    @staticmethod
+    def copies(dockerfile: Path):
+        out = []
+        for line in dockerfile.read_text(encoding="utf-8").splitlines():
+            m = re.match(r"^\s*COPY\s+(?!--)(.+?)\s+(\S+)\s*$", line)
+            if m:
+                out.extend(m.group(1).split())
+        return out
+
+    def test_railway_toml_points_at_an_existing_dockerfile(self):
+        text = (self.REPO / "railway.toml").read_text(encoding="utf-8")
+        path = re.search(r'dockerfilePath\s*=\s*"([^"]+)"', text).group(1)
+        self.assertEqual(path, "apps/mcp-server/Dockerfile")
+        self.assertTrue((self.REPO / path).is_file(), path)
+
+    def test_dockerfile_copies_only_paths_that_exist_from_its_own_folder(self):
+        sources = self.copies(ROOT / "Dockerfile")
+        self.assertIn("requirements.txt", sources)
+        for src in sources:
+            self.assertTrue((ROOT / src).exists(), f"COPY {src}: no existe desde apps/mcp-server")
+
+    def test_dockerfile_starts_the_server_as_a_non_root_user(self):
+        text = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn('CMD ["python", "server.py"]', text)
+        self.assertIn("USER appuser", text)
+        self.assertTrue((ROOT / "server.py").is_file())
+
+    def test_compose_builds_from_the_app_folder(self):
+        self.assertIn("build: ./apps/mcp-server", (self.REPO / "docker-compose.yml").read_text(encoding="utf-8"))
+
+
+class ThereArePhotosNowhere(unittest.TestCase):
+    """Las fotos se quitaron del todo: ni rutas, ni código, ni imágenes, ni peticiones desde el navegador."""
+
+    def test_no_photo_route_exists(self):
+        import server
+        paths = {r.path for r in server.app.routes if hasattr(r, "methods")}
+        for gone in ("/api/player-photo", "/api/player-photo-image", "/api/player-photo-credit",
+                     "/api/sponsor-photo-image", "/api/photo", "/creditos-fotos"):
+            self.assertNotIn(gone, paths)
+        self.assertFalse([p for p in paths if "photo" in p or "foto" in p])
+
+    def test_the_code_never_mentions_photos_or_wikimedia(self):
+        self.assertFalse((ROOT / "tools" / "photos.py").exists())
+        files = list(ROOT.glob("*.py")) + list((ROOT / "padel_mcp").glob("*.py")) + list((ROOT / "tools").glob("*.py"))
+        for path in files:
+            text = path.read_text(encoding="utf-8").lower()
+            for word in ("wikimedia", "photo", "player_photos"):
+                self.assertNotIn(word, text, f"{path.name} menciona '{word}'")
+
+    def test_the_web_loads_no_images_and_asks_nobody_for_photos(self):
+        for needle in ("<img", "new Image", "player-photo", "getWikiPhoto", "wikimedia", "pageimages", "buildSlideshow",
+                       "creditos-fotos", "es.wikipedia.org/w/api.php"):
+            self.assertNotIn(needle, INDEX, needle)
+
+    def test_the_explanation_does_not_talk_about_photos(self):
+        for needle in ("foto", "Foto", "Wikimedia", "álbum"):
+            self.assertNotIn(needle, PAGE, needle)
 
 
 class OutletNames(unittest.TestCase):

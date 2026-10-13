@@ -43,6 +43,10 @@ def ranking_rows(n=20):
     return [rk(f"Jugadora {i:02d}", i, 20000 - i * 500, nat=("ES", "AR", "PT")[i % 3]) for i in range(1, n + 1)]
 
 
+def men_rows(n=50):
+    return [rk(f"Jugador {i:02d}", i, 30000 - i * 400, category="men") for i in range(1, n + 1)]
+
+
 def tour(tid, name, level, status, start, end, location="Madrid", country="ES", fmt="pairs"):
     return {"id": tid, "name": name, "level": level, "status": status, "start_date": start, "end_date": end,
             "location": location, "country": country, "format": fmt, "venue": None, "winners": None}
@@ -76,8 +80,9 @@ def sets(*pairs_):
 
 class FakeApi:
     """Padel API de mentira: responde como la real y anota cada petición."""
-    def __init__(self, ranking=None, tournaments=None, matches=None, tour_pages=None, overrides=None):
+    def __init__(self, ranking=None, tournaments=None, matches=None, tour_pages=None, overrides=None, men=None):
         self.ranking = ranking if ranking is not None else ranking_rows()
+        self.men = men if men is not None else men_rows()
         self.tournaments = tournaments if tournaments is not None else season()
         self.matches = matches or self.default_matches
         self.tour_pages = tour_pages
@@ -103,7 +108,8 @@ class FakeApi:
                         return result
             path = request.url.path
             if path == "/api/rankings":
-                return httpx.Response(200, json={"data": self.ranking, "links": {"next": None}, "meta": {}})
+                rows = self.men if params.get("category") == "men" else self.ranking
+                return httpx.Response(200, json={"data": rows, "links": {"next": None}, "meta": {}})
             if path == "/api/tournaments":
                 if self.tour_pages:
                     page = int(params.get("page", "1"))
@@ -239,8 +245,9 @@ class FetchAll(WithToken):
 
     def test_happy_path_requests_and_result(self):
         got, api, slept = self.go()
-        first, second = api.calls[0], api.calls[1]
+        first, men, second = api.calls[0], api.calls[1], api.calls[2]
         self.assertEqual((first["path"], first["params"]["category"], first["params"]["type"]), ("/api/rankings", "women", "official"))
+        self.assertEqual((men["path"], men["params"]["category"], men["params"]["per_page"]), ("/api/rankings", "men", "50"))
         self.assertEqual(second["path"], "/api/tournaments")
         self.assertEqual(second["params"]["level"], "major,p1,p2,finals")
         self.assertEqual((second["params"]["after_date"], second["params"]["before_date"]), ("2025-12-31", "2027-01-01"))
@@ -271,7 +278,7 @@ class FetchAll(WithToken):
         got1, _, _ = self.go()
         got2, api2, _ = self.go(previous=got1["tournaments"])
         self.assertEqual(api2.match_calls(), [])
-        self.assertEqual(len(api2.calls), 2)
+        self.assertEqual(len(api2.calls), 3)          # ranking femenino, ranking masculino y calendario
         self.assertEqual(got2["tournaments"], got1["tournaments"])
 
     def test_only_new_finished_tournaments_cost_requests(self):
@@ -468,7 +475,7 @@ class IngestWithPadelApi(WithToken):
         status = run(ingest.run_once(api2.factory(), today=TODAY))
         self.assertTrue(status["ok"])
         self.assertEqual(api2.match_calls(), [])
-        self.assertEqual(status["peticiones"], 2)
+        self.assertEqual(status["peticiones"], 3)
         self.assertEqual(status["finales"], 9)
 
     def test_a_failure_keeps_the_previous_api_data_untouched(self):

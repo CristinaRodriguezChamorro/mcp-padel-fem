@@ -23,7 +23,6 @@ import hmac
 import os
 import re
 import time
-import unicodedata
 from collections import deque
 from typing import Optional
 
