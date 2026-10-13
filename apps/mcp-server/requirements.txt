@@ -1,11 +1,7 @@
 fastapi
 uvicorn
-fastmcp
+fastmcp>=4.0,<5
 feedparser
-beautifulsoup4
 groq
 aiohttp
-lxml
 httpx
-pypdf
-playwright

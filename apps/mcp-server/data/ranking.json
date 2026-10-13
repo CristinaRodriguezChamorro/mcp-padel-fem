@@ -1,0 +1,80 @@
+{
+  "_meta": {
+    "tipo": "ejemplo",
+    "actualizado": null,
+    "fuente": "Sin fuente verificada",
+    "nota": "DATOS DE EJEMPLO SIN VERIFICAR. Proceden del respaldo escrito a mano en el código antiguo y pueden estar desactualizados o ser incorrectos. Sustitúyelos por datos verificados de una fuente oficial o con licencia antes de mostrarlos como reales."
+  },
+  "jugadoras": [
+    {
+      "pos": 1,
+      "name": "Gemma Triay",
+      "pair": "Triay / Brea",
+      "flag": "🇪🇸",
+      "pts": "17.840"
+    },
+    {
+      "pos": 1,
+      "name": "Delfina Brea",
+      "pair": "Triay / Brea",
+      "flag": "🇦🇷",
+      "pts": "17.840"
+    },
+    {
+      "pos": 3,
+      "name": "Beatriz González",
+      "pair": "González / Josemaría",
+      "flag": "🇪🇸",
+      "pts": "14.880"
+    },
+    {
+      "pos": 4,
+      "name": "Paula Josemaría",
+      "pair": "González / Josemaría",
+      "flag": "🇪🇸",
+      "pts": "14.720"
+    },
+    {
+      "pos": 5,
+      "name": "Ariana Sánchez",
+      "pair": "Sánchez / Ustero",
+      "flag": "🇪🇸",
+      "pts": "13.640"
+    },
+    {
+      "pos": 6,
+      "name": "Claudia Fernández",
+      "pair": "Araújo / Fernández",
+      "flag": "🇪🇸",
+      "pts": "12.710"
+    },
+    {
+      "pos": 7,
+      "name": "Andrea Ustero",
+      "pair": "Sánchez / Ustero",
+      "flag": "🇪🇸",
+      "pts": "7.580"
+    },
+    {
+      "pos": 8,
+      "name": "Sofía Araújo",
+      "pair": "Araújo / Fernández",
+      "flag": "🇵🇹",
+      "pts": "7.200"
+    },
+    {
+      "pos": 9,
+      "name": "Marta Ortega",
+      "pair": "Calvo / Ortega",
+      "flag": "🇪🇸",
+      "pts": "6.900"
+    },
+    {
+      "pos": 10,
+      "name": "Martina Calvo",
+      "pair": "Calvo / Ortega",
+      "flag": "🇪🇸",
+      "pts": "6.850"
+    }
+  ]
+}

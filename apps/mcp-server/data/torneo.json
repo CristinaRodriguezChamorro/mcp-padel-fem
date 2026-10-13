@@ -1,0 +1,9 @@
+{
+  "_meta": {
+    "tipo": "manual",
+    "actualizado": null,
+    "fuente": "Sin torneo cargado",
+    "nota": "Sin scraping no hay marcadores automáticos. Rellena este archivo a mano (ver torneo.ejemplo.json) o conecta una API con licencia."
+  },
+  "active": false
+}

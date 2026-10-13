@@ -918,7 +918,7 @@ nav {
     <button class="tab" onclick="show('enjuego',this)">En juego</button>
     <button class="tab" onclick="show('ranking',this)">Ranking</button>
     <button class="tab" onclick="show('torneos',this)">Torneos</button>
-    <button class="tab" onclick="show('sponsors',this)">Sponsors</button>
+    <button class="tab" onclick="show('sponsors',this)">Qué usan</button>
     <button class="tab" onclick="show('sabiasque',this)">¿Sabías que?</button>
   </div>
 </nav>
@@ -969,7 +969,8 @@ nav {
   </div>
   <div id="sponsors" class="section">
     <div class="section-head">
-      <div class="section-title">Sponsors & marcas 👑</div>
+      <div class="section-title">Qué usan las jugadoras 👑</div>
+      <p class="material-aviso" style="margin:4px 0 14px;font-size:12px;line-height:1.5;color:#7a7a7a">Material que se ha visto usar a cada jugadora en competición. Es información editorial sin verificar con las jugadoras ni con las marcas, puede estar desactualizada y no indica ningún acuerdo comercial. Esta web no tiene relación con las marcas ni recibe remuneración de ellas.</p>
       <div class="section-sub">Pala, ropa y calzado de las mejores del circuito femenino español</div>
     </div>
     <div class="sponsors-list" id="sponsors-list"></div>
@@ -1151,7 +1152,13 @@ function formatNewsDate(iso){
   return d.toLocaleDateString('es-ES',{day:'numeric',month:'long',year:'numeric'});
 }
 
-function renderFuentes(fuentes){if(!fuentes?.length)return'';return`<div class="card-fuentes"><div class="fuentes-label">Fuentes</div>${fuentes.map(f=>`<div class="fuente-item"><span class="fuente-domain">${f.domain}</span><a href="${f.url}" target="_blank" class="fuente-titulo">${f.titulo}</a></div>`).join('')}</div>`;}
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const safeUrl=u=>/^https?:\/\//i.test(u||'')?u:'#';
+function usoNota(item){
+  const t={resumen:'Resumen automático a partir de la fuente.',extracto:'Extracto literal de la fuente.',enlace:'Solo titular y enlace: la fuente no permite más.'}[item.modo]||'';
+  return t?`<div class="uso-nota" style="font-size:11px;color:#8a8a8a;margin-top:6px">${t}</div>`:'';
+}
+function renderFuentes(fuentes){if(!fuentes?.length)return'';return`<div class="card-fuentes"><div class="fuentes-label">Fuentes</div>${fuentes.map(f=>`<div class="fuente-item"><span class="fuente-domain">${esc(f.medio||f.domain)}</span><a href="${esc(safeUrl(f.url))}" target="_blank" rel="noopener noreferrer" class="fuente-titulo">${esc(f.titulo)}</a>${f.autor?`<span class="fuente-autor"> · ${esc(f.autor)}</span>`:''}</div>`).join('')}</div>`;}
 
 async function loadNews(){
   try{
@@ -1159,8 +1166,8 @@ async function loadNews(){
     const items=data.resumen_diario||[];
     if(!items.length){document.getElementById('news-grid').innerHTML='<div class="empty-msg">No hay noticias ahora mismo.<br>Vuelve más tarde 🎾</div>';return;}
     const[featured,...rest]=items;
-    const featuredHtml=`<div class="news-featured" style="animation-delay:0s"><div class="news-featured-body"><div class="featured-tag">🔥 Destacado</div><div class="news-date">📅 ${formatNewsDate(featured.fecha)}</div><div class="titular">${featured.titular}</div><div class="divider"></div><div class="resumen">${featured.resumen}</div>${renderFuentes(featured.fuentes)}</div></div>`;
-    const restHtml=rest.map((item,i)=>`<div class="news-card" style="animation-delay:${(i+1)*.07}s"><div class="card-num">${String(i+2).padStart(2,'0')}</div><div class="news-card-content"><div class="card-tag">📰 Noticia</div><div class="news-date">📅 ${formatNewsDate(item.fecha)}</div><div class="titular">${item.titular}</div><div class="resumen">${item.resumen}</div>${renderFuentes(item.fuentes)}</div></div>`).join('');
+    const featuredHtml=`<div class="news-featured" style="animation-delay:0s"><div class="news-featured-body"><div class="featured-tag">🔥 Destacado</div><div class="news-date">📅 ${formatNewsDate(featured.fecha)}</div><div class="titular">${esc(featured.titular)}</div><div class="divider"></div>${featured.resumen?`<div class="resumen">${esc(featured.resumen)}</div>`:''}${usoNota(featured)}${renderFuentes(featured.fuentes)}</div></div>`;
+    const restHtml=rest.map((item,i)=>`<div class="news-card" style="animation-delay:${(i+1)*.07}s"><div class="card-num">${String(i+2).padStart(2,'0')}</div><div class="news-card-content"><div class="card-tag">📰 Noticia</div><div class="news-date">📅 ${formatNewsDate(item.fecha)}</div><div class="titular">${esc(item.titular)}</div>${item.resumen?`<div class="resumen">${esc(item.resumen)}</div>`:''}${usoNota(item)}${renderFuentes(item.fuentes)}</div></div>`).join('');
     document.getElementById('news-grid').innerHTML=featuredHtml+restHtml;
   }catch(e){document.getElementById('news-grid').innerHTML=`<div class="empty-msg">Error: ${e.message}</div>`;}
 }
@@ -1367,12 +1374,12 @@ async function loadEnJuego(){
 
       <div class="results-title">
         <span>Partidos finalizados</span>
-        <span class="results-source">${(d.results||[]).length} partidos · Datos oficiales FIP</span>
+        <span class="results-source">${(d.results||[]).length} partidos${d.source?' · '+d.source:''}</span>
       </div>
 
-      ${resultsHtml||'<div class="live-empty">Todavía no hay resultados femeninos finalizados disponibles.</div>'}
+      ${resultsHtml||(d.official_url?`<div class="live-empty">Esta web no muestra marcadores en directo. <a href="${d.official_url}" target="_blank" rel="noopener noreferrer">Ver el marcador oficial</a></div>`:'<div class="live-empty">Todavía no hay resultados femeninos finalizados disponibles.</div>')}
 
-      <div class="live-footer">Datos oficiales FIP · actualización automática</div>
+      <div class="live-footer">${d.source?('Fuente: '+d.source):''}${d.official_url?((d.source?' · ':'')+'<a href="'+d.official_url+'" target="_blank" rel="noopener noreferrer">Marcador oficial</a>'):''}</div>
     </div>`;
 
   }catch(e){
@@ -1383,7 +1390,7 @@ async function loadEnJuego(){
   }
 }
 
-const SPONSORS_DATA=[{name:"Gemma Triay",pair:"Pareja: Delfina Brea",flag:"🇪🇸",emoji:"👑",rank:"#1",wikiTitle:"Gemma_Triay",note:"La número 1 del mundo. Bullpadel construyó su pala más vendida en torno a ella. Contrato hasta 2027.",categories:[{label:"🏏 Pala",brands:[{name:"Bullpadel Elite W 2026",cls:"bullpadel"}]},{label:"👕 Ropa",brands:[{name:"Bullpadel",cls:"bullpadel"}]},{label:"👟 Calzado",brands:[{name:"Bullpadel Hack",cls:"bullpadel"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Delfina Brea",pair:"Pareja: Gemma Triay",flag:"🇦🇷",emoji:"⭐",rank:"#2",wikiTitle:"Delfina_Brea",note:"La argentina más dominante de la historia del circuito. Bullpadel la tiene como embajadora global.",categories:[{label:"🏏 Pala",brands:[{name:"Bullpadel Vertex 05 W 2026",cls:"bullpadel"}]},{label:"👕 Ropa",brands:[{name:"Bullpadel",cls:"bullpadel"}]},{label:"👟 Calzado",brands:[{name:"Bullpadel Hack",cls:"bullpadel"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Ari Sánchez",pair:"Pareja: Paula Josemaría",flag:"🇪🇸",emoji:"🔥",rank:"#3",wikiTitle:"Ari_Sánchez",note:"Fichaje estrella de Adidas en 2025. Su carisma la convierte en la cara más marketiniana del pádel femenino español.",categories:[{label:"🏏 Pala",brands:[{name:"Adidas Metalbone W 2026",cls:"adidas"}]},{label:"👕 Ropa",brands:[{name:"Adidas",cls:"adidas"}]},{label:"👟 Calzado",brands:[{name:"Adidas Adizero",cls:"adidas"}]},{label:"⌚ Otros",brands:[{name:"Garmin",cls:"generic"}]}]},{name:"Paula Josemaría",pair:"Pareja: Ari Sánchez",flag:"🇪🇸",emoji:"💥",rank:"#4",wikiTitle:"Paula_Josemaría",note:"La pegada más potente del circuito. Head la fichó hace años y sigue siendo una de sus apuestas más claras.",categories:[{label:"🏏 Pala",brands:[{name:"Head Delta Pro W 2026",cls:"head"}]},{label:"👕 Ropa",brands:[{name:"Head",cls:"head"}]},{label:"👟 Calzado",brands:[{name:"Head Sprint Pro",cls:"head"}]},{label:"🥤 Nutrición",brands:[{name:"HSN",cls:"generic"}]}]},{name:"Alejandra Salazar",pair:"Pareja: Lucía Sainz",flag:"🇪🇸",emoji:"🏆",rank:"#5",wikiTitle:"Alejandra_Salazar",note:"Leyenda viva del circuito. Adidas la ha renovado season tras season; uno de los contratos más longevos del pádel femenino español.",categories:[{label:"🏏 Pala",brands:[{name:"Adidas Adipower W 2026",cls:"adidas"}]},{label:"👕 Ropa",brands:[{name:"Adidas",cls:"adidas"}]},{label:"👟 Calzado",brands:[{name:"Adidas Adizero",cls:"adidas"}]},{label:"🎾 Pelotas",brands:[{name:"Adidas",cls:"adidas"}]}]},{name:"Lucía Sainz",pair:"Pareja: Alejandra Salazar",flag:"🇪🇸",emoji:"✨",rank:"#6",wikiTitle:"Lucía_Sainz",note:"Nox la apoya desde sus inicios. Una de las jugadoras más seguidas en redes; clave para la marca en Europa.",categories:[{label:"🏏 Pala",brands:[{name:"Nox ML10 Pro Cup W 2026",cls:"nox"}]},{label:"👕 Ropa",brands:[{name:"Nox",cls:"nox"}]},{label:"👟 Calzado",brands:[{name:"K-Swiss Ultrashot",cls:"k-swiss"}]},{label:"🧴 Recuperación",brands:[{name:"Pilexil",cls:"generic"}]}]},{name:"Marta Ortega",pair:"Pareja: Ariana Sánchez",flag:"🇪🇸",emoji:"🎯",rank:"#7",wikiTitle:"Marta_Ortega_Gallego",note:"Nox apostó fuerte por ella y le está saliendo de lujo. Marta es la imagen de la renovación de la marca.",categories:[{label:"🏏 Pala",brands:[{name:"Nox AT10 Luxury W 2026",cls:"nox"}]},{label:"👕 Ropa",brands:[{name:"Nox",cls:"nox"}]},{label:"👟 Calzado",brands:[{name:"K-Swiss Ultrashot",cls:"k-swiss"}]},{label:"⌚ Otros",brands:[{name:"Garmin",cls:"generic"}]}]},{name:"Ariana Sánchez",pair:"Pareja: Marta Ortega",flag:"🇪🇸",emoji:"🚀",rank:"#8",wikiTitle:"Ariana_Sánchez_Fallada",note:"Head la tiene muy bien atada. Su nueva pareja con Marta promete resultados y más visibilidad para la marca.",categories:[{label:"🏏 Pala",brands:[{name:"Head Graphene W 2026",cls:"head"}]},{label:"👕 Ropa",brands:[{name:"Head",cls:"head"}]},{label:"👟 Calzado",brands:[{name:"Head Sprint Pro",cls:"head"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Jessica Castello",pair:"Pareja: Tamara Icardo",flag:"🇪🇸",emoji:"🌟",rank:"Top 10",wikiTitle:"Jessica_Castello",note:"Vibora la ha hecho su bandera en el pádel femenino español. Muy activa en RRSS y con una comunidad fiel.",categories:[{label:"🏏 Pala",brands:[{name:"Vibora Yarara Edition W",cls:"vibora"}]},{label:"👕 Ropa",brands:[{name:"Vibora",cls:"vibora"}]},{label:"👟 Calzado",brands:[{name:"Asics Gel-Padel",cls:"asics"}]}]},{name:"Tamara Icardo",pair:"Pareja: Jessica Castello",flag:"🇪🇸",emoji:"💪",rank:"Top 10",wikiTitle:"Tamara_Icardo",note:"Varlion la acompaña desde que debutó en el circuito profesional. Imagen de la elegancia dentro de la pista.",categories:[{label:"🏏 Pala",brands:[{name:"Varlion LW Carbon W 2026",cls:"varlion"}]},{label:"👕 Ropa",brands:[{name:"Varlion",cls:"varlion"}]},{label:"👟 Calzado",brands:[{name:"Asics Gel-Padel",cls:"asics"}]},{label:"🥤 Nutrición",brands:[{name:"Powerade",cls:"generic"}]}]}];
+const SPONSORS_DATA=[{name:"Gemma Triay",pair:"Pareja: Delfina Brea",flag:"🇪🇸",emoji:"👑",rank:"#1",wikiTitle:"Gemma_Triay",note:'',categories:[{label:"🏏 Pala",brands:[{name:"Bullpadel Elite W 2026",cls:"bullpadel"}]},{label:"👕 Ropa",brands:[{name:"Bullpadel",cls:"bullpadel"}]},{label:"👟 Calzado",brands:[{name:"Bullpadel Hack",cls:"bullpadel"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Delfina Brea",pair:"Pareja: Gemma Triay",flag:"🇦🇷",emoji:"⭐",rank:"#2",wikiTitle:"Delfina_Brea",note:'',categories:[{label:"🏏 Pala",brands:[{name:"Bullpadel Vertex 05 W 2026",cls:"bullpadel"}]},{label:"👕 Ropa",brands:[{name:"Bullpadel",cls:"bullpadel"}]},{label:"👟 Calzado",brands:[{name:"Bullpadel Hack",cls:"bullpadel"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Ari Sánchez",pair:"Pareja: Paula Josemaría",flag:"🇪🇸",emoji:"🔥",rank:"#3",wikiTitle:"Ari_Sánchez",note:'',categories:[{label:"🏏 Pala",brands:[{name:"Adidas Metalbone W 2026",cls:"adidas"}]},{label:"👕 Ropa",brands:[{name:"Adidas",cls:"adidas"}]},{label:"👟 Calzado",brands:[{name:"Adidas Adizero",cls:"adidas"}]},{label:"⌚ Otros",brands:[{name:"Garmin",cls:"generic"}]}]},{name:"Paula Josemaría",pair:"Pareja: Ari Sánchez",flag:"🇪🇸",emoji:"💥",rank:"#4",wikiTitle:"Paula_Josemaría",note:'',categories:[{label:"🏏 Pala",brands:[{name:"Head Delta Pro W 2026",cls:"head"}]},{label:"👕 Ropa",brands:[{name:"Head",cls:"head"}]},{label:"👟 Calzado",brands:[{name:"Head Sprint Pro",cls:"head"}]},{label:"🥤 Nutrición",brands:[{name:"HSN",cls:"generic"}]}]},{name:"Alejandra Salazar",pair:"Pareja: Lucía Sainz",flag:"🇪🇸",emoji:"🏆",rank:"#5",wikiTitle:"Alejandra_Salazar",note:'',categories:[{label:"🏏 Pala",brands:[{name:"Adidas Adipower W 2026",cls:"adidas"}]},{label:"👕 Ropa",brands:[{name:"Adidas",cls:"adidas"}]},{label:"👟 Calzado",brands:[{name:"Adidas Adizero",cls:"adidas"}]},{label:"🎾 Pelotas",brands:[{name:"Adidas",cls:"adidas"}]}]},{name:"Lucía Sainz",pair:"Pareja: Alejandra Salazar",flag:"🇪🇸",emoji:"✨",rank:"#6",wikiTitle:"Lucía_Sainz",note:'',categories:[{label:"🏏 Pala",brands:[{name:"Nox ML10 Pro Cup W 2026",cls:"nox"}]},{label:"👕 Ropa",brands:[{name:"Nox",cls:"nox"}]},{label:"👟 Calzado",brands:[{name:"K-Swiss Ultrashot",cls:"k-swiss"}]},{label:"🧴 Recuperación",brands:[{name:"Pilexil",cls:"generic"}]}]},{name:"Marta Ortega",pair:"Pareja: Ariana Sánchez",flag:"🇪🇸",emoji:"🎯",rank:"#7",wikiTitle:"Marta_Ortega_Gallego",note:'',categories:[{label:"🏏 Pala",brands:[{name:"Nox AT10 Luxury W 2026",cls:"nox"}]},{label:"👕 Ropa",brands:[{name:"Nox",cls:"nox"}]},{label:"👟 Calzado",brands:[{name:"K-Swiss Ultrashot",cls:"k-swiss"}]},{label:"⌚ Otros",brands:[{name:"Garmin",cls:"generic"}]}]},{name:"Ariana Sánchez",pair:"Pareja: Marta Ortega",flag:"🇪🇸",emoji:"🚀",rank:"#8",wikiTitle:"Ariana_Sánchez_Fallada",note:'',categories:[{label:"🏏 Pala",brands:[{name:"Head Graphene W 2026",cls:"head"}]},{label:"👕 Ropa",brands:[{name:"Head",cls:"head"}]},{label:"👟 Calzado",brands:[{name:"Head Sprint Pro",cls:"head"}]},{label:"🎾 Pelotas",brands:[{name:"Head",cls:"head"}]}]},{name:"Jessica Castello",pair:"Pareja: Tamara Icardo",flag:"🇪🇸",emoji:"🌟",rank:"Top 10",wikiTitle:"Jessica_Castello",note:'',categories:[{label:"🏏 Pala",brands:[{name:"Vibora Yarara Edition W",cls:"vibora"}]},{label:"👕 Ropa",brands:[{name:"Vibora",cls:"vibora"}]},{label:"👟 Calzado",brands:[{name:"Asics Gel-Padel",cls:"asics"}]}]},{name:"Tamara Icardo",pair:"Pareja: Jessica Castello",flag:"🇪🇸",emoji:"💪",rank:"Top 10",wikiTitle:"Tamara_Icardo",note:'',categories:[{label:"🏏 Pala",brands:[{name:"Varlion LW Carbon W 2026",cls:"varlion"}]},{label:"👕 Ropa",brands:[{name:"Varlion",cls:"varlion"}]},{label:"👟 Calzado",brands:[{name:"Asics Gel-Padel",cls:"asics"}]},{label:"🥤 Nutrición",brands:[{name:"Powerade",cls:"generic"}]}]}];
 async function renderSponsors(){
   const list=document.getElementById('sponsors-list');
 
@@ -1441,7 +1448,7 @@ async function renderSponsors(){
     list.innerHTML=ranking.map((player,i)=>{
       const meta=sponsorMetaFor(player);
       const categories=meta?.categories||[];
-      const note=meta?.note||'Información de sponsors y marcas todavía no cargada para esta jugadora.';
+      const note=meta?.note||'';
 
       const productsHtml=categories.length
         ? `<div class="sponsor-products">
@@ -1455,9 +1462,9 @@ async function renderSponsors(){
            </div>`
         : `<div class="sponsor-products sponsor-products-empty">
              <div class="sponsor-category">
-               <div class="category-label">Sponsors</div>
+               <div class="category-label">Material</div>
                <div class="brand-chips">
-                 <span class="chip generic">Datos por completar</span>
+                 <span class="chip generic">Sin datos</span>
                </div>
              </div>
            </div>`;
@@ -1484,7 +1491,7 @@ async function renderSponsors(){
               <span class="sponsor-rank-badge">#${player.pos}</span>
             </div>
 
-            <div class="sponsor-note">${note}</div>
+            ${note?`<div class="sponsor-note">${esc(note)}</div>`:''}
           </div>
         </div>
 
@@ -1500,12 +1507,102 @@ async function renderSponsors(){
       'jugadoras'
     );
   }catch(e){
-    list.innerHTML='<div class="empty-msg">No se pudo cargar la información de sponsors</div>';
+    list.innerHTML='<div class="empty-msg">No se pudo cargar la información del material</div>';
   }
 }
 
 buildSlideshow();loadNews();
 setTimeout(()=>{ if(!window.__liveHasRendered){ loadEnJuego(); } },1200);loadEnJuego();loadRanking();loadTorneos();renderSponsors();
+</script>
+<script>
+/* Avisos de datos, letra pequeña con las fuentes y crédito de las fotos. Script independiente: si falla, no afecta al resto. */
+(function(){
+  var photosOff=false;
+  function fecha(iso){var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||'');return m?m[3]+'/'+m[2]+'/'+m[1]:'sin fecha indicada';}
+  function banner(msg){
+    var b=document.createElement('div');
+    b.setAttribute('role','note');
+    b.style.cssText='margin:0;padding:8px 14px;background:#fff4d6;color:#5a4300;font:13px/1.4 system-ui,sans-serif;text-align:center;border-bottom:1px solid #e6cf8a';
+    b.textContent=msg;
+    document.body.insertBefore(b, document.body.firstChild);
+  }
+  function footer(s){
+    var f=document.createElement('footer');
+    f.id='fuentes';
+    f.style.cssText='margin:28px auto 12px;padding:0 14px;max-width:900px;color:#7a7a7a;font:10px/1.5 system-ui,sans-serif;text-align:center';
+    function add(t){f.appendChild(document.createTextNode(t));}
+    function link(t,h){var a=document.createElement('a');a.href=h;a.target='_blank';a.rel='noopener noreferrer';a.textContent=t;a.style.cssText='color:inherit;text-decoration:underline';f.appendChild(a);}
+    var sets=(s&&s.datasets)||{}, wiki=null, api=null, ejemplo=false;
+    Object.keys(sets).forEach(function(k){var d=sets[k]||{};if(d.tipo==='api'&&!api)api=d;if(d.tipo==='wikipedia'&&!wiki)wiki=d;if(d.tipo==='ejemplo')ejemplo=true;});
+    add('Fuentes. ');
+    if(api){
+      add('Ranking, calendario y resultados: ');link('Padel API',api.url||'https://padelapi.org');
+      add(', datos del '+fecha(api.actualizado)+'; el ranking original lo publica la FIP. ');
+    }else if(wiki){
+      add('Ranking, calendario y finales: ');link('Wikipedia',wiki.url||'https://en.wikipedia.org/');
+      add(' (');link(wiki.licencia||'CC BY-SA 4.0',wiki.licencia_url||'https://creativecommons.org/licenses/by-sa/4.0/');
+      add('), datos del '+fecha(wiki.actualizado)+'; el ranking original lo publica la FIP. ');
+    }else if(ejemplo){
+      add('Ranking y calendario: datos de ejemplo sin verificar. ');
+    }
+    var n=s&&s.noticias, pol=n&&n.politica;
+    if(n&&n.activo&&pol&&pol.length){
+      var by={resumen:[],extracto:[],enlace:[]};
+      pol.forEach(function(p){(by[p.modo]||by.enlace).push(p.nombre);});
+      var parts=[];
+      if(by.resumen.length) parts.push('resúmenes automáticos de '+by.resumen.join(', '));
+      if(by.extracto.length) parts.push('extractos de '+by.extracto.join(', '));
+      if(by.enlace.length) parts.push('solo titulares y enlaces de '+by.enlace.join(', '));
+      add('Noticias: '+parts.join('; ')+'. Cada noticia enlaza a su original. ');
+      if(by.resumen.indexOf('OKDiario')>=0){add('OKDiario publica con licencia Creative Commons no comercial (');link('CC BY-NC','https://creativecommons.org/licenses/by-nc/3.0/es/');add('). ');}
+    }
+    if(s&&s.fotos&&s.fotos.activas){
+      add('Fotos: Wikimedia Commons, con licencia libre; ');link('autores y licencias','/creditos-fotos');add('. ');
+    }
+    add('Marcadores en directo: ');link('web oficial de la FIP','https://www.padelfip.com/calendar-premier-padel/');add('. ');
+    add('Web no oficial, sin relación con la FIP ni con Premier Padel, ni con las marcas mencionadas, y sin remuneración de ninguna. ');
+    link('¿Cómo funciona esta web?','/como-funciona');
+    document.body.appendChild(f);
+  }
+  var seen={};
+  function tag(img){
+    try{
+      if(photosOff) return;
+      var src=img.getAttribute('src')||'';
+      var m=/^\/api\/(?:player|sponsor)-photo-image\?(.*)$/.exec(src);
+      if(!m||seen[src]) return;
+      seen[src]=1;
+      var q=new URLSearchParams(m[1]), name=q.get('name');
+      if(!name) return;
+      var url='/api/player-photo-credit?name='+encodeURIComponent(name)+(q.get('wiki_title')?'&wiki_title='+encodeURIComponent(q.get('wiki_title')):'');
+      fetch(url).then(function(r){return r.ok?r.json():null;}).then(function(c){
+        if(c&&c.autor) img.title='Foto: '+c.autor+' · '+c.licencia+' (Wikimedia Commons)';
+      }).catch(function(){});
+    }catch(e){}
+  }
+  try{
+    fetch('/api/data-status').then(function(r){return r.json();}).then(function(s){
+      if(s.fotos&&s.fotos.activas===false) photosOff=true;
+      var sets=s.datasets||{}, keys=Object.keys(sets);
+      var ejemplo=keys.filter(function(k){return (sets[k]||{}).tipo==='ejemplo';});
+      if(ejemplo.length) banner('Datos de ejemplo sin verificar ('+ejemplo.join(', ')+'). Se sustituirán por datos reales.');
+      var late=keys.map(function(k){return sets[k]||{};}).filter(function(d){return (d.tipo==='wikipedia'||d.tipo==='api')&&d.desactualizado;});
+      if(late.length) banner('Ranking y calendario con retraso: la fuente se actualizó por última vez el '+fecha(late[0].actualizado)+'.');
+      footer(s);
+    }).catch(function(){ footer({}); });
+
+    new MutationObserver(function(list){
+      list.forEach(function(m){
+        if(m.type==='attributes'){ if(m.target.tagName==='IMG') tag(m.target); return; }
+        m.addedNodes.forEach(function(n){
+          if(n.nodeType!==1) return;
+          if(n.tagName==='IMG') tag(n); else if(n.querySelectorAll) n.querySelectorAll('img').forEach(tag);
+        });
+      });
+    }).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['src']});
+    document.querySelectorAll('img').forEach(tag);
+  }catch(e){}
+})();
 </script>
 </body>
 </html>

@@ -12,18 +12,105 @@ import datetime
 import time
 import unicodedata
 from groq import Groq
-from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 from email.utils import parsedate_to_datetime
-from tools.live_data import get_womens_ranking_names
+from tools.local_data import get_womens_ranking_names
+from tools.http_policy import USER_AGENT, check_and_wait
+from tools.players import norm as _pnorm, players_from_names, mentioned_players
 
 RSS_FEEDS = [
+    "https://okdiario.com/deportes/padel/feed",
     "https://e00-marca.uecdn.es/rss/padel.xml",
     "https://www.mundodeportivo.com/rss/padel.xml",
     "https://www.padelspain.net/feed/",
     "https://www.padeladdict.com/feed/",
     "https://www.setpadelmagazine.es/feed/",
 ]
+
+
+# Noticias: SOLO lo que cada medio publica en su feed RSS para que lo consuman programas
+# (título, enlace, fecha y extracto). No se descargan artículos ni se scrapean páginas.
+# Se puede desactivar con NEWS_RSS_ENABLED=false o sustituir la lista con NEWS_RSS_FEEDS
+# (URLs separadas por comas).
+def _rss_enabled() -> bool:
+    return os.environ.get("NEWS_RSS_ENABLED", "true").strip().lower() not in ("false", "0", "no", "off")
+
+
+def _rss_feeds() -> list[str]:
+    custom = [u.strip() for u in os.environ.get("NEWS_RSS_FEEDS", "").split(",") if u.strip()]
+    return custom or list(RSS_FEEDS)
+
+
+# Qué se puede hacer con cada fuente, según lo que se ha podido verificar de sus condiciones:
+#   "resumen"  -> título, resumen propio (puede hacerlo una IA) y enlace. Solo con permiso explícito
+#                 de adaptar el contenido (OKDiario publica con Creative Commons no comercial).
+#   "extracto" -> título, extracto corto TAL CUAL (sin reescribir ni pasar por una IA) y enlace.
+#   "enlace"   -> solo título, fecha, medio y enlace. Es el valor por defecto: cualquier fuente que no
+#                 esté en esta tabla (o cuyas condiciones no se hayan leído) se trata así.
+# Para subir una fuente de nivel hay que leer antes sus condiciones de uso.
+SOURCE_POLICY = {
+    "okdiario.com": ("OKDiario", "resumen"),
+    "padeladdict.com": ("Padel Addict", "extracto"),
+    "e00-marca.uecdn.es": ("Marca", "enlace"),
+    "mundodeportivo.com": ("Mundo Deportivo", "enlace"),
+    "padelspain.net": ("Padel Spain", "enlace"),
+    "setpadelmagazine.es": ("Set Padel Magazine", "enlace"),
+}
+DEFAULT_MODE = "enlace"
+OUTLET_NAMES = {host: name for host, (name, _) in SOURCE_POLICY.items()}
+
+NEWS_CACHE_SECONDS = 10 * 60      # cada cuánto se vuelve a consultar (como mucho)
+MAX_RESUMENES = 6                 # noticias que se resumen con IA en cada actualización
+MAX_TOTAL = 15                    # noticias que se publican en total
+EXTRACT_CHARS = 220               # longitud máxima del extracto literal
+
+
+def _host(url: str) -> str:
+    return urlparse(url).netloc.replace("www.", "")
+
+
+def _politica_de_feed(feed_url: str) -> tuple[str, str, str]:
+    host = _host(feed_url)
+    name, mode = SOURCE_POLICY.get(host, (host, DEFAULT_MODE))
+    return host, name, mode
+
+
+def rss_status() -> dict:
+    policy = {}
+    for u in _rss_feeds():
+        _, name, mode = _politica_de_feed(u)
+        policy[name] = mode
+    return {
+        "activo": _rss_enabled(),
+        "fuentes": sorted(policy),
+        "politica": [{"nombre": n, "modo": m} for n, m in sorted(policy.items())],
+        "nota": "Solo se leen los feeds RSS que los propios medios publican; no se descargan artículos.",
+    }
+
+
+# ── limpieza de todo lo que viene de fuera ───────────────────────────────────
+
+def _seguro(text: str, limit: int = 300) -> str:
+    """Texto ajeno -> una línea sin etiquetas ni símbolos < >, con longitud acotada."""
+    text = re.sub(r"<[^>]*>", " ", str(text or ""))
+    text = text.replace("<", "").replace(">", "")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit].rstrip()
+
+
+def _es_url_segura(url: str) -> bool:
+    parsed = urlparse(url or "")
+    return parsed.scheme in ("http", "https") and bool(parsed.netloc)
+
+
+def _extracto_corto(text: str, limit: int = EXTRACT_CHARS) -> str:
+    """Primeras palabras del extracto original, tal cual y cortadas en una palabra completa."""
+    text = _seguro(text, 2000)
+    text = re.sub(r"\s*(?:\[…\]|\[\.\.\.\]|Continuar leyendo.*|Leer más.*|Seguir leyendo.*|Read more.*)$", "", text).strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    return cut + "…"
 
 
 # Groq is optional. If quota/rate-limit fails, disable it temporarily and use
@@ -86,8 +173,11 @@ FILTRO_FEMENINO = (
     "femenino", "femenina", "femeninos", "femeninas", "mujeres",
 )
 
+# Las noticias se centran SOLO en el Top 20 del ranking femenino.
+TOP_N = 20
+
 # Cache local: el ranking no necesita consultarse en cada refresh de noticias.
-_ranking_names_cache = {"ts": 0.0, "names": None}
+_ranking_names_cache = {"ts": 0.0, "display": None}
 RANKING_NAMES_TTL = 6 * 60 * 60
 
 
@@ -110,147 +200,118 @@ def _ranking_full_names(names: list[str]) -> set[str]:
     }
 
 
-async def get_dynamic_ranking_names() -> set[str]:
+async def get_top_player_names(limit: int = TOP_N) -> list[str]:
     """
-    Obtiene primero el ranking femenino y guarda sus nombres completos en caché.
-    Las noticias se filtran únicamente contra este conjunto.
+    Nombres (tal como salen en el ranking) de las jugadoras del Top 20, en orden.
+    Se cachean 6 h; si la fuente falla se reutiliza lo último conocido.
     """
     now = time.time()
-    cached = _ranking_names_cache.get("names")
+    cached = _ranking_names_cache.get("display")
     if cached and (now - _ranking_names_cache["ts"]) < RANKING_NAMES_TTL:
         return cached
 
     try:
-        names = await get_womens_ranking_names(limit=200)
-        normalized_names = _ranking_full_names(names)
-        _ranking_names_cache["ts"] = now
-        _ranking_names_cache["names"] = normalized_names
-        print(
-            f"Filtro noticias: {len(normalized_names)} jugadoras cargadas "
-            "desde el ranking femenino"
-        )
-        return normalized_names
+        names = [n for n in await get_womens_ranking_names(limit=limit) if n][:limit]
+        if names:
+            _ranking_names_cache["ts"] = now
+            _ranking_names_cache["display"] = names
+            print(f"Filtro noticias: Top {len(names)} del ranking femenino cargado")
+            return names
     except Exception as exc:
         print(f"  ranking filter error: {exc}")
-        return cached or set()
+    return cached or []
 
 
-def es_noticia_femenina(
+def _female_term_present(padded: str) -> bool:
+    return any(t and f" {t} " in padded for t in {_normalizar(x) for x in FILTRO_FEMENINO})
+
+
+def es_noticia_top20(
     titulo: str,
     texto: str,
     ranking_names: set[str],
 ) -> bool:
     """
-    Regla determinista:
+    Regla determinista: la noticia se conserva SOLO si habla de alguien del Top 20.
 
-    La noticia se conserva si cumple AL MENOS una condición:
-    1) aparece el nombre completo de una jugadora del ranking femenino;
-    2) aparece una señal explícita de contenido femenino
-       (women, female, woman, femenino, femenina, mujeres...).
+      - nombre completo de una jugadora del Top 20  -> se conserva;
+      - solo apellido (o inicial + apellido)        -> se conserva si además hay una
+        señal femenina (femenino, women...) o se mencionan al menos dos jugadoras
+        distintas. Un apellido suelto podría ser un jugador masculino.
 
+    Una noticia genérica sobre pádel femenino sin ninguna jugadora del Top 20 NO pasa.
     Groq NO interviene en esta decisión.
     """
     if any(b in titulo.lower() for b in BASURA):
         return False
 
-    contenido = _normalizar(f"{titulo} {texto}")
-    padded = f" {contenido} "
-
-    # Señal explícita de contenido femenino.
-    female_terms = {_normalizar(term) for term in FILTRO_FEMENINO}
-    if any(term and f" {term} " in padded for term in female_terms):
+    players = players_from_names(ranking_names)
+    hits = mentioned_players(f"{titulo} {texto}", players)
+    if not hits:
+        return False
+    if any(strength == 2 for _, strength in hits):
         return True
-
-    # Nombre completo de una jugadora del ranking.
-    return any(
-        player_name and f" {player_name} " in padded
-        for player_name in ranking_names
-    )
+    padded = f" {_normalizar(f'{titulo} {texto}')} "
+    return _female_term_present(padded) or len(hits) >= 2
 
 
 def _extraer_fragmentos_femeninos(texto: str, ranking_names: set[str]) -> str:
     """
-    Conserva únicamente las frases donde aparece alguna jugadora del ranking.
-    Esto evita que un artículo mixto lleve contenido masculino al resumen.
+    Conserva únicamente las frases donde aparece alguna jugadora del Top 20.
+    Esto evita que un artículo mixto lleve contenido masculino o ajeno al resumen.
     """
     if not texto:
         return ""
 
+    players = players_from_names(ranking_names)
     frases = re.split(r"(?<=[.!?])\s+", texto)
-    seleccion = []
-
-    female_terms = {_normalizar(term) for term in FILTRO_FEMENINO}
-
-    for frase in frases:
-        norm = _normalizar(frase)
-        padded = f" {norm} "
-
-        has_ranked_player = any(
-            player_name and f" {player_name} " in padded
-            for player_name in ranking_names
-        )
-        has_female_term = any(
-            term and f" {term} " in padded
-            for term in female_terms
-        )
-
-        if has_ranked_player or has_female_term:
-            seleccion.append(frase.strip())
-
+    seleccion = [f.strip() for f in frases if mentioned_players(f, players)]
     return " ".join(seleccion)[:3000]
+
+
+def _nombres_jugadoras(texto: str, players: list) -> list[str]:
+    """Nombres (de pantalla) de las jugadoras del Top 20 mencionadas en el texto."""
+    return [p["name"] for p, _ in mentioned_players(texto, players)]
+
+
+def _centrar_en_top20(noticias: list, articulos: list, players: list) -> list:
+    """
+    Etiqueta cada noticia con las jugadoras del Top 20 de las que habla (las de sus
+    fuentes y las que cita su propio texto) y descarta cualquiera que no hable de
+    ninguna: el resumen nunca amplía el alcance del filtro.
+    """
+    url_tags = {a.get("url", ""): a.get("jugadoras", []) for a in articulos}
+    centradas = []
+    for n in noticias:
+        tags = []
+        for f in n.get("fuentes", []):
+            for name in url_tags.get(f.get("url", ""), []):
+                if name not in tags:
+                    tags.append(name)
+        for name in _nombres_jugadoras(f"{n.get('titular', '')} {n.get('resumen', '')}", players):
+            if name not in tags:
+                tags.append(name)
+        if tags:
+            n["jugadoras"] = tags
+            centradas.append(n)
+    return centradas
+
+
+def _foco_jugadoras(articulos: list) -> str:
+    nombres = []
+    for art in articulos:
+        for n in art.get("jugadoras", []):
+            if n not in nombres:
+                nombres.append(n)
+    if not nombres:
+        return ""
+    return f"Céntrate en estas jugadoras del Top 20 mundial: {', '.join(nombres)}. Ignora el resto de informaciones."
+
 
 def clean_text(text: str) -> str:
     text = re.sub(r'<[^>]+>', '', text)
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
-
-
-async def scrape(session: aiohttp.ClientSession, url: str) -> dict:
-    """Obtiene texto + fecha original si la web la publica."""
-    try:
-        async with session.get(
-            url,
-            timeout=aiohttp.ClientTimeout(total=12),
-            headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
-        ) as resp:
-            if resp.status != 200:
-                return {"text": "", "published_date": ""}
-            html = await resp.text()
-
-        soup = BeautifulSoup(html, "html.parser")
-        page_date = ""
-
-        for node in (
-            soup.find("meta", attrs={"property": "article:published_time"}),
-            soup.find("meta", attrs={"name": "date"}),
-            soup.find("meta", attrs={"name": "publish-date"}),
-            soup.find("time", attrs={"datetime": True}),
-        ):
-            if not node:
-                continue
-            raw = node.get("content") or node.get("datetime") or ""
-            m = re.search(r"(\d{4}-\d{2}-\d{2})", raw)
-            if m:
-                page_date = m.group(1)
-                break
-
-        for tag in soup.find_all(["nav", "footer", "aside", "script", "style", "header"]):
-            tag.decompose()
-
-        body = (
-            soup.find("article") or
-            soup.find("div", class_=re.compile(r"(article|content|body|text|entry)", re.I)) or
-            soup.find("main") or soup
-        )
-        parts = [
-            p.get_text().strip()
-            for p in body.find_all("p")
-            if len(p.get_text().strip()) > 40
-        ]
-        return {"text": " ".join(parts)[:5000], "published_date": page_date}
-    except Exception as e:
-        print(f"  scrape error {url}: {e}")
-        return {"text": "", "published_date": ""}
 
 
 async def generar_noticia(client: Groq, sem: asyncio.Semaphore, articulos: list) -> dict | None:
@@ -271,10 +332,12 @@ async def generar_noticia(client: Groq, sem: asyncio.Semaphore, articulos: list)
             f"Contenido: {art['texto'][:1800]}\n"
         )
 
+    foco = _foco_jugadoras(articulos)
     prompt = f"""Eres periodista deportiva española especializada en pádel femenino.
 
 Resume EXCLUSIVAMENTE información del circuito femenino.
 No menciones jugadores masculinos ni inventes datos.
+{foco}
 
 FUENTES:
 {texto_articulos}
@@ -350,6 +413,7 @@ async def generar_noticia_individual(client: Groq, sem: asyncio.Semaphore, art: 
     if not _is_groq_available():
         return None
 
+    foco = _foco_jugadoras([art])
     prompt = f"""Eres periodista deportiva española especializada en pádel femenino.
 
 FUENTE:
@@ -363,6 +427,7 @@ Devuelve SOLO JSON:
 }}
 
 Solo pádel femenino. No inventes datos ni menciones jugadores masculinos.
+{foco}
 """
 
     async with sem:
@@ -434,46 +499,28 @@ def _sentencias_completas(texto: str) -> list[str]:
     return salida
 
 
-def _ranking_surnames_from_names(ranking_names: set[str]) -> set[str]:
-    surnames = set()
-    for full_name in ranking_names:
-        parts = full_name.split()
-        if len(parts) >= 2 and len(parts[-1]) >= 4:
-            surnames.add(parts[-1])
-    return surnames
-
-
 def _female_title_strength(titulo: str, ranking_names: set[str]) -> int:
     """
-    3 = female/women/etc. explícito o nombre completo de jugadora
-    2 = al menos dos apellidos del ranking femenino
-    0 = señal insuficiente
+    3 = nombre completo de una jugadora del Top 20, o apellido + señal femenina
+    2 = al menos dos jugadoras del Top 20 por apellido
+    0 = señal insuficiente (un texto genérico "femenino" sin jugadoras NO basta)
     """
-    norm = _normalizar(titulo)
-    padded = f" {norm} "
+    padded = f" {_normalizar(titulo)} "
+    hits = mentioned_players(titulo, players_from_names(ranking_names))
+    full = any(strength == 2 for _, strength in hits)
+    weak = sum(1 for _, strength in hits if strength == 1)
 
-    male_terms = {_normalizar(x) for x in ("masculino","masculina","masculinos","masculinas","men","male")}
-    female_terms = {_normalizar(x) for x in FILTRO_FEMENINO}
-
+    male_terms = {_normalizar(x) for x in ("masculino", "masculina", "masculinos", "masculinas", "men", "male")}
     explicit_male = any(term and f" {term} " in padded for term in male_terms)
-    explicit_female = any(term and f" {term} " in padded for term in female_terms)
+    explicit_female = _female_term_present(padded)
 
-    full_hits = {
-        name for name in ranking_names
-        if name and f" {name} " in padded
-    }
-
-    surnames = _ranking_surnames_from_names(ranking_names)
-    surname_hits = {
-        surname for surname in surnames
-        if surname and f" {surname} " in padded
-    }
-
-    if explicit_male and not explicit_female and not full_hits and len(surname_hits) < 2:
+    if explicit_male and not explicit_female and not full and weak < 2:
         return 0
-    if explicit_female or full_hits:
+    if full:
         return 3
-    if len(surname_hits) >= 2:
+    if explicit_female and weak >= 1:
+        return 3
+    if weak >= 2:
         return 2
     return 0
 
@@ -637,7 +684,77 @@ def _latest_article_date(articulos: list) -> str:
 
 
 
+_FEED_CACHE: dict[str, dict] = {}
+
+
+async def _fetch_feed(feed_url: str):
+    """
+    Descarga un feed RSS respetando robots.txt, sin bloquear el event loop y con petición condicional
+    (ETag / Last-Modified): si el medio responde "no ha cambiado" (304) se reutiliza lo anterior y casi
+    no le cuesta nada. Así se puede consultar cada pocos minutos sin molestar.
+    """
+    if not await check_and_wait(feed_url):
+        return None
+    previous = _FEED_CACHE.get(feed_url, {})
+    headers = {
+        "User-Agent": USER_AGENT,
+        "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*;q=0.5",
+    }
+    if previous.get("etag"):
+        headers["If-None-Match"] = previous["etag"]
+    if previous.get("modified"):
+        headers["If-Modified-Since"] = previous["modified"]
+    try:
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.get(feed_url, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status == 304 and previous.get("feed") is not None:
+                    return previous["feed"]
+                if resp.status != 200:
+                    print(f"  feed {feed_url}: HTTP {resp.status}")
+                    return None
+                data = await resp.read()
+                etag = (resp.headers.get("ETag") or "")[:200]
+                modified = (resp.headers.get("Last-Modified") or "")[:200]
+    except Exception as exc:
+        print(f"  feed error {feed_url}: {type(exc).__name__}: {exc}")
+        return None
+    feed = feedparser.parse(data)
+    _FEED_CACHE[feed_url] = {"etag": etag, "modified": modified, "feed": feed}
+    return feed
+
+
+def _item_directo(art: dict) -> dict:
+    """Noticia de una fuente que solo permite título (y extracto literal) y enlace: nunca pasa por la IA."""
+    mode = art["modo"]
+    return {
+        "titular": art["titulo"],
+        "resumen": _extracto_corto(art.get("texto_original", "")) if mode == "extracto" else "",
+        "fecha": art.get("published_date") or datetime.date.today().isoformat(),
+        "fuentes": [{"domain": art["host"], "medio": art["medio"], "titulo": art["titulo"],
+                     "url": art["url"], "autor": art.get("autor", "")}],
+        "modo": mode,
+    }
+
+
+def _enriquecer_fuentes(noticias: list, articulos: list) -> list:
+    """Añade el medio y el autor a cada fuente (la atribución que piden algunas licencias) y el modo a cada noticia."""
+    by_url = {a.get("url", ""): a for a in articulos}
+    for n in noticias:
+        modes = set()
+        for f in n.get("fuentes", []):
+            art = by_url.get(f.get("url", ""))
+            f.setdefault("medio", art["medio"] if art else f.get("domain", ""))
+            f.setdefault("autor", art.get("autor", "") if art else "")
+            if art:
+                modes.add(art["modo"])
+        n.setdefault("modo", "resumen" if "resumen" in modes else (next(iter(modes)) if modes else "enlace"))
+    return noticias
+
+
 async def get_latest_news() -> dict:
+    if not _rss_enabled():
+        return {"date": datetime.date.today().isoformat(), "resumen_diario": [],
+                "message": "Noticias desactivadas (NEWS_RSS_ENABLED=false)."}
     api_key = os.environ.get("GROQ_API_KEY")
     client = Groq(api_key=api_key) if api_key else None
     print("\n=== PADELfem: inicio pipeline ===")
@@ -646,13 +763,16 @@ async def get_latest_news() -> dict:
     vistos_titulos = set()
     vistos_links = set()
 
-    for feed_url in RSS_FEEDS:
+    for feed_url in _rss_feeds():
         try:
-            feed = feedparser.parse(feed_url)
+            feed = await _fetch_feed(feed_url)
+            if feed is None:
+                continue
+            host, medio, modo = _politica_de_feed(feed_url)
             for entry in feed.entries[:30]:
-                titulo = entry.get("title", "").strip()
+                titulo = _seguro(entry.get("title", ""), 220)
                 link = entry.get("link", "").strip()
-                if not titulo or not link:
+                if not titulo or not _es_url_segura(link):
                     continue
                 if titulo.lower() in vistos_titulos or link in vistos_links:
                     continue
@@ -662,6 +782,10 @@ async def get_latest_news() -> dict:
                     "titulo": titulo,
                     "texto": clean_text(entry.get("summary", "") or entry.get("description", "")),
                     "url": link,
+                    "host": host,
+                    "medio": medio,
+                    "modo": modo,
+                    "autor": _seguro(entry.get("author", ""), 80),
                     "published": entry.get("published", ""),
                     "published_date": _rss_publication_iso(entry),
                 })
@@ -670,12 +794,16 @@ async def get_latest_news() -> dict:
 
     print(f"RSS: {len(raw)} artículos")
 
-    ranking_names = await get_dynamic_ranking_names()
+    top_names = await get_top_player_names()
+    ranking_names = {_pnorm(n) for n in top_names}
+    players = players_from_names(top_names)
+    if not players:
+        print("  sin Top 20 disponible: no se puede filtrar, se devuelven 0 noticias")
     femeninos = []
     for art in raw:
         titulo = art["titulo"]
         texto = art.get("texto", "")
-        if not es_noticia_femenina(titulo, texto, ranking_names):
+        if not es_noticia_top20(titulo, texto, ranking_names):
             continue
 
         title_norm = _normalizar(titulo)
@@ -685,44 +813,23 @@ async def get_latest_news() -> dict:
             for term in ("masculino","masculina","masculinos","masculinas","men","male")
         )
 
-        # If the headline is explicitly male, only keep it when the RSS text itself
-        # contains a strong female signal; later scraping will isolate the female part.
-        if male_title:
-            body_norm = _normalizar(texto)
-            padded_body = f" {body_norm} "
-            female_terms = {_normalizar(term) for term in FILTRO_FEMENINO}
-            strong_body = any(
-                term and f" {term} " in padded_body for term in female_terms
-            ) or any(
-                name and f" {name} " in padded_body for name in ranking_names
-            )
-            if not strong_body:
-                continue
+        # Si el titular es explícitamente masculino, solo se conserva cuando el propio
+        # texto menciona a una jugadora del Top 20.
+        if male_title and not mentioned_players(texto, players):
+            continue
 
         femeninos.append(art)
-    print(f"Filtro ranking femenino: {len(femeninos)} noticias")
+    print(f"Filtro Top 20: {len(femeninos)} noticias")
     for art in femeninos:
         print(f"  ✓ {art['titulo'][:70]}")
 
     if not femeninos:
         return {"resumen_diario": [], "date": datetime.date.today().isoformat()}
 
-    async with aiohttp.ClientSession() as session:
-        textos = await asyncio.gather(
-            *[scrape(session, art["url"]) for art in femeninos],
-            return_exceptions=True
-        )
-
     depurados = []
-    for art, scraped in zip(femeninos, textos):
-        scraped_text = scraped.get("text", "") if isinstance(scraped, dict) else ""
-        scraped_date = scraped.get("published_date", "") if isinstance(scraped, dict) else ""
-
-        if scraped_date:
-            art["published_date"] = scraped_date
-
-        candidato = scraped_text if len(scraped_text) > len(art["texto"]) else art["texto"]
-        fragmento = _extraer_fragmentos_femeninos(candidato, ranking_names)
+    for art in femeninos:
+        art["texto_original"] = art.get("texto", "")
+        fragmento = _extraer_fragmentos_femeninos(art.get("texto", ""), ranking_names)
 
         if not fragmento:
             fragmento = _extraer_fragmentos_femeninos(
@@ -732,6 +839,7 @@ async def get_latest_news() -> dict:
 
         if fragmento:
             art["texto"] = fragmento
+            art["jugadoras"] = _nombres_jugadoras(f"{art['titulo']} {fragmento}", players)
             depurados.append(art)
 
     femeninos = depurados
@@ -740,7 +848,12 @@ async def get_latest_news() -> dict:
     if not femeninos:
         return {"resumen_diario": [], "date": datetime.date.today().isoformat()}
 
-    grupos = agrupar(femeninos)[:4]
+    # Reparto por política de la fuente: solo las que lo permiten expresamente pasan por la IA.
+    todos = femeninos
+    femeninos = [a for a in todos if a["modo"] == "resumen"]
+    print(f"Por política: {len(femeninos)} para resumir, {len(todos) - len(femeninos)} solo con enlace/extracto")
+
+    grupos = agrupar(femeninos)[:MAX_RESUMENES]
     print(f"Grupos: {len(grupos)}")
 
     sem = asyncio.Semaphore(2)
@@ -806,7 +919,12 @@ async def get_latest_news() -> dict:
 
         print(f"Noticias tras fallback determinista: {len(noticias)}")
 
+    noticias.extend(_item_directo(a) for a in todos if a["modo"] != "resumen")
+    noticias = _centrar_en_top20(noticias, todos, players)
+    noticias = _enriquecer_fuentes(noticias, todos)
+
     noticias.sort(key=lambda x: x.get("fecha", ""), reverse=True)
+    noticias = noticias[:MAX_TOTAL]
 
     return {
         "date": datetime.date.today().isoformat(),
