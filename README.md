@@ -96,7 +96,6 @@ Cada respuesta indica su fuente, su antigüedad y los avisos (datos de ejemplo, 
 |---|---|
 | Ranking, calendario y resultados | **Padel API** (padelapi.org) si hay `PADELAPI_TOKEN`; si no hay token, o falla y todavía no hay datos buenos de la API guardados, la API de **Wikipedia** (página *Premier Padel <año>*, CC BY-SA 4.0) |
 | Noticias | Los **feeds RSS** de los medios, con una regla por fuente (ver abajo) |
-| Fotos de jugadoras | Wikimedia, solo las que se pueden acreditar |
 | Marcadores en directo | No se reproducen: enlace al marcador oficial |
 | «Qué usan» y «¿Sabías que?» | Textos escritos a mano en `static/index.html`, sin fuente automática |
 
@@ -104,15 +103,13 @@ Cada respuesta indica su fuente, su antigüedad y los avisos (datos de ejemplo, 
 
 **Wikipedia (respaldo).** La mantienen voluntarios, así que el ranking y los resultados pueden ir con **semanas de retraso**. Solo recoge ganadoras y finalistas, sin semifinales. La web y el MCP avisan cuando los datos pasan de 14 días.
 
-**Noticias.** Se consultan como mucho cada 10 minutos, solo las que hablan de alguna jugadora del Top 20 y se publican como máximo 15. Cada medio se trata según lo que permiten sus condiciones; cualquier fuente nueva empieza en «solo titular y enlace» hasta que se lean las suyas:
+**Noticias.** Se consultan como mucho cada 10 minutos, solo las que hablan de alguna jugadora del Top 20 y se publican como máximo 15. **Nunca de hombres**: manda el titular. Si el titular nombra a un jugador, o dice «masculino», la noticia se descarta; un titular solo con apellidos no basta (muchos son también de hombres) y hace falta que diga expresamente que es femenino. Para saber quiénes son ellos, la tarea de actualización guarda también el ranking masculino de Padel API (`data/ranking_masculino.json`, solo nombres: no se muestra en ningún sitio). Sin esa lista (por ejemplo con el respaldo de Wikipedia, o unos minutos tras un despliegue) el filtro es más estricto: solo pasan las noticias que digan expresamente femenino, mujeres, campeonas o jugadoras. Cada medio se trata según lo que permiten sus condiciones; cualquier fuente nueva empieza en «solo titular y enlace» hasta que se lean las suyas:
 
 | Nivel | Qué se publica | Medios |
 |---|---|---|
 | resumen | Título, resumen propio (con IA si hay `GROQ_API_KEY`), autor y enlace | OKDiario (licencia Creative Commons no comercial) |
 | extracto | Título, extracto corto literal y enlace | Padel Addict |
 | solo titular y enlace | Título, fecha, medio y enlace | Marca, Mundo Deportivo, Padel Spain, Set Padel Magazine |
-
-**Fotos.** Las de Wikimedia son de licencia libre, pero casi todas exigen citar autor y licencia. Una foto solo se muestra si se ha podido comprobar su crédito (solo CC0, dominio público, CC BY y CC BY-SA); si no, la web muestra las iniciales. El crédito sale al pasar el ratón y en `/creditos-fotos`.
 
 **Por qué no la web de la FIP.** Sus condiciones de uso prohíben los robots y la extracción de datos, y copiar su contenido sin licencia escrita. Esta aplicación **no lee la web de la FIP**: solo enlaza a su marcador oficial.
 
@@ -171,7 +168,6 @@ Si el despliegue falla, el log de Railway dice dónde. Si se queja de no encontr
 | `NEWS_RSS_FEEDS` | Sustituye la lista de feeds (URLs separadas por comas); los que no estén en la tabla de niveles se tratan como «solo titular y enlace» | los de la tabla |
 | `GROQ_API_KEY` | Resúmenes de noticias con IA (sin ella, resumen determinista) | — |
 | `GROQ_NEWS_MODEL` | Modelo de Groq para los resúmenes | `llama-3.1-8b-instant` |
-| `PLAYER_PHOTOS` | `off` apaga las fotos | activas |
 | `SCRAPER_CONTACT` | Tu correo, para identificar al programa ante los medios y Wikipedia | — |
 | `SCRAPER_INFO_URL` | URL con información del programa (para el User-Agent) | — |
 | `SCRAPER_USER_AGENT` | User-Agent completo, si quieres sustituir el automático | automático |
@@ -201,10 +197,9 @@ Si el despliegue falla, el log de Railway dice dónde. Si se queja de no encontr
     │   ├── ingest.py            # elige la fuente, valida y guarda; actualización diaria
     │   ├── local_data.py        # lee data/*.json (sin red) y arma las fichas de torneo
     │   ├── news.py              # noticias por RSS, con regla por fuente y filtro Top 20
-    │   ├── photos.py            # autor y licencia de cada foto (sin crédito, no hay foto)
     │   ├── players.py           # reconoce jugadoras del Top 20 en un texto
     │   └── http_policy.py       # User-Agent honesto, robots.txt y ritmo por dominio
-    ├── data/              # datos de arranque (de ejemplo); la tarea de actualización los reescribe
+    ├── data/              # datos de arranque (de ejemplo); la tarea de actualización los reescribe y añade ranking_masculino.json
     │   ├── ranking.json
     │   ├── calendario.json
     │   ├── torneo.json          # torneo en juego puesto a mano (opcional): con "active": true tiene prioridad
@@ -225,14 +220,8 @@ GET /api/ranking               ranking femenino
 GET /api/calendar              torneos actuales y próximos
 GET /api/live                  torneo en curso (sin marcadores) y enlace al marcador oficial
 GET /api/news                  noticias
-GET /api/data-status           fuente, antigüedad, última actualización y estado de las fotos
+GET /api/data-status           fuente, antigüedad y resultado de la última actualización
 GET /api/version               versión
-GET /api/player-photo          URL de la foto de una jugadora y su crédito
-GET /api/player-photo-image    la foto de una jugadora
-GET /api/player-photo-credit   autor y licencia de esa foto
-GET /api/sponsor-photo-image   la misma foto, para la pestaña «Qué usan»
-GET /api/photo                 foto ya acreditada, por su URL de Wikimedia
-GET /creditos-fotos            autor y licencia de cada foto mostrada
 GET /como-funciona             la arquitectura explicada para todos
 ```
 
@@ -261,7 +250,7 @@ Si eres titular de una web usada como fuente y prefieres que no se acceda a ella
 - **Retraso y alcance.** Con Padel API gratuita solo hay resultados de los últimos 6 meses. Con el respaldo de Wikipedia, semanas de retraso y sin terceras. Solo se publican las finales femeninas, no las rondas previas ni marcadores en directo.
 - **Arranque.** El disco de Railway es efímero: tras cada despliegue se vuelven a pedir los datos y durante unos 3-4 minutos se muestran los de ejemplo.
 - **Noticias.** Hay pocas (los medios publican unas pocas de pádel a la semana), como máximo 15, y la mayoría solo con titular y enlace.
-- **Superficie pública.** Los endpoints de fotos aceptan cualquier nombre y consultan a Wikimedia (con caché, pero sin un tope duro), y FastAPI publica `/docs`, `/redoc` y `/openapi.json`. El MCP en modo abierto no identifica a nadie: para uso público, `MCP_AUTH=github`.
+- **Superficie pública.** FastAPI publica `/docs`, `/redoc` y `/openapi.json`. El MCP en modo abierto no identifica a nadie: para uso público, `MCP_AUTH=github`.
 - **Padel API.** Si el MCP se hace muy público, conviene confirmar con ellos que su uso encaja con sus condiciones.
 
 ## Objetivo

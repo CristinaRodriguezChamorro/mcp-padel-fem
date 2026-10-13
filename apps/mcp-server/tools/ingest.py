@@ -41,6 +41,7 @@ from tools.local_data import _data_dir
 STATUS_FILE = "_ingesta.json"
 MIN_RANKING_ROWS = 8
 MIN_TOURNAMENTS = 8
+MIN_MEN_ROWS = 10        # la lista de hombres solo se guarda si parece completa
 MAX_SHRINK = 0.6          # una tabla nueva con menos del 60 % de filas que la anterior se considera rota
 
 
@@ -230,11 +231,21 @@ async def _run_padelapi(client_factory: Optional[Callable[[], httpx.AsyncClient]
         data_dir_rank, data_dir_cal = data_dir / "ranking.json", data_dir / "calendario.json"
         _atomic_write(data_dir_rank, {"_meta": rank_meta, "jugadoras": got["ranking"]})
         _atomic_write(data_dir_cal, {"_meta": cal_meta, "torneos": got["tournaments"]})
+        men_rows, notes = len(got.get("men") or []), list(got["notes"])
+        if men_rows >= MIN_MEN_ROWS:
+            _atomic_write(data_dir / "ranking_masculino.json", {
+                "_meta": {**common, "actualizado": rank_meta["actualizado"],
+                          "nota": "Ranking masculino según Padel API. Solo sirve para que las noticias no mezclen "
+                                  "a jugadores; no se muestra en ningún sitio."},
+                "jugadores": got["men"]})
+        else:
+            notes.append(f"ranking masculino: solo {men_rows} filas; se conserva la lista anterior")
         finals = sum(1 for t in got["tournaments"] if t.get("final_femenina"))
         status = _save_status(ok=True, estado="correcto", mensaje="Datos actualizados desde Padel API.",
                               fuente_activa="padelapi", ranking_filas=len(got["ranking"]),
                               torneos=len(got["tournaments"]), finales=finals, peticiones=got["calls"],
-                              avisos=got["notes"], fecha_fuente=rank_meta["actualizado"],
+                              ranking_masculino_filas=men_rows,
+                              avisos=notes, fecha_fuente=rank_meta["actualizado"],
                               consultado=today.isoformat(), intento_padelapi=None)
         print(f"  ingesta (Padel API): correcta ({len(got['ranking'])} jugadoras, {len(got['tournaments'])} torneos, "
               f"{finals} finales, {got['calls']} peticiones)")

@@ -118,7 +118,7 @@ class Routes(unittest.TestCase):
 
 
 class Files(unittest.TestCase):
-    RUNTIME = {"data/_ingesta.json", ".vscode/mcp.json"}
+    RUNTIME = {"data/_ingesta.json", "data/ranking_masculino.json", ".vscode/mcp.json"}   # los crea la app o tú
 
     def test_every_path_it_mentions_exists(self):
         paths = set(re.findall(r"`((?:apps|examples|data|tools|padel_mcp|static|tests)/[\w./\-]+\.(?:json|html|py|toml|yml|md))`", README))
@@ -141,7 +141,8 @@ class Files(unittest.TestCase):
 
     def test_it_does_not_talk_about_things_that_were_removed(self):
         for gone in ("live_data", "scraper.py", "Playwright", "playwright", "start.sh", "mcp_tools.py", "mcp_auth.py",
-                     "padelspeak", "Chromium", "apps/web"):
+                     "padelspeak", "Chromium", "apps/web", "PLAYER_PHOTOS", "creditos-fotos", "player-photo", "photos.py",
+                     "Wikimedia", "foto de"):
             self.assertNotIn(gone, README, gone)
 
 

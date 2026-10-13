@@ -1,8 +1,7 @@
 """
 Barrera contra el scraping: falla si alguien vuelve a introducir código que lea webs de
-terceros que no sean las permitidas (feeds RSS de los medios y APIs/imágenes de Wikimedia).
+terceros que no sean las permitidas (feeds RSS de los medios y APIs de Padel API y Wikipedia).
 """
-import os
 import re
 import subprocess
 import sys
@@ -19,7 +18,7 @@ FORBIDDEN_LIBS = ("playwright", "bs4", "beautifulsoup4", "pypdf", "lxml", "selen
 ALLOWED_HOSTS = {
     "okdiario.com",
     "padelapi.org",                                                    # datos reales con licencia (token propio)
-    "en.wikipedia.org", "es.wikipedia.org", "commons.wikimedia.org",   # datos (CC BY-SA) y fotos
+    "en.wikipedia.org", "es.wikipedia.org",                                # respaldo de datos (CC BY-SA)
     "creativecommons.org",                                             # enlace a la licencia
     "api.github.com", "github.com",                                    # comprobar el token y enlazar el repo
     "e00-marca.uecdn.es", "www.mundodeportivo.com", "www.padelspain.net",

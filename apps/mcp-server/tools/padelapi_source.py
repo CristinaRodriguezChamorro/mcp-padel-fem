@@ -9,7 +9,6 @@ revenderlos como producto, replicar su base de datos ni extraerla en masa. Por e
   - se piden pocos datos y se guardan en data/ (la web y el MCP leen de esos archivos; la API no se
     consulta con cada pregunta de un usuario);
   - un torneo ya completado no se vuelve a pedir;
-  - las fotos y pósters de la API no se usan (no tienen licencia);
   - el ritmo es de una petición cada ~6,5 s (el plan gratuito admite 10 por minuto).
 
 Todo error (token malo, límite, red, respuesta rara) se convierte en un SourceError con un mensaje
@@ -37,6 +36,7 @@ LEVELS = "major,p1,p2,finals"
 LEVEL_TEXT = {"major": "Major", "p1": "P1", "p2": "P2", "finals": "Finals"}
 HIDDEN = "hidden_free_plan"           # lo que devuelve el plan gratuito para datos fuera de su alcance
 RANKING_ROWS = 20
+MEN_ROWS = 50                         # solo sirve para que las noticias no mezclen a jugadores; no se muestra
 FREE_WINDOW_DAYS = 175                # el plan gratuito solo enseña resultados de los últimos 6 meses
 MAX_FINAL_FETCHES = 12                # torneos nuevos por pasada (cada uno cuesta 2 peticiones)
 MAX_PAGES = 4
@@ -156,6 +156,20 @@ def parse_ranking(data: list, limit: int = RANKING_ROWS) -> list:
     return rows[:limit]
 
 
+def parse_men_ranking(data: list, limit: int = MEN_ROWS) -> list:
+    """Nombres de los jugadores del ranking masculino oficial (para que las noticias no los mezclen)."""
+    rows = []
+    for r in data:
+        if r.get("category") != "men" or r.get("type", "official") != "official":
+            continue
+        pos, name = r.get("ranking"), clean_name(r.get("name"))
+        if not name or isinstance(pos, bool) or not isinstance(pos, int) or pos < 1:
+            continue
+        rows.append({"pos": pos, "name": name})
+    rows.sort(key=lambda x: x["pos"])
+    return rows[:limit]
+
+
 def snapshot_date(data: list) -> Optional[str]:
     dates = sorted(str(r.get("date"))[:10] for r in data if re.match(r"^\d{4}-\d{2}-\d{2}", str(r.get("date") or "")))
     return dates[-1] if dates else None
@@ -266,6 +280,16 @@ async def fetch_all(today: date, previous_tournaments: Optional[list] = None,
         raw_ranking = [x for x in (body.get("data") or []) if isinstance(x, dict)]
         ranking = parse_ranking(raw_ranking)
 
+        men = []
+        try:
+            men_body = await api.get("/rankings", {"type": "official", "category": "men", "sort_by": "ranking",
+                                                   "order_by": "asc", "per_page": MEN_ROWS})
+            men = parse_men_ranking([x for x in (men_body.get("data") or []) if isinstance(x, dict)])
+        except FatalSourceError:
+            raise
+        except SourceError as exc:
+            notes.append(f"ranking masculino: {exc}")
+
         raw_tournaments = await api.pages("/tournaments", {
             "level": LEVELS, "after_date": f"{today.year - 1}-12-31", "before_date": f"{today.year + 1}-01-01",
             "sort_by": "start_date", "order_by": "asc"})
@@ -302,5 +326,5 @@ async def fetch_all(today: date, previous_tournaments: Optional[list] = None,
                 notes.append(f"{t['name']}: la final femenina aún no tiene ganadora clara en la fuente")
         if len(todo) > MAX_FINAL_FETCHES:
             notes.append(f"{len(todo) - MAX_FINAL_FETCHES} torneos se completarán en la próxima pasada")
-        return {"ranking": ranking, "tournaments": tournaments, "snapshot": snapshot_date(raw_ranking),
+        return {"ranking": ranking, "men": men, "tournaments": tournaments, "snapshot": snapshot_date(raw_ranking),
                 "calls": api.calls, "notes": notes}

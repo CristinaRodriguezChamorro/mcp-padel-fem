@@ -38,7 +38,7 @@
 
 <svg viewBox="0 0 780 440" role="img" aria-labelledby="t d">
   <title id="t">Dibujo de cómo funciona la web</title>
-  <desc id="d">Tú preguntas a la tendera, que mira su cuaderno. La tendera rellena el cuaderno con lo que copia de la biblioteca, de los tablones de los periódicos y del álbum de fotos. Para los marcadores en directo, solo te señala el marcador oficial.</desc>
+  <desc id="d">Tú preguntas a la tendera, que mira su cuaderno. La tendera rellena el cuaderno con lo que copia de la biblioteca y de los tablones de los periódicos. Para los marcadores en directo, solo te señala el marcador oficial.</desc>
   <defs>
     <marker id="f" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M2 1L8 5L2 9" fill="none" stroke="#333" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
@@ -62,25 +62,20 @@
     <text x="370" y="50" font-size="18" font-weight="bold">Marcador oficial</text>
     <text x="370" y="76" font-size="15">solo un cartel con una flecha</text>
 
-    <rect x="10" y="340" width="240" height="85" rx="10" fill="#f1e8f7" stroke="#333"/>
-    <text x="130" y="374" font-size="18" font-weight="bold">El proveedor de datos</text>
-    <text x="130" y="400" font-size="15">Padel API (y Wikipedia)</text>
+    <rect x="60" y="340" width="240" height="85" rx="10" fill="#f1e8f7" stroke="#333"/>
+    <text x="180" y="374" font-size="18" font-weight="bold">El proveedor de datos</text>
+    <text x="180" y="400" font-size="15">Padel API (y Wikipedia)</text>
 
-    <rect x="270" y="340" width="240" height="85" rx="10" fill="#f1e8f7" stroke="#333"/>
-    <text x="390" y="374" font-size="18" font-weight="bold">Los periódicos</text>
-    <text x="390" y="400" font-size="15">sus titulares y enlaces</text>
-
-    <rect x="530" y="340" width="240" height="85" rx="10" fill="#f1e8f7" stroke="#333"/>
-    <text x="650" y="374" font-size="18" font-weight="bold">El álbum de fotos</text>
-    <text x="650" y="400" font-size="15">(Wikimedia), con su autor</text>
+    <rect x="480" y="340" width="240" height="85" rx="10" fill="#f1e8f7" stroke="#333"/>
+    <text x="600" y="374" font-size="18" font-weight="bold">Los periódicos</text>
+    <text x="600" y="400" font-size="15">sus titulares y enlaces</text>
   </g>
   <g stroke="#333" stroke-width="2.2" fill="none">
     <line x1="184" y1="210" x2="266" y2="210" marker-start="url(#f)" marker-end="url(#f)"/>
     <line x1="474" y1="210" x2="566" y2="210" marker-start="url(#f)" marker-end="url(#f)"/>
     <line x1="370" y1="153" x2="370" y2="104" marker-end="url(#f)" stroke-dasharray="6 5"/>
-    <line x1="140" y1="337" x2="300" y2="269" marker-end="url(#f)"/>
-    <line x1="390" y1="337" x2="375" y2="269" marker-end="url(#f)"/>
-    <line x1="640" y1="337" x2="450" y2="269" marker-end="url(#f)"/>
+    <line x1="190" y1="337" x2="305" y2="269" marker-end="url(#f)"/>
+    <line x1="590" y1="337" x2="440" y2="269" marker-end="url(#f)"/>
   </g>
 </svg>
 <p class="peque">Las flechas con dos puntas son preguntas y respuestas. Las de abajo son los viajes de la tendera para copiar información. La de línea discontinua es el cartel que te manda al marcador oficial.</p>
@@ -106,16 +101,11 @@
   <tbody>
     <tr><td>Ranking, calendario y finales</td><td>Padel API, un servicio de datos de pádel profesional con permiso de uso (se cita al pie de la web); de respaldo, Wikipedia (la escriben voluntarios; su licencia pide citarla)</td><td>Una vez al día</td></tr>
     <tr><td>Noticias</td><td>Los tablones de titulares que los propios periódicos ponen para quien quiera leerlos. Cada periódico se trata según lo que permite: de OKDiario, que lo permite con una licencia no comercial, se hace un resumen con otras palabras (un ayudante, una inteligencia artificial si está activada) con su autor y su enlace; de Padel Addict solo un extracto corto, tal cual; del resto, solo el titular y el enlace. Solo se guardan las que hablan de las 20 primeras jugadoras.</td><td>Como mucho cada diez minutos</td></tr>
-    <tr><td>Fotos</td><td>El álbum de Wikimedia, solo si se puede comprobar quién la hizo y con qué permiso</td><td>Al verlas, y se recuerdan una semana</td></tr>
     <tr><td>Marcadores en directo</td><td>No los copiamos: te mandamos al marcador oficial de la FIP</td><td>—</td></tr>
   </tbody>
 </table>
 
-<h2>5. Las fotos, con el nombre del fotógrafo</h2>
-<p>Las fotos de Wikimedia se pueden usar gratis, pero casi todas piden poner <strong>quién la hizo</strong> y <strong>con qué permiso</strong>. Es como poner la etiqueta con el nombre del fotógrafo debajo del cuadro. Si pasas el ratón por una foto, ves su autor. Hay además una <a href="/creditos-fotos">página con todos los créditos</a>.</p>
-<p><strong>Si no se puede comprobar quién hizo la foto, no se pone.</strong> En su lugar salen las iniciales de la jugadora.</p>
-
-<h2>6. El teléfono: para asistentes como Copilot o Claude</h2>
+<h2>5. El teléfono: para asistentes como Copilot o Claude</h2>
 <p>Además de la ventanilla (la web), la tendera tiene <strong>una línea de teléfono</strong>. Sirve para que un asistente de ordenador le pregunte cosas, como «¿cómo va Delfina Brea?». A eso se le llama <strong>MCP</strong>.</p>
 <ul>
   <li><strong>Para llamar hay que decir quién eres.</strong> Se hace con tu «carné de GitHub» (un código llamado <em>token</em>). Ese carné <strong>no da ningún permiso</strong>: solo sirve para identificarte.</li>
@@ -123,7 +113,7 @@
   <li>Solo <strong>lee</strong>: por teléfono no se puede cambiar nada.</li>
 </ul>
 
-<h2>7. Lo que esta web NO hace, y por qué</h2>
+<h2>6. Lo que esta web NO hace, y por qué</h2>
 <ul>
   <li><strong>No enseña marcadores en directo.</strong> El dueño del marcador oficial (la FIP) no permite que otros lo copien con programas sin su permiso. Por eso ponemos el cartel con la flecha.</li>
   <li><strong>El ranking puede ir con retraso</strong> de semanas, porque depende de que los voluntarios de Wikipedia lo actualicen. La web siempre dice de qué fecha son los datos.</li>
@@ -132,7 +122,7 @@
 </ul>
 <p>El plan para tener datos oficiales y al día es <strong>pedir permiso a la FIP por correo</strong>. Si lo concede, se añade su fuente.</p>
 
-<h2>8. Dónde vive todo</h2>
+<h2>7. Dónde vive todo</h2>
 <ul>
   <li><strong>La tienda</strong> (donde trabaja la tendera) es un servicio de internet que siempre está abierto, llamado <em>Railway</em>.</li>
   <li><strong>Los planos de la tienda</strong> (el código) se guardan en <em>GitHub</em>.</li>
@@ -140,14 +130,13 @@
   <li>Antes de cambiar nada, se pasa <strong>una lista de comprobaciones automáticas</strong> (más de cien) para ver que todo sigue funcionando.</li>
 </ul>
 
-<h2>9. Si algo falla</h2>
+<h2>8. Si algo falla</h2>
 <ul>
-  <li><strong>No salen fotos:</strong> es que no se ha podido comprobar quién las hizo. Es a propósito: prefiere no poner la foto antes que ponerla sin su crédito.</li>
   <li><strong>Los datos son viejos:</strong> la biblioteca no se ha actualizado, o la tendera no ha podido copiarla. La franja amarilla lo dice.</li>
   <li><strong>Para ver el motivo exacto</strong>, quien administra la web puede abrir <a href="/api/data-status">/api/data-status</a>: ahí la tendera apunta cuándo copió por última vez y qué le pasó.</li>
 </ul>
 
-<h2>10. Palabras raras</h2>
+<h2>9. Palabras raras</h2>
 <dl>
   <dt>Servidor</dt><dd>La tendera: el programa que contesta cuando alguien pregunta.</dd>
   <dt>Padel API</dt><dd>El proveedor de datos de la tendera: un servicio con permiso de uso que tiene el ranking y los resultados de los torneos.</dd>

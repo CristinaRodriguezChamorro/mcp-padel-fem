@@ -2,7 +2,6 @@
 Pruebas sin internet: levantan un servidor local que imita webs con distintos robots.txt.
 Ejecutar desde apps/mcp-server:   python -m unittest discover -s tests -v
 """
-import asyncio
 import os
 import sys
 import time

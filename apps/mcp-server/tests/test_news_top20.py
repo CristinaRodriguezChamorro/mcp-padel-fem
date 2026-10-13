@@ -15,6 +15,8 @@ from tools.players import mention_strength, mentioned_players, players_from_name
 
 TOP = ["Gemma Triay", "Delfina Brea", "Ariana Sánchez", "Ari Sánchez", "Marta Ortega"]
 NORMS = {news._pnorm(n) for n in TOP}
+MEN = {news._pnorm(n) for n in ["Arturo Coello", "Agustin Tapia", "Alejandro Galan", "Federico Chingotto", "Juan Lebron",
+                                "Maximiliano Sanchez", "Mohamed Gonzalez"]}     # la lista de ellos, como la da Padel API
 
 
 def rss(items):
@@ -28,7 +30,7 @@ def rss(items):
 
 class FilterRules(unittest.TestCase):
     def test_full_name_passes(self):
-        self.assertTrue(news.es_noticia_top20("Gemma Triay gana en Madrid", "Gran final.", NORMS))
+        self.assertTrue(news.es_noticia_top20("Gemma Triay gana en Madrid", "Gran final.", NORMS, MEN))
 
     def test_generic_womens_news_without_a_top20_player_is_rejected(self):
         self.assertFalse(news.es_noticia_top20("El pádel femenino crece en España", "Más licencias de mujeres.", NORMS))
@@ -37,9 +39,11 @@ class FilterRules(unittest.TestCase):
         self.assertFalse(news.es_noticia_top20("Coello y Tapia ganan en Madrid", "Final masculina.", NORMS))
 
     def test_lone_surname_needs_corroboration(self):
-        self.assertFalse(news.es_noticia_top20("Triay gana en Rotterdam", "Sin más contexto.", NORMS))
-        self.assertTrue(news.es_noticia_top20("Triay gana en Rotterdam", "Torneo femenino de Rotterdam.", NORMS))
-        self.assertTrue(news.es_noticia_top20("Triay y Brea ganan en Rotterdam", "Final.", NORMS))
+        self.assertFalse(news.es_noticia_top20("Triay gana en Rotterdam", "Sin más contexto.", NORMS, MEN))
+        self.assertTrue(news.es_noticia_top20("Triay gana en Rotterdam", "Torneo femenino de Rotterdam.", NORMS, MEN))
+        # varios apellidos juntos NO bastan: muchos apellidos son también de hombres
+        self.assertFalse(news.es_noticia_top20("Triay y Brea ganan en Rotterdam", "Final.", NORMS, MEN))
+        self.assertTrue(news.es_noticia_top20("Triay y Brea, campeonas en Rotterdam", "Final.", NORMS, MEN))
 
     def test_ambiguous_surname_is_rejected(self):
         self.assertFalse(news.es_noticia_top20("Sánchez gana en Rotterdam", "Torneo femenino.", NORMS))

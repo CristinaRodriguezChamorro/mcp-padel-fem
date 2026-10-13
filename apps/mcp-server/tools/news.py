@@ -14,9 +14,9 @@ import unicodedata
 from groq import Groq
 from urllib.parse import urlparse
 from email.utils import parsedate_to_datetime
-from tools.local_data import get_womens_ranking_names
+from tools.local_data import get_mens_ranking_names, get_womens_ranking_names
 from tools.http_policy import USER_AGENT, check_and_wait
-from tools.players import norm as _pnorm, players_from_names, mentioned_players
+from tools.players import norm as _pnorm, mentioned_players
 
 RSS_FEEDS = [
     "https://okdiario.com/deportes/padel/feed",
@@ -171,6 +171,10 @@ BASURA = [
 FILTRO_FEMENINO = (
     "female", "women", "woman",
     "femenino", "femenina", "femeninos", "femeninas", "mujeres",
+    "campeona", "campeonas", "jugadora", "jugadoras", "ellas",
+)
+FILTRO_MASCULINO = (
+    "masculino", "masculina", "masculinos", "masculinas", "hombres", "varones", "male", "men s", "mens",
 )
 
 # Las noticias se centran SOLO en el Top 20 del ranking femenino.
@@ -178,7 +182,7 @@ TOP_N = 20
 
 # Cache local: el ranking no necesita consultarse en cada refresh de noticias.
 _ranking_names_cache = {"ts": 0.0, "display": None}
-RANKING_NAMES_TTL = 6 * 60 * 60
+RANKING_NAMES_TTL = 5 * 60        # los nombres salen de un archivo local: leerlos es barato y así se notan las actualizaciones
 
 
 def _normalizar(texto: str) -> str:
@@ -203,7 +207,7 @@ def _ranking_full_names(names: list[str]) -> set[str]:
 async def get_top_player_names(limit: int = TOP_N) -> list[str]:
     """
     Nombres (tal como salen en el ranking) de las jugadoras del Top 20, en orden.
-    Se cachean 6 h; si la fuente falla se reutiliza lo último conocido.
+    Se cachean 5 min; si la fuente falla se reutiliza lo último conocido.
     """
     now = time.time()
     cached = _ranking_names_cache.get("display")
@@ -222,56 +226,127 @@ async def get_top_player_names(limit: int = TOP_N) -> list[str]:
     return cached or []
 
 
+_men_names_cache = {"ts": 0.0, "display": None}
+
+
+async def get_top_men_names(limit: int = 50) -> list[str]:
+    """
+    Nombres de los jugadores del ranking masculino. Solo sirven para NO mezclarlos en las noticias; no se
+    muestran en ningún sitio. Se cachean 5 min (una lista vacía no se cachea). Sin lista (p. ej. con el respaldo de Wikipedia) devuelve [] y el
+    filtro pasa a ser más estricto.
+    """
+    now = time.time()
+    cached = _men_names_cache.get("display")
+    if cached is not None and (now - _men_names_cache["ts"]) < RANKING_NAMES_TTL:
+        return cached
+    try:
+        names = [n for n in await get_mens_ranking_names(limit=limit) if n][:limit]
+    except Exception as exc:  # noqa: BLE001
+        print(f"  men ranking filter error: {exc}")
+        return cached or []
+    if names:
+        _men_names_cache["ts"] = now
+        _men_names_cache["display"] = names
+        print(f"Filtro noticias: {len(names)} jugadores del ranking masculino cargados")
+    else:
+        # Una lista vacía NO se guarda: tras un despliegue el archivo aparece unos minutos después y no
+        # hay que quedarse en modo estricto hasta que caduque la caché.
+        _men_names_cache["display"] = None
+        print("Filtro noticias: sin lista de jugadores (modo estricto: solo noticias que digan expresamente femenino)")
+    return names
+
+
+def _term_present(padded: str, terms) -> bool:
+    return any(t and f" {t} " in padded for t in {_normalizar(x) for x in terms})
+
+
 def _female_term_present(padded: str) -> bool:
-    return any(t and f" {t} " in padded for t in {_normalizar(x) for x in FILTRO_FEMENINO})
+    return _term_present(padded, FILTRO_FEMENINO)
+
+
+def _male_term_present(padded: str) -> bool:
+    return _term_present(padded, FILTRO_MASCULINO)
+
+
+def _universe(women_names, men_names=()) -> list:
+    """Todas las personas que conocemos, con su género. Un apellido compartido (entre mujeres, o con un hombre)
+    solo cuenta si va con el nombre de pila o la inicial: así 'Maxi Sánchez' no se confunde con 'Ariana Sánchez'."""
+    return ([{"name": n, "g": "f"} for n in women_names if n] +
+            [{"name": n, "g": "m"} for n in men_names if n])
+
+
+def _classify(text: str, women_names, men_names=()) -> tuple[list, list]:
+    """(menciones de jugadoras, menciones de jugadores) en el texto, con su fuerza."""
+    hits = mentioned_players(text, _universe(women_names, men_names))
+    return ([(p, s) for p, s in hits if p["g"] == "f"], [(p, s) for p, s in hits if p["g"] == "m"])
 
 
 def es_noticia_top20(
     titulo: str,
     texto: str,
     ranking_names: set[str],
+    men_names=(),
 ) -> bool:
     """
-    Regla determinista: la noticia se conserva SOLO si habla de alguien del Top 20.
+    Regla determinista: la noticia se conserva SOLO si es de pádel femenino y habla de alguien del Top 20.
+    Manda el titular: una noticia no deja de ser de hombres porque nombre a una jugadora de pasada.
 
-      - nombre completo de una jugadora del Top 20  -> se conserva;
-      - solo apellido (o inicial + apellido)        -> se conserva si además hay una
-        señal femenina (femenino, women...) o se mencionan al menos dos jugadoras
-        distintas. Un apellido suelto podría ser un jugador masculino.
-
+      1. Si el titular nombra a un jugador del ranking masculino, o dice 'masculino', se descarta.
+      2. Sin la lista de jugadores (modo estricto) solo pasa si además dice expresamente femenino, mujeres,
+         campeonas, jugadoras... en el titular o el texto: sin ella no se puede descartar a un hombre.
+      3. Con la lista:
+           - nombre completo de una jugadora en el titular                  -> pasa;
+           - solo apellidos en el titular                                    -> pasa solo si hay señal femenina
+             expresa (varios apellidos juntos no bastan: muchos son también de hombres);
+           - jugadoras solo en el texto                                      -> pasa si hay señal femenina expresa
+             y no aparece ningún hombre ni ninguna señal masculina.
     Una noticia genérica sobre pádel femenino sin ninguna jugadora del Top 20 NO pasa.
     Groq NO interviene en esta decisión.
     """
     if any(b in titulo.lower() for b in BASURA):
         return False
 
-    players = players_from_names(ranking_names)
-    hits = mentioned_players(f"{titulo} {texto}", players)
-    if not hits:
+    f_title, m_title = _classify(titulo, ranking_names, men_names)
+    f_all, m_all = _classify(f"{titulo} {texto}", ranking_names, men_names)
+    if not f_all:
         return False
-    if any(strength == 2 for _, strength in hits):
-        return True
-    padded = f" {_normalizar(f'{titulo} {texto}')} "
-    return _female_term_present(padded) or len(hits) >= 2
+
+    padded_title = f" {_normalizar(titulo)} "
+    padded_all = f" {_normalizar(f'{titulo} {texto}')} "
+    female_term = _female_term_present(padded_all)
+
+    if m_title or _male_term_present(padded_title):
+        return False
+    if not men_names:
+        return female_term and not _male_term_present(padded_all)
+
+    if f_title:
+        if any(strength == 2 for _, strength in f_title):
+            return True
+        return female_term
+    return female_term and not m_all and not _male_term_present(padded_all)
 
 
-def _extraer_fragmentos_femeninos(texto: str, ranking_names: set[str]) -> str:
+def _extraer_fragmentos_femeninos(texto: str, ranking_names: set[str], men_names=()) -> str:
     """
-    Conserva únicamente las frases donde aparece alguna jugadora del Top 20.
-    Esto evita que un artículo mixto lleve contenido masculino o ajeno al resumen.
+    Conserva únicamente las frases donde aparece alguna jugadora del Top 20 y ningún jugador ni señal masculina.
+    Esto evita que un artículo mixto lleve contenido masculino al resumen.
     """
     if not texto:
         return ""
 
-    players = players_from_names(ranking_names)
     frases = re.split(r"(?<=[.!?])\s+", texto)
-    seleccion = [f.strip() for f in frases if mentioned_players(f, players)]
+    seleccion = []
+    for frase in frases:
+        f, m = _classify(frase, ranking_names, men_names)
+        if f and not m and not _male_term_present(f" {_normalizar(frase)} "):
+            seleccion.append(frase.strip())
     return " ".join(seleccion)[:3000]
 
 
 def _nombres_jugadoras(texto: str, players: list) -> list[str]:
-    """Nombres (de pantalla) de las jugadoras del Top 20 mencionadas en el texto."""
-    return [p["name"] for p, _ in mentioned_players(texto, players)]
+    """Nombres (de pantalla) de las jugadoras del Top 20 mencionadas en el texto (los hombres no cuentan)."""
+    return [p["name"] for p, _ in mentioned_players(texto, players) if p.get("g", "f") == "f"]
 
 
 def _centrar_en_top20(noticias: list, articulos: list, players: list) -> list:
@@ -283,6 +358,14 @@ def _centrar_en_top20(noticias: list, articulos: list, players: list) -> list:
     url_tags = {a.get("url", ""): a.get("jugadoras", []) for a in articulos}
     centradas = []
     for n in noticias:
+        # Salvaguarda final: nada de lo que se publica puede nombrar a un jugador del ranking masculino.
+        if any(p.get("g") == "m" for p, _ in mentioned_players(n.get("titular", ""), players)):
+            continue
+        if any(p.get("g") == "m" for p, _ in mentioned_players(n.get("resumen", "") or "", players)):
+            if n.get("modo") == "extracto":
+                n["resumen"] = ""                       # se queda solo con titular y enlace
+            else:
+                continue
         tags = []
         for f in n.get("fuentes", []):
             for name in url_tags.get(f.get("url", ""), []):
@@ -499,19 +582,20 @@ def _sentencias_completas(texto: str) -> list[str]:
     return salida
 
 
-def _female_title_strength(titulo: str, ranking_names: set[str]) -> int:
+def _female_title_strength(titulo: str, ranking_names: set[str], men_names=()) -> int:
     """
     3 = nombre completo de una jugadora del Top 20, o apellido + señal femenina
     2 = al menos dos jugadoras del Top 20 por apellido
     0 = señal insuficiente (un texto genérico "femenino" sin jugadoras NO basta)
     """
     padded = f" {_normalizar(titulo)} "
-    hits = mentioned_players(titulo, players_from_names(ranking_names))
+    hits, male_hits = _classify(titulo, ranking_names, men_names)
+    if male_hits:
+        return 0
     full = any(strength == 2 for _, strength in hits)
     weak = sum(1 for _, strength in hits if strength == 1)
 
-    male_terms = {_normalizar(x) for x in ("masculino", "masculina", "masculinos", "masculinas", "men", "male")}
-    explicit_male = any(term and f" {term} " in padded for term in male_terms)
+    explicit_male = _male_term_present(padded)
     explicit_female = _female_term_present(padded)
 
     if explicit_male and not explicit_female and not full and weak < 2:
@@ -561,7 +645,7 @@ def _titulo_fallback_desde_frase(frase: str) -> str:
     return base
 
 
-def generar_fallback_sin_ia(art: dict, ranking_names: set[str]) -> dict | None:
+def generar_fallback_sin_ia(art: dict, ranking_names: set[str], men_names=()) -> dict | None:
     """
     Fallback cuando Groq está en 429.
 
@@ -580,10 +664,10 @@ def generar_fallback_sin_ia(art: dict, ranking_names: set[str]) -> dict | None:
 
     # Body ya viene de _extraer_fragmentos_femeninos, pero exigimos una señal fuerte.
     body_strength = max(
-        (_female_title_strength(frase, ranking_names) for frase in frases),
+        (_female_title_strength(frase, ranking_names, men_names) for frase in frases),
         default=0,
     )
-    title_strength = _female_title_strength(titulo_original, ranking_names)
+    title_strength = _female_title_strength(titulo_original, ranking_names, men_names)
 
     if max(title_strength, body_strength) < 2:
         return None
@@ -795,29 +879,16 @@ async def get_latest_news() -> dict:
     print(f"RSS: {len(raw)} artículos")
 
     top_names = await get_top_player_names()
+    men_top = await get_top_men_names()
     ranking_names = {_pnorm(n) for n in top_names}
-    players = players_from_names(top_names)
-    if not players:
+    men_names = {_pnorm(n) for n in men_top}
+    players = _universe(top_names, men_top)
+    if not top_names:
         print("  sin Top 20 disponible: no se puede filtrar, se devuelven 0 noticias")
     femeninos = []
     for art in raw:
-        titulo = art["titulo"]
-        texto = art.get("texto", "")
-        if not es_noticia_top20(titulo, texto, ranking_names):
+        if not es_noticia_top20(art["titulo"], art.get("texto", ""), ranking_names, men_names):
             continue
-
-        title_norm = _normalizar(titulo)
-        padded_title = f" {title_norm} "
-        male_title = any(
-            f" {_normalizar(term)} " in padded_title
-            for term in ("masculino","masculina","masculinos","masculinas","men","male")
-        )
-
-        # Si el titular es explícitamente masculino, solo se conserva cuando el propio
-        # texto menciona a una jugadora del Top 20.
-        if male_title and not mentioned_players(texto, players):
-            continue
-
         femeninos.append(art)
     print(f"Filtro Top 20: {len(femeninos)} noticias")
     for art in femeninos:
@@ -829,12 +900,13 @@ async def get_latest_news() -> dict:
     depurados = []
     for art in femeninos:
         art["texto_original"] = art.get("texto", "")
-        fragmento = _extraer_fragmentos_femeninos(art.get("texto", ""), ranking_names)
+        fragmento = _extraer_fragmentos_femeninos(art.get("texto", ""), ranking_names, men_names)
 
         if not fragmento:
             fragmento = _extraer_fragmentos_femeninos(
                 f"{art['titulo']}. {art.get('texto', '')}",
                 ranking_names,
+                men_names,
             )
 
         if fragmento:
@@ -885,7 +957,7 @@ async def get_latest_news() -> dict:
         ][:4]
 
         if candidatos and client and _is_groq_available():
-            print(f"  noticias: reintento individual máximo 1")
+            print("  noticias: reintento individual máximo 1")
             # At most one extra LLM call. If it 429s, breaker opens immediately.
             item = await generar_noticia_individual(client, sem, candidatos[0])
             if item:
@@ -908,7 +980,7 @@ async def get_latest_news() -> dict:
                 continue
 
             try:
-                fallback = generar_fallback_sin_ia(art, ranking_names)
+                fallback = generar_fallback_sin_ia(art, ranking_names, men_names)
             except Exception as exc:
                 print(f"  fallback noticias error: {type(exc).__name__}: {exc}")
                 fallback = None
