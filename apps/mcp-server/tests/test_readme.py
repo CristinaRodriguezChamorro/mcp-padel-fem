@@ -161,9 +161,11 @@ class Facts(unittest.TestCase):
         sec = section("De dónde salen los datos")
         for host, (name, mode) in news.SOURCE_POLICY.items():
             self.assertIn(name, sec, name)
-        self.assertEqual({m for _, m in news.SOURCE_POLICY.values()}, {"resumen", "extracto", "enlace"})
-        for word in ("resumen", "extracto", "solo titular y enlace"):
-            self.assertIn(word, sec)
+        self.assertEqual({m for _, m in news.SOURCE_POLICY.values()}, {"resumen", "extracto"})
+        for phrase in ("resumen", "extracto", "tres líneas", "fecha real", "enlace directo", f"{news.EXTRACT_CHARS} caracteres"):
+            self.assertIn(phrase, sec, phrase)
+        for left_out in ("Marca", "Mundo Deportivo", "Padel Spain", "Set Padel Magazine"):
+            self.assertIn(left_out, sec, f"el README debe decir que {left_out} se dejó fuera")
 
     def test_the_three_mcp_auth_modes_are_explained(self):
         sec = section("Quién puede conectarse (`MCP_AUTH`)")

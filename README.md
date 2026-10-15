@@ -84,7 +84,7 @@ Otras herramientas, apagadas por defecto: se activan con `MCP_TOOLS=extended`.
 | `resultado_torneo` | Ficha de la final femenina de cualquier torneo ya jugado (por nombre o por jugadora) |
 | `resultados_recientes` | Finales femeninas ya jugadas, con filtro opcional por jugadora |
 | `calendario` | Próximos torneos |
-| `noticias` | Noticias con enlace a la fuente (según la fuente: resumen, extracto literal o solo titular), con filtro opcional por jugadora |
+| `noticias` | Noticias de pádel femenino con un resumen de unas tres líneas, su fecha real y el enlace directo a la noticia, con filtro opcional por jugadora |
 | `resumen_del_dia` | Panorama rápido |
 | `estado_de_los_datos` | Fuente, antigüedad y última actualización de cada dato |
 
@@ -97,19 +97,22 @@ Cada respuesta indica su fuente, su antigüedad y los avisos (datos de ejemplo, 
 | Ranking, calendario y resultados | **Padel API** (padelapi.org) si hay `PADELAPI_TOKEN`; si no hay token, o falla y todavía no hay datos buenos de la API guardados, la API de **Wikipedia** (página *Premier Padel <año>*, CC BY-SA 4.0) |
 | Noticias | Los **feeds RSS** de los medios, con una regla por fuente (ver abajo) |
 | Marcadores en directo | No se reproducen: enlace al marcador oficial |
-| «Qué usan» y «¿Sabías que?» | Textos escritos a mano en `static/index.html`, sin fuente automática |
+| «Sponsors» y «¿Sabías que?» | Textos escritos a mano en `static/index.html`, sin fuente automática |
 
 **Padel API.** Servicio comercial con datos de Premier Padel (Major, P1, P2 y Finals) y un plan gratuito: ranking mundial actual, calendario y resultados de los últimos 6 meses, 50.000 peticiones al mes (10 por minuto y 2.000 al día), con cuadros completos desde 2023, de donde salen las semifinalistas. La tarea diaria hace unas pocas peticiones con una pausa de 6,5 s entre ellas y no vuelve a pedir un torneo ya completado. Sus [condiciones](https://padelapi.org/terms-of-service) permiten usar los datos en tu propia aplicación y guardar las respuestas; **no** permiten revenderlos como producto, copiar su base de datos ni extraerla en masa. Por eso el MCP ofrece respuestas filtradas y limitadas, y no un paso directo de su API. Sus nombres de jugadoras vienen sin tildes.
 
 **Wikipedia (respaldo).** La mantienen voluntarios, así que el ranking y los resultados pueden ir con **semanas de retraso**. Solo recoge ganadoras y finalistas, sin semifinales. La web y el MCP avisan cuando los datos pasan de 14 días.
 
-**Noticias.** Se consultan como mucho cada 10 minutos, solo las que hablan de alguna jugadora del Top 20 y se publican como máximo 15. **Nunca de hombres**: manda el titular. Si el titular nombra a un jugador, o dice «masculino», la noticia se descarta; un titular solo con apellidos no basta (muchos son también de hombres) y hace falta que diga expresamente que es femenino. Para saber quiénes son ellos, la tarea de actualización guarda también el ranking masculino de Padel API (`data/ranking_masculino.json`, solo nombres: no se muestra en ningún sitio). Sin esa lista (por ejemplo con el respaldo de Wikipedia, o unos minutos tras un despliegue) el filtro es más estricto: solo pasan las noticias que digan expresamente femenino, mujeres, campeonas o jugadoras. Cada medio se trata según lo que permiten sus condiciones; cualquier fuente nueva empieza en «solo titular y enlace» hasta que se lean las suyas:
+**Noticias.** Se consultan como mucho cada 10 minutos, solo se publican las que hablan de alguna jugadora del Top 20 y como máximo 15. **Nunca de hombres**: manda el titular. Si el titular nombra a un jugador, o dice «masculino», la noticia se descarta; un titular solo con apellidos no basta (muchos son también de hombres) y hace falta que diga expresamente que es femenino. Para saber quiénes son ellos, la tarea de actualización guarda también el ranking masculino de Padel API (`data/ranking_masculino.json`, solo nombres: no se muestra en ningún sitio). Sin esa lista (por ejemplo con el respaldo de Wikipedia, o unos minutos tras un despliegue) el filtro es más estricto: solo pasan las noticias que digan expresamente femenino, mujeres, campeonas o jugadoras. Cada medio se trata según lo que permiten sus condiciones; cualquier fuente nueva empieza en «solo titular y enlace» hasta que se lean las suyas:
+
+Cada noticia que se publica lleva su **fecha real** (la que da el medio; si no la da, no se inventa), un **resumen de al menos unas tres líneas** y el **enlace directo** a la noticia. Una noticia sin ese resumen no sale. Por eso solo se publican las fuentes cuyas condiciones permiten resumir o citar; cualquier otra se ignora (ni siquiera se le pide el feed) hasta que se lean las suyas:
 
 | Nivel | Qué se publica | Medios |
 |---|---|---|
-| resumen | Título, resumen propio (con IA si hay `GROQ_API_KEY`), autor y enlace | OKDiario (licencia Creative Commons no comercial) |
-| extracto | Título, extracto corto literal y enlace | Padel Addict |
-| solo titular y enlace | Título, fecha, medio y enlace | Marca, Mundo Deportivo, Padel Spain, Set Padel Magazine |
+| resumen | Título, resumen propio de unas tres líneas (con IA si hay `GROQ_API_KEY`; si no, las primeras frases de la crónica), fecha, autor y enlace. Usa el texto completo que OKDiario publica en su feed | OKDiario (licencia Creative Commons no comercial) |
+| extracto | Título, extracto literal de unas tres líneas (hasta 300 caracteres, sin reescribir), fecha y enlace | Padel Addict |
+
+Marca, Mundo Deportivo, Padel Spain y Set Padel Magazine se han dejado fuera: no se han verificado sus condiciones para resumir sus noticias, y sin eso no se les puede dar el resumen que se exige.
 
 **Por qué no la web de la FIP.** Sus condiciones de uso prohíben los robots y la extracción de datos, y copiar su contenido sin licencia escrita. Esta aplicación **no lee la web de la FIP**: solo enlaza a su marcador oficial.
 
@@ -165,7 +168,7 @@ Si el despliegue falla, el log de Railway dice dónde. Si se queja de no encontr
 | `MCP_USER_RATE_PER_MIN` | Peticiones por minuto al MCP, por cuenta de GitHub | `120` |
 | `MCP_GLOBAL_RATE_PER_MIN` | Peticiones por minuto al MCP, en total | `600` |
 | `NEWS_RSS_ENABLED` | `false` apaga las noticias | activas |
-| `NEWS_RSS_FEEDS` | Sustituye la lista de feeds (URLs separadas por comas); los que no estén en la tabla de niveles se tratan como «solo titular y enlace» | los de la tabla |
+| `NEWS_RSS_FEEDS` | Sustituye la lista de feeds (URLs separadas por comas); los que no estén en la tabla de arriba se ignoran | los de la tabla |
 | `GROQ_API_KEY` | Resúmenes de noticias con IA (sin ella, resumen determinista) | — |
 | `GROQ_NEWS_MODEL` | Modelo de Groq para los resúmenes | `llama-3.1-8b-instant` |
 | `SCRAPER_CONTACT` | Tu correo, para identificar al programa ante los medios y Wikipedia | — |
@@ -240,7 +243,7 @@ No necesitan internet ni tokens. Incluyen una barrera que falla si el código ap
 
 - El programa se identifica como `PadelFemBot/1.0`, respeta `robots.txt` en los feeds y espera entre peticiones al mismo dominio. A Wikipedia le pide una página al día.
 - Wikipedia: CC BY-SA 4.0; la web cita la fuente al pie. Padel API: sus condiciones, arriba. OKDiario exige **atribución con enlace directo, sin `nofollow`**, a cada artículo; la web ya lo hace. Conviene releer las condiciones de vez en cuando.
-- «Qué usan» no contiene datos de contratos y avisa de que el material no está verificado con las marcas. Si algún día cobras de una marca o añades enlaces de afiliación, pasa a ser publicidad y las fuentes con licencia no comercial (OKDiario) dejarían de valer.
+- La pestaña «Sponsors» no contiene datos de contratos y avisa de que el material no está verificado con las marcas. Si algún día cobras de una marca o añades enlaces de afiliación, pasa a ser publicidad y las fuentes con licencia no comercial (OKDiario) dejarían de valer.
 - El historial de git de un repositorio que haya contenido versiones anteriores puede conservar código antiguo de scraping. Si vas a hacerlo público y eso te preocupa, empieza un repositorio nuevo.
 
 Si eres titular de una web usada como fuente y prefieres que no se acceda a ella, escribe al contacto del repositorio y se retirará.

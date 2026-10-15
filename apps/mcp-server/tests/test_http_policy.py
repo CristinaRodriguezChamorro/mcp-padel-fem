@@ -115,8 +115,7 @@ class NewsPipelineTests(unittest.IsolatedAsyncioTestCase):
         <item><title>Gemma Triay gana el torneo femenino de pádel</title>
         <link>https://medio.example/gemma-triay</link>
         <pubDate>Mon, 28 Sep 2026 10:15:00 +0000</pubDate>
-        <description>La jugadora Gemma Triay se impuso en la final femenina del circuito.
-        Fue un partido muy igualado en Madrid.</description></item></channel></rss>""".encode("utf-8")
+        <description>La jugadora Gemma Triay se impuso en la final femenina del circuito tras un partido muy igualado en Madrid. Gemma Triay sellaría el título en dos sets ante un público entregado en la grada del pabellón madrileño. Gemma Triay dedicó el triunfo a toda su familia después de recibir el trofeo de campeona.</description></item></channel></rss>""".encode("utf-8")
 
         calls = {"article_requests": 0}
 

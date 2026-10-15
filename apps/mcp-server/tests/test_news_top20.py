@@ -105,13 +105,17 @@ class PipelineTests(unittest.IsolatedAsyncioTestCase):
     async def test_only_top20_news_survive_and_are_tagged(self):
         result = await self.run_with([
             ("Gemma Triay y Delfina Brea ganan el torneo de Madrid",
-             "La pareja formada por Gemma Triay y Delfina Brea se impuso en la final femenina. Fue un partido muy igualado en Madrid."),
+             "La pareja formada por Gemma Triay y Delfina Brea se impuso en la final femenina del torneo de Madrid tras un partido muy igualado. "
+               "Gemma Triay y Delfina Brea sellaron el título en dos sets ante un público entregado en la grada del pabellón. "
+               "Delfina Brea dedicó el triunfo a toda su familia después de recibir el trofeo de campeonas."),
             ("El pádel femenino crece en España",
              "Cada año hay más licencias de mujeres en los clubes españoles. Los clubes ya notan el aumento."),
             ("Coello y Tapia ganan en Madrid",
              "La pareja masculina se impuso en la final. Fue un partido muy igualado en Madrid."),
             ("Marta Ortega, semifinalista en Rotterdam",
-             "La jugadora Marta Ortega alcanzó las semifinales del torneo. Cayó tras un partido muy disputado."),
+             "La jugadora Marta Ortega alcanzó las semifinales del torneo de Rotterdam tras vencer en tres sets a la pareja favorita del cuadro femenino. "
+               "Marta Ortega cayó finalmente en las semifinales después de más de dos horas de juego muy disputado. "
+               "Marta Ortega se mostró muy satisfecha con su semana en el torneo y con el apoyo recibido."),
         ])
         items = result["resumen_diario"]
         titulares = " | ".join(i["titular"] for i in items)

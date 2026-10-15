@@ -21,7 +21,7 @@ import httpx
 
 from tools import ingest, local_data, news
 from tools import padelapi_source as pa
-from test_news_policy import MARCA, OKD, PADD, PipelineBase, item, rss
+from test_news_policy import OKD, ORTEGA_TEXT, PADD, WOMEN_TEXT, PipelineBase, item, rss
 import test_padelapi_source as tp
 
 WOMEN = ["Gemma Triay", "Delfina Brea", "Ariana Sanchez", "Paula Josemaria", "Beatriz Gonzalez", "Claudia Fernandez",
@@ -154,18 +154,15 @@ class FinalSafeguard(unittest.TestCase):
 
 class WholePipeline(PipelineBase):
     async def test_the_published_news_contain_no_men_in_any_mode(self):
+        men_story = "Coello y Tapia ganaron la final masculina ante Galán y Chingotto en un partido muy igualado de principio a fin. " * 3
         self.serve({
-            OKD: rss([item("Coello y Tapia ganan en Madrid", "En el cuadro masculino, final ante Galán. Paula Josemaría, en la grada.",
-                           "https://okdiario.com/m1", "Ana"),
-                      item("Gemma Triay y Delfina Brea ganan en Madrid", "La pareja formada por Gemma Triay y Delfina Brea se impuso en la final femenina. Fue un partido muy igualado.",
-                           "https://okdiario.com/w1", "Ana")]),
-            PADD: rss([item("Arturo Coello: «Marta Ortega es una gran amiga»", "El número uno habla de la jugadora Marta Ortega.",
+            OKD: rss([item("Coello y Tapia ganan en Madrid", men_story + " Paula Josemaría estaba en la grada.", "https://okdiario.com/m1", "Ana"),
+                      item("Gemma Triay y Delfina Brea ganan en Madrid", WOMEN_TEXT, "https://okdiario.com/w1", "Ana")]),
+            PADD: rss([item("Arturo Coello: «Marta Ortega es una gran amiga»", men_story + " El jugador habla de la jugadora Marta Ortega.",
                             "https://www.padeladdict.com/m2"),
-                       item("Marta Ortega, semifinalista en Rotterdam", "Marta Ortega avanza. Arturo Coello la felicitó en redes. Más texto de la crónica femenina.",
-                            "https://www.padeladdict.com/w2")]),
-            MARCA: rss([item("Momo González y Maxi Sánchez, a semifinales", "Los jugadores masculinos avanzan.", "https://www.marca.com/m3"),
-                        item("Delfina Brea lidera el ranking femenino", "Delfina Brea sigue como número uno del ranking femenino.",
-                             "https://www.marca.com/w3")]),
+                       item("Momo González y Maxi Sánchez, a semifinales", men_story + " Los jugadores masculinos avanzan.",
+                            "https://www.padeladdict.com/m3"),
+                       item("Marta Ortega, semifinalista en Rotterdam", ORTEGA_TEXT, "https://www.padeladdict.com/w2")]),
         })
         import tools.news as n
         original_men = n.get_top_men_names
@@ -181,26 +178,30 @@ class WholePipeline(PipelineBase):
         for gone in ("Coello", "Tapia", "Galán", "Momo", "Maxi", "Mohamed"):
             self.assertNotIn(gone, blob, gone)
         titles = sorted(i["titular"] for i in result["resumen_diario"])
-        self.assertEqual(len(titles), 3, titles)
-        self.assertTrue(all("Coello" not in t and "Momo" not in t for t in titles))
+        self.assertEqual(len(titles), 2, titles)
+        self.assertTrue(all(len(i["resumen"]) >= news.MIN_SUMMARY_CHARS for i in result["resumen_diario"]))
 
-    async def test_the_extract_of_a_woman_story_that_names_a_man_is_blanked(self):
-        self.serve({PADD: rss([item("Marta Ortega, semifinalista en Rotterdam",
-                                    "Marta Ortega avanza en la jornada femenina. Arturo Coello la felicitó en redes.",
-                                    "https://www.padeladdict.com/w2")])})
+    async def test_an_extract_that_names_a_man_leaves_the_item_without_a_summary_so_it_is_not_published(self):
+        text = ("Marta Ortega avanza en la jornada femenina del torneo de Rotterdam tras un partido muy disputado en la pista central. "
+                "Arturo Coello la felicitó en redes sociales por el triunfo conseguido ante el público. "
+                "Marta Ortega agradeció el apoyo recibido durante toda la semana de competición en la ciudad.")
+        self.serve({PADD: rss([item("Marta Ortega, semifinalista en Rotterdam", text, "https://www.padeladdict.com/w2")])})
         result = await news.get_latest_news()
-        (only,) = result["resumen_diario"]
-        self.assertEqual(only["modo"], "extracto")
+        self.assertEqual(result["resumen_diario"], [])
         self.assertNotIn("Coello", json.dumps(result, ensure_ascii=False))
 
     async def test_without_the_list_of_men_only_explicitly_female_news_pass(self):
         async def nobody():
             return []
         news.get_top_men_names = nobody
-        self.serve({
-            MARCA: rss([item("Gemma Triay gana en Madrid", "Gran final.", "https://www.marca.com/a"),
-                        item("Arturo Coello: «Paula Josemaría es mi pareja»", "El jugador habla.", "https://www.marca.com/b"),
-                        item("Delfina Brea gana en Madrid", "Gran final femenina.", "https://www.marca.com/c")])})
+        no_signal = ("Gemma Triay gana el torneo de Madrid tras un partido muy disputado en la pista central del pabellón madrileño. "
+                     "Gemma Triay se mostró muy satisfecha con su semana de competición y con el apoyo recibido en la grada. "
+                     "Gemma Triay dedicó el título a toda su familia nada más recibir el trofeo del torneo.")
+        with_signal = no_signal.replace("torneo de Madrid", "torneo femenino de Madrid").replace("Gemma Triay", "Delfina Brea")
+        self.serve({PADD: rss([item("Gemma Triay gana en Madrid", no_signal, "https://www.padeladdict.com/a"),
+                               item("Arturo Coello: «Paula Josemaría es mi pareja»", no_signal.replace("Gemma Triay", "Arturo Coello"),
+                                    "https://www.padeladdict.com/b"),
+                               item("Delfina Brea gana en Madrid", with_signal, "https://www.padeladdict.com/c")])})
         items = (await news.get_latest_news())["resumen_diario"]
         self.assertEqual([i["titular"] for i in items], ["Delfina Brea gana en Madrid"])
 

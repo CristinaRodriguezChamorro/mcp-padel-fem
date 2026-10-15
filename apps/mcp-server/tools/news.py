@@ -20,11 +20,7 @@ from tools.players import norm as _pnorm, mentioned_players
 
 RSS_FEEDS = [
     "https://okdiario.com/deportes/padel/feed",
-    "https://e00-marca.uecdn.es/rss/padel.xml",
-    "https://www.mundodeportivo.com/rss/padel.xml",
-    "https://www.padelspain.net/feed/",
     "https://www.padeladdict.com/feed/",
-    "https://www.setpadelmagazine.es/feed/",
 ]
 
 
@@ -44,25 +40,23 @@ def _rss_feeds() -> list[str]:
 # Qué se puede hacer con cada fuente, según lo que se ha podido verificar de sus condiciones:
 #   "resumen"  -> título, resumen propio (puede hacerlo una IA) y enlace. Solo con permiso explícito
 #                 de adaptar el contenido (OKDiario publica con Creative Commons no comercial).
-#   "extracto" -> título, extracto corto TAL CUAL (sin reescribir ni pasar por una IA) y enlace.
-#   "enlace"   -> solo título, fecha, medio y enlace. Es el valor por defecto: cualquier fuente que no
-#                 esté en esta tabla (o cuyas condiciones no se hayan leído) se trata así.
-# Para subir una fuente de nivel hay que leer antes sus condiciones de uso.
+#   "extracto" -> título, extracto literal (unas tres líneas) SIN reescribir ni pasar por una IA, y enlace.
+#   "ninguno"  -> NO se publica: sin permiso verificado no hay resumen, y una noticia sin resumen de tres
+#                 líneas no sale. Es el valor por defecto de cualquier fuente que no esté en esta tabla.
+# Para publicar una fuente nueva hay que leer antes sus condiciones de uso.
 SOURCE_POLICY = {
     "okdiario.com": ("OKDiario", "resumen"),
     "padeladdict.com": ("Padel Addict", "extracto"),
-    "e00-marca.uecdn.es": ("Marca", "enlace"),
-    "mundodeportivo.com": ("Mundo Deportivo", "enlace"),
-    "padelspain.net": ("Padel Spain", "enlace"),
-    "setpadelmagazine.es": ("Set Padel Magazine", "enlace"),
 }
-DEFAULT_MODE = "enlace"
+DEFAULT_MODE = "ninguno"
+PUBLISHABLE_MODES = ("resumen", "extracto")
 OUTLET_NAMES = {host: name for host, (name, _) in SOURCE_POLICY.items()}
 
 NEWS_CACHE_SECONDS = 10 * 60      # cada cuánto se vuelve a consultar (como mucho)
 MAX_RESUMENES = 6                 # noticias que se resumen con IA en cada actualización
 MAX_TOTAL = 15                    # noticias que se publican en total
-EXTRACT_CHARS = 220               # longitud máxima del extracto literal
+EXTRACT_CHARS = 300               # longitud máxima del extracto literal (unas tres líneas)
+MIN_SUMMARY_CHARS = 200           # una noticia solo sale con un resumen de al menos unas tres líneas
 
 
 def _host(url: str) -> str:
@@ -76,15 +70,20 @@ def _politica_de_feed(feed_url: str) -> tuple[str, str, str]:
 
 
 def rss_status() -> dict:
-    policy = {}
+    policy, ignored = {}, set()
     for u in _rss_feeds():
         _, name, mode = _politica_de_feed(u)
-        policy[name] = mode
+        if mode in PUBLISHABLE_MODES:
+            policy[name] = mode
+        else:
+            ignored.add(name)
     return {
         "activo": _rss_enabled(),
         "fuentes": sorted(policy),
         "politica": [{"nombre": n, "modo": m} for n, m in sorted(policy.items())],
-        "nota": "Solo se leen los feeds RSS que los propios medios publican; no se descargan artículos.",
+        "ignoradas": sorted(ignored),
+        "nota": "Solo se leen los feeds RSS que los propios medios publican; no se descargan artículos. Las fuentes "
+                "sin permiso verificado para resumir se ignoran.",
     }
 
 
@@ -96,6 +95,17 @@ def _seguro(text: str, limit: int = 300) -> str:
     text = text.replace("<", "").replace(">", "")
     text = re.sub(r"\s+", " ", text).strip()
     return text[:limit].rstrip()
+
+
+def _texto_de_entrada(entry, modo: str) -> str:
+    """Texto del feed. De una fuente con permiso para adaptar (modo 'resumen') se usa el contenido completo si el
+    feed lo trae (content:encoded), para que el resumen sea bueno; de las demás, solo el extracto que publica el medio."""
+    if modo == "resumen":
+        for c in entry.get("content") or []:
+            value = c.get("value") if isinstance(c, dict) else None
+            if value:
+                return clean_text(value)[:8000]
+    return clean_text(entry.get("summary", "") or entry.get("description", ""))
 
 
 def _es_url_segura(url: str) -> bool:
@@ -428,7 +438,7 @@ FUENTES:
 Devuelve SOLO JSON:
 {{
   "titular": "máximo 14 palabras; mini-resumen del hecho principal",
-  "resumen": "2-3 frases completas, 45-85 palabras; síntesis propia, nunca extracto cortado"
+  "resumen": "3 frases completas (unas tres líneas), 45-85 palabras; síntesis propia, nunca extracto cortado"
 }}
 
 Reglas:
@@ -454,7 +464,7 @@ Reglas:
             data = json.loads(match.group())
             titular = clean_text(data.get("titular", ""))
             resumen = clean_text(data.get("resumen", ""))
-            if not titular or not resumen or resumen.endswith(("...", "…")):
+            if not titular or len(resumen) < MIN_SUMMARY_CHARS or resumen.endswith(("...", "…")):
                 return None
 
             fuentes = []
@@ -472,7 +482,7 @@ Reglas:
             result = {
                 "titular": titular,
                 "resumen": resumen,
-                "fecha": _latest_article_date(articulos) or datetime.date.today().isoformat(),
+                "fecha": _latest_article_date(articulos) or None,
                 "fuentes": fuentes,
                 "generated_by": f"groq:{GROQ_MODEL}",
             }
@@ -506,7 +516,7 @@ Contenido: {art.get('texto', '')[:2200]}
 Devuelve SOLO JSON:
 {{
   "titular": "máximo 14 palabras; mini-resumen",
-  "resumen": "2-3 frases completas, 45-85 palabras; síntesis propia"
+  "resumen": "3 frases completas (unas tres líneas), 45-85 palabras; síntesis propia"
 }}
 
 Solo pádel femenino. No inventes datos ni menciones jugadores masculinos.
@@ -529,7 +539,7 @@ Solo pádel femenino. No inventes datos ni menciones jugadores masculinos.
             data = json.loads(match.group())
             titular = clean_text(data.get("titular", ""))
             resumen = clean_text(data.get("resumen", ""))
-            if not titular or not resumen or resumen.endswith(("...", "…")):
+            if not titular or len(resumen) < MIN_SUMMARY_CHARS or resumen.endswith(("...", "…")):
                 return None
 
             url = art.get("url", "")
@@ -542,7 +552,7 @@ Solo pádel femenino. No inventes datos ni menciones jugadores masculinos.
             result = {
                 "titular": titular,
                 "resumen": resumen,
-                "fecha": art.get("published_date") or datetime.date.today().isoformat(),
+                "fecha": art.get("published_date") or None,
                 "fuentes": fuentes,
                 "generated_by": f"groq:{GROQ_MODEL}",
             }
@@ -672,18 +682,16 @@ def generar_fallback_sin_ia(art: dict, ranking_names: set[str], men_names=()) ->
     if max(title_strength, body_strength) < 2:
         return None
 
-    # 1 frase puede servir si contiene suficiente información;
-    # preferimos 2-3 cuando existen.
-    if len(frases) >= 3:
-        resumen = " ".join(frases[:3])
-    elif len(frases) == 2:
-        resumen = " ".join(frases)
-    else:
-        resumen = frases[0]
-
-    # Never truncate mid-sentence.
-    if len(resumen) > 750 and len(frases) >= 2:
-        resumen = " ".join(frases[:2])
+    # Hasta tres frases completas, y una cuarta si con tres no se llega a las tres líneas.
+    # Nunca se corta una frase por la mitad.
+    resumen, usadas = "", 0
+    for frase in frases[:4]:
+        if resumen and len(resumen) + 1 + len(frase) > 750:
+            break
+        resumen = f"{resumen} {frase}".strip()
+        usadas += 1
+        if usadas >= 3 and len(resumen) >= MIN_SUMMARY_CHARS:
+            break
 
     if title_strength >= 2:
         titular = titulo_original
@@ -705,7 +713,7 @@ def generar_fallback_sin_ia(art: dict, ranking_names: set[str], men_names=()) ->
     return {
         "titular": titular,
         "resumen": resumen,
-        "fecha": art.get("published_date") or datetime.date.today().isoformat(),
+        "fecha": art.get("published_date") or None,
         "fuentes": fuentes,
         "generated_by": "deterministic-fallback-v22",
     }
@@ -808,16 +816,23 @@ async def _fetch_feed(feed_url: str):
 
 
 def _item_directo(art: dict) -> dict:
-    """Noticia de una fuente que solo permite título (y extracto literal) y enlace: nunca pasa por la IA."""
-    mode = art["modo"]
+    """Noticia de una fuente que solo permite un extracto literal (y enlace): nunca pasa por la IA."""
     return {
         "titular": art["titulo"],
-        "resumen": _extracto_corto(art.get("texto_original", "")) if mode == "extracto" else "",
-        "fecha": art.get("published_date") or datetime.date.today().isoformat(),
+        "resumen": _extracto_corto(art.get("texto_original", "")),
+        "fecha": art.get("published_date") or None,
         "fuentes": [{"domain": art["host"], "medio": art["medio"], "titulo": art["titulo"],
                      "url": art["url"], "autor": art.get("autor", "")}],
-        "modo": mode,
+        "modo": art["modo"],
     }
+
+
+def _publicable(n: dict) -> bool:
+    """Una noticia solo sale con titular, un resumen de al menos unas tres líneas y el enlace directo a la noticia."""
+    fuentes = n.get("fuentes") or []
+    return bool((n.get("titular") or "").strip()
+                and len((n.get("resumen") or "").strip()) >= MIN_SUMMARY_CHARS
+                and fuentes and _es_url_segura(fuentes[0].get("url", "")))
 
 
 def _enriquecer_fuentes(noticias: list, articulos: list) -> list:
@@ -831,7 +846,7 @@ def _enriquecer_fuentes(noticias: list, articulos: list) -> list:
             f.setdefault("autor", art.get("autor", "") if art else "")
             if art:
                 modes.add(art["modo"])
-        n.setdefault("modo", "resumen" if "resumen" in modes else (next(iter(modes)) if modes else "enlace"))
+        n.setdefault("modo", "resumen" if "resumen" in modes else (next(iter(modes)) if modes else "resumen"))
     return noticias
 
 
@@ -849,10 +864,13 @@ async def get_latest_news() -> dict:
 
     for feed_url in _rss_feeds():
         try:
+            host, medio, modo = _politica_de_feed(feed_url)
+            if modo not in PUBLISHABLE_MODES:
+                print(f"  feed ignorado (sin permiso verificado para resumir): {medio}")
+                continue
             feed = await _fetch_feed(feed_url)
             if feed is None:
                 continue
-            host, medio, modo = _politica_de_feed(feed_url)
             for entry in feed.entries[:30]:
                 titulo = _seguro(entry.get("title", ""), 220)
                 link = entry.get("link", "").strip()
@@ -864,7 +882,7 @@ async def get_latest_news() -> dict:
                 vistos_links.add(link)
                 raw.append({
                     "titulo": titulo,
-                    "texto": clean_text(entry.get("summary", "") or entry.get("description", "")),
+                    "texto": _texto_de_entrada(entry, modo),
                     "url": link,
                     "host": host,
                     "medio": medio,
@@ -991,11 +1009,15 @@ async def get_latest_news() -> dict:
 
         print(f"Noticias tras fallback determinista: {len(noticias)}")
 
-    noticias.extend(_item_directo(a) for a in todos if a["modo"] != "resumen")
+    noticias.extend(_item_directo(a) for a in todos if a["modo"] == "extracto")
     noticias = _centrar_en_top20(noticias, todos, players)
     noticias = _enriquecer_fuentes(noticias, todos)
+    sin_resumen = len(noticias)
+    noticias = [n for n in noticias if _publicable(n)]
+    if len(noticias) < sin_resumen:
+        print(f"  descartadas {sin_resumen - len(noticias)} noticias sin resumen de tres líneas o sin enlace")
 
-    noticias.sort(key=lambda x: x.get("fecha", ""), reverse=True)
+    noticias.sort(key=lambda x: x.get("fecha") or "", reverse=True)
     noticias = noticias[:MAX_TOTAL]
 
     return {
