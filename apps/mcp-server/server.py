@@ -1,16 +1,20 @@
+from contextlib import asynccontextmanager, suppress
+from datetime import date
 import os
 import time
-import httpx
 import asyncio
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse, Response, JSONResponse
-from fastmcp import FastMCP
-from tools.news import get_latest_news
-from tools.live_data import get_ranking_live, get_calendar_live, get_tournament_now
+from fastapi.responses import FileResponse
+from tools.news import get_latest_news, rss_status, NEWS_CACHE_SECONDS
+from tools import ingest
+from tools.local_data import (get_ranking_live, get_calendar_live, get_tournament_now, get_recent_finals,
+                              dataset_status, data_age_seconds)
+from padel_mcp.tools import build_mcp, gate_from_env
 
-app = FastAPI(title="Padel Fem MCP")
-mcp = FastMCP("PadelFemMCP")
+# Versión que está corriendo: se ve en /api/version, en /api/data-status y al pie de la web, para saber
+# siempre si el despliegue es el último.
+APP_VERSION = "2026-10-13-v4-solo-femenino-sponsors-sin-fotos"
 
 # ── CACHÉ ─────────────────────────────────────────────────────────────────────
 _cache: dict = {}
@@ -24,22 +28,103 @@ def cache_get(key: str, ttl: int):
 def cache_set(key: str, data):
     _cache[key] = {"ts": time.time(), "data": data}
 
+def cache_age(key: str):
+    entry = _cache.get(key)
+    return int(time.time() - entry["ts"]) if entry else None
+
+
+# ── MCP (comparte cachés y fuentes con la web) ────────────────────────────────
+# Mismas claves y duraciones de caché que los endpoints /api/*: web y MCP
+# nunca duplican peticiones a las fuentes externas.
+
+# Los datos locales son archivos JSON: leerlos es barato, y con una caché corta un cambio se ve pronto.
+LOCAL_TTL = 60
+
+async def _provide(key: str, ttl: int, fetch, dataset: str | None = None):
+    data = cache_get(key, ttl)
+    if data is None:
+        data = await fetch()
+        cache_set(key, data)
+    out = {"data": data, "age_s": cache_age(key), "fallback": None}
+    if dataset:
+        status = dataset_status().get(dataset, {})
+        out["tipo"] = status.get("tipo")
+        out["fuente"] = status.get("fuente")
+        out["licencia"] = status.get("licencia")
+        out["desactualizado"] = status.get("desactualizado")
+        out["age_s"] = data_age_seconds(dataset)          # antigüedad real de los datos, no de la caché
+        if status.get("tipo") == "ejemplo":
+            out["fallback"] = True
+            out["aviso"] = status.get("nota") or "Datos de ejemplo sin verificar."
+        elif not status.get("disponible"):
+            out["aviso"] = status.get("nota")
+    return out
+
+async def _status_provider():
+    return {"data": {"datasets": dataset_status(), "ingesta": ingest.ingest_status(), "noticias": rss_status()},
+            "age_s": 0, "fallback": None}
+
+mcp = build_mcp({
+    "ranking":  lambda: _provide("ranking", LOCAL_TTL, get_ranking_live, "ranking"),
+    "calendar": lambda: _provide("calendar", LOCAL_TTL, get_calendar_live, "calendario"),
+    "live":     lambda: _provide("live:female", LOCAL_TTL, lambda: get_tournament_now(gender="female"), "calendario"),
+    "finals":   lambda: _provide("finals", LOCAL_TTL, get_recent_finals, "calendario"),
+    "news":     lambda: _provide("news", NEWS_CACHE_SECONDS, get_latest_news),
+    "status":   _status_provider,
+})
+# stateless_http: cada petición es independiente (no hace falta afinidad de sesión en Railway).
+mcp_app = mcp.http_app(path="/mcp", stateless_http=True)
+
+def make_lifespan(mcp_application):
+    """Arranca el MCP y, si no está apagada, la tarea que refresca ranking y calendario desde Wikipedia."""
+    @asynccontextmanager
+    async def _lifespan(app):
+        task = None
+        async with mcp_application.lifespan(app):
+            if ingest.enabled():
+                print(f"  Ingesta: ranking y calendario desde Wikipedia cada {ingest.interval_hours():g} h")
+                task = asyncio.create_task(ingest.run_forever())
+            else:
+                print("  Ingesta desactivada (WIKIPEDIA_INGEST=off): se usan los datos de data/ tal cual")
+            try:
+                yield
+            finally:
+                if task:
+                    task.cancel()
+                    with suppress(asyncio.CancelledError):
+                        await task
+    return _lifespan
+
+
+lifespan = make_lifespan(mcp_app)
+app = FastAPI(title="Padel Fem MCP", lifespan=lifespan)
+
 
 # ── API ───────────────────────────────────────────────────────────────────────
 
 @app.get("/api/news")
 async def api_news():
-    cached = cache_get("news", 30 * 60)
+    cached = cache_get("news", NEWS_CACHE_SECONDS)
     if cached:
         return cached
-    data = await get_latest_news()
-    cache_set("news", data)
-    return data
+
+    try:
+        data = await get_latest_news()
+        cache_set("news", data)
+        return data
+    except Exception as exc:
+        print(f"  /api/news fatal error: {type(exc).__name__}: {exc}")
+        return {
+            "date": date.today().isoformat(),
+            "resumen_diario": [],
+            "error": True,
+            "message": "No se pudieron actualizar las noticias",
+        }
 
 
 @app.get("/api/ranking")
 async def api_ranking():
-    cached = cache_get("ranking", 6 * 60 * 60)
+    cached = cache_get("ranking", LOCAL_TTL)
     if cached:
         return cached
     data = await get_ranking_live()
@@ -49,7 +134,7 @@ async def api_ranking():
 
 @app.get("/api/calendar")
 async def api_calendar():
-    cached = cache_get("calendar", 6 * 60 * 60)
+    cached = cache_get("calendar", LOCAL_TTL)
     if cached:
         return cached
     data = await get_calendar_live()
@@ -67,7 +152,7 @@ async def api_live(gender: str = "female"):
         gender = "female"
 
     cache_key = f"live:{gender}"
-    cached = cache_get(cache_key, 3 * 60)
+    cached = cache_get(cache_key, LOCAL_TTL)
     if cached:
         return cached
 
@@ -89,70 +174,22 @@ async def api_live(gender: str = "female"):
         }
 
 
-@app.get("/api/live-debug")
-async def api_live_debug(gender: str = "female"):
-    """Diagnóstico mínimo para comprobar qué ve la lógica de En juego."""
-    gender = (gender or "female").strip().lower()
-    if gender == "women":
-        gender = "female"
-    if gender not in {"female", "male"}:
-        gender = "female"
-    data = await get_tournament_now(gender=gender)
-    return {
-        "active": data.get("active", False),
-        "error": data.get("error", False),
-        "message": data.get("message", ""),
-        "name": data.get("name", ""),
-        "place": data.get("place", ""),
-        "dates": data.get("dates", ""),
-        "gender": data.get("gender", gender),
-        "results_count": len(data.get("results", [])),
-        "has_next_match": bool(data.get("next_match")),
-        "source_url": data.get("source_url", ""),
-    }
+@app.get("/api/data-status")
+async def api_data_status():
+    """De dónde sale cada dato, qué tan al día está, el resultado de la última actualización y si las noticias están activas."""
+    return {"version": APP_VERSION, "datasets": dataset_status(), "ingesta": ingest.ingest_status(), "noticias": rss_status()}
 
 
-@app.get("/api/photo")
-async def api_photo(url: str):
-    """Proxy para imágenes de Wikimedia — evita hotlink block."""
-    try:
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            resp = await client.get(
-                url,
-                headers={
-                    "User-Agent": "PadelFemMCP/1.0 httpx/0.27",
-                    "Referer": "https://commons.wikimedia.org/",
-                },
-                timeout=10,
-            )
-            ct = resp.headers.get("content-type", "image/jpeg")
-            return StreamingResponse(
-                iter([resp.content]),
-                media_type=ct,
-                headers={"Cache-Control": "public, max-age=86400"},
-            )
-    except Exception:
-        return Response(status_code=404)
-
-
-# ── MCP TOOL ──────────────────────────────────────────────────────────────────
-
-@mcp.tool()
-async def resumen_diario_padel_femenino():
-    """Devuelve el resumen diario de noticias del circuito profesional femenino de pádel."""
-    cached = cache_get("news", 30 * 60)
-    if cached:
-        return cached
-    data = await get_latest_news()
-    cache_set("news", data)
-    return data
+# ── MCP: endpoint /ai/mcp ─────────────────────────────────────────────────────
+# El acceso se decide con MCP_AUTH (github | token | open); ver gate_from_env en padel_mcp/tools.py.
+app.mount("/ai", gate_from_env(mcp_app))
 
 
 # ── STATIC ────────────────────────────────────────────────────────────────────
 
 @app.get("/api/version")
 async def api_version():
-    return {"version": "v7-female-women-news-live-2026-08-08"}
+    return {"version": APP_VERSION}
 
 @app.get("/")
 async def index():
@@ -162,9 +199,16 @@ async def index():
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
-            "X-App-Version": "v7-female-women-news-live-2026-08-08",
+            "X-App-Version": APP_VERSION,
         },
     )
+
+@app.get("/como-funciona")
+async def como_funciona():
+    """Explicación de la arquitectura en lenguaje llano, para quien no sabe de informática."""
+    return FileResponse(os.path.join(os.path.dirname(os.path.abspath(__file__)), "static", "como-funciona.html"),
+                        media_type="text/html")
+
 
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
