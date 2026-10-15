@@ -93,9 +93,8 @@ def _meta(payload: dict) -> dict:
 
 
 _USO = {
-    "resumen": "Resumen propio con enlace y autor de la fuente original.",
-    "extracto": "Extracto literal de la fuente, sin reescribir. Para más, usa el enlace.",
-    "enlace": "Solo titular y enlace: la fuente no permite más. No hay texto que resumir; no inventes su contenido.",
+    "resumen": "Resumen propio, con la fecha de la noticia, su autor y el enlace directo a la noticia original.",
+    "extracto": "Extracto literal de la fuente (sin reescribir), con la fecha de la noticia y el enlace directo para leerla entera.",
 }
 
 
@@ -108,7 +107,8 @@ def _news_item(item: dict) -> dict:
         "fuentes": item.get("fuentes", []),
         "jugadoras": item.get("jugadoras", []),
         "modo": mode,
-        "uso": _USO.get(mode, _USO["enlace"]),
+        "uso": _USO.get(mode, _USO["resumen"]),
+        "enlace": next((f.get("url") for f in (item.get("fuentes") or []) if f.get("url")), None),
     }
 
 
@@ -139,9 +139,8 @@ def build_mcp(providers: dict, extended: Optional[bool] = None) -> FastMCP:
             "final, primeras, segundas y terceras, y el resultado final; si falta un dato (las terceras, por "
             "ejemplo), dilo sin inventarlo. NO hay marcadores en directo: para eso se da el enlace oficial. "
             "Si ves más herramientas (jugadora, noticias, resultado_torneo...), úsalas con sus filtros; cada "
-            "noticia indica su 'modo' según lo que permite su fuente: 'resumen' (resumen propio), 'extracto' "
-            "(texto literal) o 'enlace' (solo titular y enlace; no inventes su contenido). Cita siempre el "
-            "medio y el enlace."
+            "noticia trae su resumen (modo 'resumen': resumen propio; 'extracto': texto literal), su fecha y "
+            "el enlace directo a la noticia ('enlace'). Cita siempre el medio, la fecha y el enlace."
         ),
     )
 
@@ -333,9 +332,9 @@ def build_mcp(providers: dict, extended: Optional[bool] = None) -> FastMCP:
 
     @mcp.tool(annotations=READ_ONLY)
     async def noticias(jugadora: Optional[str] = None, limite: int = 5) -> dict:
-        """Noticias recientes sobre las jugadoras del Top 20, siempre con enlace a la fuente original.
-        Según lo que permita cada fuente, una noticia trae resumen, extracto literal o solo titular y enlace
-        (campo 'modo'). Cada una indica de qué jugadoras habla. Con 'jugadora' solo devuelve las que hablan de ella."""
+        """Noticias recientes sobre las jugadoras del Top 20 (solo pádel femenino). Cada noticia trae un resumen de
+        unas tres líneas (resumen propio o extracto literal, según la fuente), su fecha real y el enlace directo a
+        la noticia original; cada una indica de qué jugadoras habla. Con 'jugadora' solo devuelve las que hablan de ella."""
         limite = max(1, min(int(limite), 10))
         news, err = await _call(providers["news"], "news")
         if err:

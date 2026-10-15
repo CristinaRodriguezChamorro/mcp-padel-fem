@@ -133,13 +133,28 @@ class SponsorsSectionIsNotAdvertising(unittest.TestCase):
             self.assertNotIn(word, text, word)
 
     def test_the_tab_is_renamed_and_the_disclaimer_is_visible(self):
-        self.assertIn(">Qué usan</button>", INDEX)
-        self.assertIn("Qué usan las jugadoras", INDEX)
+        self.assertIn(">Sponsors</button>", INDEX)
+        self.assertIn("Sponsors de las jugadoras", INDEX)
         self.assertNotIn("Sponsors & marcas", INDEX)
-        self.assertNotIn(">Sponsors</button>", INDEX)
         for phrase in ("sin verificar con las jugadoras ni con las marcas", "puede estar desactualizada",
                        "no tiene relación con las marcas ni recibe remuneración"):
             self.assertIn(phrase, self.section_html(), phrase)
+
+
+class NewsCardsShowDateAndDirectLink(unittest.TestCase):
+    def test_the_cards_show_the_real_date_only_when_there_is_one_and_always_a_direct_link(self):
+        for needle in ("${featured.fecha?`<div class=\"news-date\">", "${item.fecha?`<div class=\"news-date\">",
+                       "${leerNoticia(featured)}", "${leerNoticia(item)}", "Leer la noticia completa",
+                       "function leerNoticia(item)", 'rel="noopener noreferrer"'):
+            self.assertIn(needle, INDEX, needle)
+        self.assertNotIn("nofollow", INDEX)
+
+    def test_the_summary_is_always_shown(self):
+        self.assertIn("${featured.resumen?`<div class=\"resumen\">${esc(featured.resumen)}</div>`:''}", INDEX)
+        self.assertIn("${item.resumen?`<div class=\"resumen\">${esc(item.resumen)}</div>`:''}", INDEX)
+
+    def test_there_is_no_link_only_note_any_more(self):
+        self.assertNotIn("Solo titular y enlace", INDEX)
 
 
 class ThirdPartyTextIsEscapedInTheWeb(unittest.TestCase):
@@ -255,12 +270,14 @@ class OutletNames(unittest.TestCase):
     def test_default_feeds_are_listed_by_their_readable_names(self):
         os.environ.pop("NEWS_RSS_FEEDS", None)
         names = news.rss_status()["fuentes"]
-        self.assertEqual(names, sorted(["OKDiario", "Marca", "Mundo Deportivo", "Padel Spain", "Padel Addict", "Set Padel Magazine"]))
+        self.assertEqual(names, ["OKDiario", "Padel Addict"])
         self.assertFalse(any("uecdn" in n or "." in n for n in names))
 
     def test_an_unknown_feed_is_listed_by_its_host(self):
-        os.environ["NEWS_RSS_FEEDS"] = "https://www.ejemplo.test/feed.xml, https://e00-marca.uecdn.es/rss.xml"
-        self.assertEqual(news.rss_status()["fuentes"], sorted(["ejemplo.test", "Marca"]))
+        os.environ["NEWS_RSS_FEEDS"] = "https://www.ejemplo.test/feed.xml, https://okdiario.com/deportes/padel/feed"
+        status = news.rss_status()
+        self.assertEqual(status["fuentes"], ["OKDiario"])
+        self.assertEqual(status["ignoradas"], ["ejemplo.test"], "una fuente sin permiso verificado se ignora y se dice")
 
     def test_every_default_feed_has_a_readable_name(self):
         from urllib.parse import urlparse

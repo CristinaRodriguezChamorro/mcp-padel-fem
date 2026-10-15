@@ -900,7 +900,7 @@ nav {
     <button class="tab" onclick="show('enjuego',this)">En juego</button>
     <button class="tab" onclick="show('ranking',this)">Ranking</button>
     <button class="tab" onclick="show('torneos',this)">Torneos</button>
-    <button class="tab" onclick="show('sponsors',this)">Qué usan</button>
+    <button class="tab" onclick="show('sponsors',this)">Sponsors</button>
     <button class="tab" onclick="show('sabiasque',this)">¿Sabías que?</button>
   </div>
 </nav>
@@ -948,8 +948,8 @@ nav {
   </div>
   <div id="sponsors" class="section">
     <div class="section-head">
-      <div class="section-title">Qué usan las jugadoras 👑</div>
-      <p class="material-aviso" style="margin:4px 0 14px;font-size:12px;line-height:1.5;color:#7a7a7a">Material que se ha visto usar a cada jugadora en competición. Es información editorial sin verificar con las jugadoras ni con las marcas, puede estar desactualizada y no indica ningún acuerdo comercial. Esta web no tiene relación con las marcas ni recibe remuneración de ellas.</p>
+      <div class="section-title">Sponsors de las jugadoras 👑</div>
+      <p class="material-aviso" style="margin:4px 0 14px;font-size:12px;line-height:1.5;color:#7a7a7a">Marcas y material que se ve usar a cada jugadora en competición. Es información editorial sin verificar con las jugadoras ni con las marcas, puede estar desactualizada y no describe ningún acuerdo entre ellas y las marcas. Esta web no tiene relación con las marcas ni recibe remuneración de ellas.</p>
       <div class="section-sub">Pala, ropa y calzado de las mejores del circuito femenino español</div>
     </div>
     <div class="sponsors-list" id="sponsors-list"></div>
@@ -1126,8 +1126,12 @@ function formatNewsDate(iso){
 const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const safeUrl=u=>/^https?:\/\//i.test(u||'')?u:'#';
 function usoNota(item){
-  const t={resumen:'Resumen automático a partir de la fuente.',extracto:'Extracto literal de la fuente.',enlace:'Solo titular y enlace: la fuente no permite más.'}[item.modo]||'';
+  const t={resumen:'Resumen automático a partir de la fuente.',extracto:'Extracto literal de la fuente.'}[item.modo]||'';
   return t?`<div class="uso-nota" style="font-size:11px;color:#8a8a8a;margin-top:6px">${t}</div>`:'';
+}
+function leerNoticia(item){
+  const u=((item.fuentes||[])[0]||{}).url||'';
+  return /^https?:\/\//i.test(u)?`<a class="leer-noticia" href="${esc(u)}" target="_blank" rel="noopener noreferrer" style="display:inline-block;margin-top:10px;font-weight:700;color:var(--pink)">Leer la noticia completa →</a>`:'';
 }
 function renderFuentes(fuentes){if(!fuentes?.length)return'';return`<div class="card-fuentes"><div class="fuentes-label">Fuentes</div>${fuentes.map(f=>`<div class="fuente-item"><span class="fuente-domain">${esc(f.medio||f.domain)}</span><a href="${esc(safeUrl(f.url))}" target="_blank" rel="noopener noreferrer" class="fuente-titulo">${esc(f.titulo)}</a>${f.autor?`<span class="fuente-autor"> · ${esc(f.autor)}</span>`:''}</div>`).join('')}</div>`;}
 
@@ -1137,8 +1141,8 @@ async function loadNews(){
     const items=data.resumen_diario||[];
     if(!items.length){document.getElementById('news-grid').innerHTML='<div class="empty-msg">No hay noticias ahora mismo.<br>Vuelve más tarde 🎾</div>';return;}
     const[featured,...rest]=items;
-    const featuredHtml=`<div class="news-featured" style="animation-delay:0s"><div class="news-featured-body"><div class="featured-tag">🔥 Destacado</div><div class="news-date">📅 ${formatNewsDate(featured.fecha)}</div><div class="titular">${esc(featured.titular)}</div><div class="divider"></div>${featured.resumen?`<div class="resumen">${esc(featured.resumen)}</div>`:''}${usoNota(featured)}${renderFuentes(featured.fuentes)}</div></div>`;
-    const restHtml=rest.map((item,i)=>`<div class="news-card" style="animation-delay:${(i+1)*.07}s"><div class="card-num">${String(i+2).padStart(2,'0')}</div><div class="news-card-content"><div class="card-tag">📰 Noticia</div><div class="news-date">📅 ${formatNewsDate(item.fecha)}</div><div class="titular">${esc(item.titular)}</div>${item.resumen?`<div class="resumen">${esc(item.resumen)}</div>`:''}${usoNota(item)}${renderFuentes(item.fuentes)}</div></div>`).join('');
+    const featuredHtml=`<div class="news-featured" style="animation-delay:0s"><div class="news-featured-body"><div class="featured-tag">🔥 Destacado</div>${featured.fecha?`<div class="news-date">📅 ${formatNewsDate(featured.fecha)}</div>`:''}<div class="titular">${esc(featured.titular)}</div><div class="divider"></div>${featured.resumen?`<div class="resumen">${esc(featured.resumen)}</div>`:''}${usoNota(featured)}${leerNoticia(featured)}${renderFuentes(featured.fuentes)}</div></div>`;
+    const restHtml=rest.map((item,i)=>`<div class="news-card" style="animation-delay:${(i+1)*.07}s"><div class="card-num">${String(i+2).padStart(2,'0')}</div><div class="news-card-content"><div class="card-tag">📰 Noticia</div>${item.fecha?`<div class="news-date">📅 ${formatNewsDate(item.fecha)}</div>`:''}<div class="titular">${esc(item.titular)}</div>${item.resumen?`<div class="resumen">${esc(item.resumen)}</div>`:''}${usoNota(item)}${leerNoticia(item)}${renderFuentes(item.fuentes)}</div></div>`).join('');
     document.getElementById('news-grid').innerHTML=featuredHtml+restHtml;
   }catch(e){document.getElementById('news-grid').innerHTML=`<div class="empty-msg">Error: ${e.message}</div>`;}
 }
@@ -1437,7 +1441,7 @@ async function renderSponsors(){
       'jugadoras'
     );
   }catch(e){
-    list.innerHTML='<div class="empty-msg">No se pudo cargar la información del material</div>';
+    list.innerHTML='<div class="empty-msg">No se pudo cargar la información de los sponsors</div>';
   }
 }
 
