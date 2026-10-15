@@ -1,0 +1,54 @@
+{
+  "_meta": {
+    "tipo": "ejemplo",
+    "actualizado": null,
+    "fuente": "Sin fuente verificada",
+    "nota": "TORNEO FICTICIO para probar la pestaña En juego y las tools del MCP. Cópialo sobre torneo.json solo para pruebas."
+  },
+  "active": true,
+  "name": "Torneo de ejemplo",
+  "place": "Ciudad de ejemplo",
+  "dates": "1-7 Oct (ficticio)",
+  "watch": [
+    "Canal de ejemplo"
+  ],
+  "source": "Datos de ejemplo",
+  "source_url": "",
+  "structure": {
+    "draw_size": 16
+  },
+  "results": [
+    {
+      "round": "Octavos de final",
+      "winner": "Gemma Triay / Delfina Brea",
+      "loser": "Pareja A / Pareja B",
+      "score": "6–2  6–3",
+      "date": "2026-10-03",
+      "status": "finalizado"
+    },
+    {
+      "round": "Octavos de final",
+      "winner": "Beatriz González / Paula Josemaría",
+      "loser": "Pareja C / Pareja D",
+      "score": "6–4  7–5",
+      "date": "2026-10-03",
+      "status": "finalizado"
+    },
+    {
+      "round": "Cuartos de final",
+      "winner": "Ariana Sánchez / Andrea Ustero",
+      "loser": "Pareja E / Pareja F",
+      "score": "7–6  6–4",
+      "date": "2026-10-04",
+      "status": "finalizado"
+    }
+  ],
+  "next_match": {
+    "round": "Semifinales",
+    "pair1": "Gemma Triay / Delfina Brea",
+    "pair2": "Ariana Sánchez / Andrea Ustero",
+    "when": "Sáb 18:00 (ficticio)",
+    "date": "2026-10-05"
+  },
+  "current_match": null
+}

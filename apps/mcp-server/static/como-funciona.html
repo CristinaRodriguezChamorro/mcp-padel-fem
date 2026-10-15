@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>¿Cómo funciona esta web? Explicado para todos</title>
+<style>
+  :root{color-scheme:light}
+  body{margin:0;background:#fffdf8;color:#1f1f1f;font:20px/1.65 Georgia,"Times New Roman",serif}
+  main{max-width:780px;margin:0 auto;padding:28px 20px 60px}
+  h1{font-size:2em;line-height:1.2;margin:.2em 0 .4em}
+  h2{font-size:1.45em;margin:2em 0 .4em;padding-top:.6em;border-top:2px solid #e6dcc8}
+  p,li{margin:.6em 0}
+  .lead{font-size:1.15em;background:#fff4d6;border-left:6px solid #e0a800;padding:14px 18px;border-radius:6px}
+  .cuadro{background:#f4efe3;border-radius:8px;padding:12px 18px;margin:1em 0}
+  table{border-collapse:collapse;width:100%;font-size:.9em}
+  th,td{border:1px solid #d9cfba;padding:8px 10px;text-align:left;vertical-align:top}
+  th{background:#f0e9d8}
+  dt{font-weight:bold;margin-top:.8em}
+  dd{margin:0 0 .2em 0}
+  a{color:#0b4f8a}
+  svg{width:100%;height:auto;display:block;margin:1em 0;background:#fff;border:1px solid #e6dcc8;border-radius:8px}
+  .peque{font-size:.8em;color:#555}
+  @media print{body{font-size:14px}h2{break-after:avoid}}
+</style>
+</head>
+<body>
+<main>
+
+<p class="peque"><a href="/">← Volver a la web</a></p>
+
+<h1>¿Cómo funciona esta web?</h1>
+<p class="peque">Explicado sin palabras raras. Las pocas que hay están al final, en el apartado «Palabras raras».</p>
+
+<p class="lead">Imagínala como <strong>una tienda de barrio</strong>. Hay una tendera que sabe de pádel femenino. No se lo sabe todo de memoria: cada día va a la biblioteca, copia lo que hace falta en su cuaderno, y cuando tú preguntas, te contesta mirando el cuaderno.</p>
+
+<h2>1. El dibujo</h2>
+
+<svg viewBox="0 0 780 440" role="img" aria-labelledby="t d">
+  <title id="t">Dibujo de cómo funciona la web</title>
+  <desc id="d">Tú preguntas a la tendera, que mira su cuaderno. La tendera rellena el cuaderno con lo que copia de la biblioteca y de los tablones de los periódicos. Para los marcadores en directo, solo te señala el marcador oficial.</desc>
+  <defs>
+    <marker id="f" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="#333" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <g font-family="Georgia,serif" text-anchor="middle" fill="#1f1f1f">
+    <rect x="10" y="155" width="170" height="110" rx="10" fill="#e8f1fb" stroke="#333"/>
+    <text x="95" y="193" font-size="20" font-weight="bold">Tú</text>
+    <text x="95" y="222" font-size="16">con el móvil</text>
+    <text x="95" y="244" font-size="16">o el ordenador</text>
+
+    <rect x="270" y="155" width="200" height="110" rx="10" fill="#fff4d6" stroke="#333"/>
+    <text x="370" y="200" font-size="20" font-weight="bold">La tendera</text>
+    <text x="370" y="228" font-size="16">(el «servidor»)</text>
+
+    <rect x="570" y="165" width="200" height="90" rx="10" fill="#e6f4e8" stroke="#333"/>
+    <text x="670" y="205" font-size="20" font-weight="bold">Su cuaderno</text>
+    <text x="670" y="232" font-size="16">(los datos guardados)</text>
+
+    <rect x="270" y="15" width="200" height="85" rx="10" fill="#fff" stroke="#333" stroke-dasharray="6 5"/>
+    <text x="370" y="50" font-size="18" font-weight="bold">Marcador oficial</text>
+    <text x="370" y="76" font-size="15">solo un cartel con una flecha</text>
+
+    <rect x="60" y="340" width="240" height="85" rx="10" fill="#f1e8f7" stroke="#333"/>
+    <text x="180" y="374" font-size="18" font-weight="bold">El proveedor de datos</text>
+    <text x="180" y="400" font-size="15">Padel API (y Wikipedia)</text>
+
+    <rect x="480" y="340" width="240" height="85" rx="10" fill="#f1e8f7" stroke="#333"/>
+    <text x="600" y="374" font-size="18" font-weight="bold">Los periódicos</text>
+    <text x="600" y="400" font-size="15">sus titulares y enlaces</text>
+  </g>
+  <g stroke="#333" stroke-width="2.2" fill="none">
+    <line x1="184" y1="210" x2="266" y2="210" marker-start="url(#f)" marker-end="url(#f)"/>
+    <line x1="474" y1="210" x2="566" y2="210" marker-start="url(#f)" marker-end="url(#f)"/>
+    <line x1="370" y1="153" x2="370" y2="104" marker-end="url(#f)" stroke-dasharray="6 5"/>
+    <line x1="190" y1="337" x2="305" y2="269" marker-end="url(#f)"/>
+    <line x1="590" y1="337" x2="440" y2="269" marker-end="url(#f)"/>
+  </g>
+</svg>
+<p class="peque">Las flechas con dos puntas son preguntas y respuestas. Las de abajo son los viajes de la tendera para copiar información. La de línea discontinua es el cartel que te manda al marcador oficial.</p>
+
+<h2>2. Qué pasa cuando abres la página</h2>
+<ol>
+  <li><strong>Tú</strong> abres la web y pides, por ejemplo, el ranking.</li>
+  <li><strong>La tendera</strong> no sale a la calle a buscarlo. Mira <strong>su cuaderno</strong>.</li>
+  <li>Te lo enseña en la pantalla, junto a la fecha de cuando lo copió.</li>
+</ol>
+<p>Por eso la web va rápida, y por eso no molestamos a nadie cada vez que alguien la abre.</p>
+
+<h2>3. Qué hace la tendera cuando nadie mira</h2>
+<p><strong>Una vez al día</strong> va a su proveedor de datos (un servicio de datos de pádel profesional, con permiso, llamado Padel API) y copia en su cuaderno el ranking, el calendario y los resultados de cada final, con las semifinales. Si el proveedor no está disponible y no tiene nada bueno apuntado, va a la biblioteca (Wikipedia), que tiene más retraso.</p>
+<div class="cuadro">
+  <p><strong>Antes de cambiar la hoja del cuaderno, comprueba que la copia tiene sentido:</strong> que hay al menos ocho jugadoras, que los puntos van de más a menos, que no hay nombres repetidos ni cosas raras. Si algo no cuadra, <strong>no tira la hoja vieja</strong>: la conserva y apunta «hoy no me cuadraba, por esto».</p>
+</div>
+<p>Si un día la biblioteca está cerrada, sigue usando lo que ya tenía apuntado. Y si lo apuntado tiene más de dos semanas, la web te lo avisa con una franja amarilla arriba.</p>
+
+<h2>4. De dónde sale cada cosa</h2>
+<table>
+  <thead><tr><th>Lo que ves</th><th>De dónde sale</th><th>Cada cuánto</th></tr></thead>
+  <tbody>
+    <tr><td>Ranking, calendario y finales</td><td>Padel API, un servicio de datos de pádel profesional con permiso de uso (se cita al pie de la web); de respaldo, Wikipedia (la escriben voluntarios; su licencia pide citarla)</td><td>Una vez al día</td></tr>
+    <tr><td>Noticias</td><td>Los tablones de titulares que los propios periódicos ponen para quien quiera leerlos. Cada noticia sale con su fecha, un resumen de unas tres líneas y un enlace directo para leerla entera. De OKDiario, que lo permite con una licencia no comercial, se hace un resumen con otras palabras (un ayudante, una inteligencia artificial si está activada); de Padel Addict, un extracto de unas tres líneas, tal cual. Los demás periódicos no se usan por ahora, porque no se ha comprobado que permitan resumir sus noticias. Solo salen las que hablan de las 20 primeras jugadoras y nunca las de hombres.</td><td>Como mucho cada diez minutos</td></tr>
+    <tr><td>Marcadores en directo</td><td>No los copiamos: te mandamos al marcador oficial de la FIP</td><td>—</td></tr>
+  </tbody>
+</table>
+
+<h2>5. El teléfono: para asistentes como Copilot o Claude</h2>
+<p>Además de la ventanilla (la web), la tendera tiene <strong>una línea de teléfono</strong>. Sirve para que un asistente de ordenador le pregunte cosas, como «¿cómo va Delfina Brea?». A eso se le llama <strong>MCP</strong>.</p>
+<ul>
+  <li><strong>Para llamar hay que decir quién eres.</strong> Se hace con tu «carné de GitHub» (un código llamado <em>token</em>). Ese carné <strong>no da ningún permiso</strong>: solo sirve para identificarte.</li>
+  <li>La tendera atiende <strong>un número limitado de llamadas por minuto</strong> a cada persona, para que nadie la sature.</li>
+  <li>Solo <strong>lee</strong>: por teléfono no se puede cambiar nada.</li>
+</ul>
+
+<h2>6. Lo que esta web NO hace, y por qué</h2>
+<ul>
+  <li><strong>No enseña marcadores en directo.</strong> El dueño del marcador oficial (la FIP) no permite que otros lo copien con programas sin su permiso. Por eso ponemos el cartel con la flecha.</li>
+  <li><strong>El ranking puede ir con retraso</strong> de semanas, porque depende de que los voluntarios de Wikipedia lo actualicen. La web siempre dice de qué fecha son los datos.</li>
+  <li><strong>Solo enseña las finales</strong> de cada torneo, no todos los partidos.</li>
+  <li><strong>No es una web oficial.</strong> No tiene relación con la FIP ni con Premier Padel.</li>
+</ul>
+<p>El plan para tener datos oficiales y al día es <strong>pedir permiso a la FIP por correo</strong>. Si lo concede, se añade su fuente.</p>
+
+<h2>7. Dónde vive todo</h2>
+<ul>
+  <li><strong>La tienda</strong> (donde trabaja la tendera) es un servicio de internet que siempre está abierto, llamado <em>Railway</em>.</li>
+  <li><strong>Los planos de la tienda</strong> (el código) se guardan en <em>GitHub</em>.</li>
+  <li>Todo va dentro de <strong>una caja</strong> (<em>Docker</em>) que funciona igual en cualquier sitio.</li>
+  <li>Antes de cambiar nada, se pasa <strong>una lista de comprobaciones automáticas</strong> (más de cien) para ver que todo sigue funcionando.</li>
+</ul>
+
+<h2>8. Si algo falla</h2>
+<ul>
+  <li><strong>Los datos son viejos:</strong> la biblioteca no se ha actualizado, o la tendera no ha podido copiarla. La franja amarilla lo dice.</li>
+  <li><strong>Para ver el motivo exacto</strong>, quien administra la web puede abrir <a href="/api/data-status">/api/data-status</a>: ahí la tendera apunta cuándo copió por última vez y qué le pasó.</li>
+</ul>
+
+<h2>9. Palabras raras</h2>
+<dl>
+  <dt>Servidor</dt><dd>La tendera: el programa que contesta cuando alguien pregunta.</dd>
+  <dt>Padel API</dt><dd>El proveedor de datos de la tendera: un servicio con permiso de uso que tiene el ranking y los resultados de los torneos.</dd>
+  <dt>Wikipedia</dt><dd>La enciclopedia que escribe la gente de forma voluntaria. Es la biblioteca de la historia.</dd>
+  <dt>RSS</dt><dd>El tablón donde un periódico cuelga sus titulares para que cualquiera los lea.</dd>
+  <dt>Inteligencia artificial (IA)</dt><dd>Un ayudante de ordenador que resume textos con otras palabras.</dd>
+  <dt>MCP</dt><dd>La línea de teléfono para que asistentes de ordenador pregunten a la tendera.</dd>
+  <dt>Token</dt><dd>El carné que dice quién eres cuando llamas por teléfono.</dd>
+  <dt>Licencia</dt><dd>El permiso que da el autor de algo para que otros lo usen, y las condiciones que pone.</dd>
+</dl>
+
+<p class="peque"><a href="/">← Volver a la web</a></p>
+</main>
+</body>
+</html>

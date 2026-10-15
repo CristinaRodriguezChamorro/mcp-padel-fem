@@ -1,0 +1,12 @@
+version: '3.9'
+
+services:
+  mcp-server:
+    build: ./apps/mcp-server
+    ports:
+      - "8000:8000"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}

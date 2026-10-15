@@ -1,0 +1,2 @@
+[build]
+dockerfilePath = "apps/mcp-server/Dockerfile"

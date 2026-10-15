@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+fastmcp
+feedparser
+beautifulsoup4
+groq
+aiohttp
+lxml
+httpx
+pypdf
+playwright

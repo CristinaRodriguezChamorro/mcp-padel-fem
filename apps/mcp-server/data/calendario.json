@@ -1,0 +1,100 @@
+{
+  "_meta": {
+    "tipo": "ejemplo",
+    "actualizado": null,
+    "fuente": "Sin fuente verificada",
+    "nota": "DATOS DE EJEMPLO SIN VERIFICAR. Proceden del respaldo escrito a mano en el código antiguo y pueden estar desactualizados o ser incorrectos. Sustitúyelos por datos verificados de una fuente oficial o con licencia antes de mostrarlos como reales."
+  },
+  "torneos": [
+    {
+      "name": "London P1",
+      "place": "London 🇬🇧",
+      "start": "2026-08-03",
+      "end": "2026-08-09",
+      "badge": "p1",
+      "badgeText": "P1",
+      "tv": "Red Bull TV · Movistar+"
+    },
+    {
+      "name": "Madrid P1",
+      "place": "Madrid 🇪🇸",
+      "start": "2026-08-31",
+      "end": "2026-09-06",
+      "badge": "p1",
+      "badgeText": "P1",
+      "tv": "Red Bull TV · Movistar+"
+    },
+    {
+      "name": "Paris Major",
+      "place": "Paris 🇫🇷",
+      "start": "2026-09-07",
+      "end": "2026-09-13",
+      "badge": "major",
+      "badgeText": "MAJOR",
+      "tv": "Red Bull TV · Movistar+"
+    },
+    {
+      "name": "Rotterdam P2",
+      "place": "Rotterdam 🇳🇱",
+      "start": "2026-09-28",
+      "end": "2026-10-04",
+      "badge": "p2",
+      "badgeText": "P2",
+      "tv": "Movistar+ · YouTube"
+    },
+    {
+      "name": "Germany P2",
+      "place": "Germany 🇩🇪",
+      "start": "2026-10-05",
+      "end": "2026-10-11",
+      "badge": "p2",
+      "badgeText": "P2",
+      "tv": "Movistar+ · YouTube"
+    },
+    {
+      "name": "Milano P1",
+      "place": "Milano 🇮🇹",
+      "start": "2026-10-12",
+      "end": "2026-10-18",
+      "badge": "p1",
+      "badgeText": "P1",
+      "tv": "Red Bull TV · Movistar+"
+    },
+    {
+      "name": "Kuwait Major",
+      "place": "Kuwait 🇰🇼",
+      "start": "2026-10-26",
+      "end": "2026-10-31",
+      "badge": "major",
+      "badgeText": "MAJOR",
+      "tv": "Red Bull TV · Movistar+"
+    },
+    {
+      "name": "Dubai P1",
+      "place": "Dubai 🇦🇪",
+      "start": "2026-11-08",
+      "end": "2026-11-15",
+      "badge": "p1",
+      "badgeText": "P1",
+      "tv": "Red Bull TV · Movistar+"
+    },
+    {
+      "name": "Mexico Major",
+      "place": "Acapulco 🇲🇽",
+      "start": "2026-11-23",
+      "end": "2026-11-29",
+      "badge": "major",
+      "badgeText": "MAJOR",
+      "tv": "Red Bull TV · Movistar+"
+    },
+    {
+      "name": "Premier Padel Finals",
+      "place": "Barcelona 🇪🇸",
+      "start": "2026-12-07",
+      "end": "2026-12-13",
+      "badge": "major",
+      "badgeText": "FINALS",
+      "tv": "Red Bull TV · Movistar+"
+    }
+  ]
+}
