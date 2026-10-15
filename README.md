@@ -99,17 +99,17 @@ Cada respuesta indica su fuente, su antigüedad y los avisos (datos de ejemplo, 
 | Marcadores en directo | No se reproducen: enlace al marcador oficial |
 | «Sponsors» y «¿Sabías que?» | Textos escritos a mano en `static/index.html`, sin fuente automática |
 
-**Padel API.** Servicio comercial con datos de Premier Padel (Major, P1, P2 y Finals) y un plan gratuito: ranking mundial actual, calendario y resultados de los últimos 6 meses, 50.000 peticiones al mes (10 por minuto y 2.000 al día), con cuadros completos desde 2023, de donde salen las semifinalistas. La tarea diaria hace unas pocas peticiones con una pausa de 6,5 s entre ellas y no vuelve a pedir un torneo ya completado. Sus [condiciones](https://padelapi.org/terms-of-service) permiten usar los datos en tu propia aplicación y guardar las respuestas; **no** permiten revenderlos como producto, copiar su base de datos ni extraerla en masa. Por eso el MCP ofrece respuestas filtradas y limitadas, y no un paso directo de su API. Sus nombres de jugadoras vienen sin tildes.
+**Padel API.** Servicio comercial con datos de Premier Padel (Major, P1, P2 y Finals) y un plan gratuito: ranking mundial actual, calendario y resultados de los últimos 6 meses, 50.000 peticiones al mes (10 por minuto y 2.000 al día), con cuadros completos desde 2023, de donde salen las semifinalistas. La tarea diaria hace unas pocas peticiones con una pausa de 6,5 s entre ellas y no vuelve a pedir un torneo ya completado. Sus [condiciones](https://padelapi.org/terms-of-service) permiten usar los datos en tu propia aplicación y guardar las respuestas; **no** permiten revenderlos como producto, copiar su base de datos ni extraerla en masa. Por eso el MCP ofrece respuestas filtradas y limitadas, y no un paso directo de su API. Sus nombres vienen con los dos apellidos y sin tildes («Gemma Triay Pons»): se guardan como nombre y primer apellido («Gemma Triay»), que es como los escribe la prensa.
 
 **Wikipedia (respaldo).** La mantienen voluntarios, así que el ranking y los resultados pueden ir con **semanas de retraso**. Solo recoge ganadoras y finalistas, sin semifinales. La web y el MCP avisan cuando los datos pasan de 14 días.
 
-**Noticias.** Se consultan como mucho cada 10 minutos, solo se publican las que hablan de alguna jugadora del Top 20 y como máximo 15. **Nunca de hombres**: manda el titular. Si el titular nombra a un jugador, o dice «masculino», la noticia se descarta; un titular solo con apellidos no basta (muchos son también de hombres) y hace falta que diga expresamente que es femenino. Para saber quiénes son ellos, la tarea de actualización guarda también el ranking masculino de Padel API (`data/ranking_masculino.json`, solo nombres: no se muestra en ningún sitio). Sin esa lista (por ejemplo con el respaldo de Wikipedia, o unos minutos tras un despliegue) el filtro es más estricto: solo pasan las noticias que digan expresamente femenino, mujeres, campeonas o jugadoras. Cada medio se trata según lo que permiten sus condiciones; cualquier fuente nueva empieza en «solo titular y enlace» hasta que se lean las suyas:
+**Noticias.** Se consultan como mucho cada 10 minutos, solo se publican las que hablan de alguna jugadora del Top 20 y como máximo 15. **Nunca de hombres**: manda el titular. Si el titular nombra a un jugador, o dice «masculino», la noticia se descarta; un titular solo con apellidos no basta (muchos son también de hombres) y hace falta que diga expresamente que es femenino. Para saber quiénes son ellos, la tarea de actualización guarda también el ranking masculino de Padel API (`data/ranking_masculino.json`, solo nombres: no se muestra en ningún sitio). A esa lista se suma siempre una lista fija de jugadores muy conocidos y de sus apodos (Coello, Tapia, Chingotto, «Stupa»…), para que no se cuele ninguno aunque la API falle o aún no haya descargado la suya. Sin la lista de la API (por ejemplo con el respaldo de Wikipedia, o unos minutos tras un despliegue) el filtro es más estricto: solo pasan las noticias que digan expresamente femenino, mujeres, campeonas o jugadoras. Cada medio se trata según lo que permiten sus condiciones; cualquier fuente nueva empieza en «solo titular y enlace» hasta que se lean las suyas:
 
 Cada noticia que se publica lleva su **fecha real** (la que da el medio; si no la da, no se inventa), un **resumen de al menos unas tres líneas** y el **enlace directo** a la noticia. Una noticia sin ese resumen no sale. Por eso solo se publican las fuentes cuyas condiciones permiten resumir o citar; cualquier otra se ignora (ni siquiera se le pide el feed) hasta que se lean las suyas:
 
 | Nivel | Qué se publica | Medios |
 |---|---|---|
-| resumen | Título, resumen propio de unas tres líneas (con IA si hay `GROQ_API_KEY`; si no, las primeras frases de la crónica), fecha, autor y enlace. Usa el texto completo que OKDiario publica en su feed | OKDiario (licencia Creative Commons no comercial) |
+| resumen | Título, resumen propio de unas tres líneas (con IA si hay `GROQ_API_KEY`; si el modelo de Groq ya no existe se busca otro solo, y si no hay ninguno, las primeras frases de la crónica), fecha, autor y enlace. Usa el texto completo que OKDiario publica en su feed | OKDiario (licencia Creative Commons no comercial) |
 | extracto | Título, extracto literal de unas tres líneas (hasta 300 caracteres, sin reescribir), fecha y enlace | Padel Addict |
 
 Marca, Mundo Deportivo, Padel Spain y Set Padel Magazine se han dejado fuera: no se han verificado sus condiciones para resumir sus noticias, y sin eso no se les puede dar el resumen que se exige.
@@ -145,6 +145,7 @@ Si `MCP_AUTH` tiene un valor desconocido o contradictorio (por ejemplo `open` ju
 4. En **Settings → Networking → Generate Domain** obtén la dirección pública.
 5. Espera unos 4 minutos tras el arranque y abre `https://TU-APP.up.railway.app/api/data-status`: `ingesta.ok` debe ser `true` y `fuente_activa` `padelapi`. El disco de Railway es efímero: tras cada despliegue los datos se vuelven a pedir.
 6. El MCP queda en `https://TU-APP.up.railway.app/ai/mcp`.
+7. Para saber qué versión está corriendo, abre `https://TU-APP.up.railway.app/api/version` (también sale al pie de la web): si no es la última que has subido, el despliegue no ha terminado o no ha cogido el último commit.
 
 Si el despliegue falla, el log de Railway dice dónde. Si se queja de no encontrar `requirements.txt` al construir, el contexto de construcción no es `apps/mcp-server`: revisa el *Root Directory* del servicio.
 
@@ -170,7 +171,7 @@ Si el despliegue falla, el log de Railway dice dónde. Si se queja de no encontr
 | `NEWS_RSS_ENABLED` | `false` apaga las noticias | activas |
 | `NEWS_RSS_FEEDS` | Sustituye la lista de feeds (URLs separadas por comas); los que no estén en la tabla de arriba se ignoran | los de la tabla |
 | `GROQ_API_KEY` | Resúmenes de noticias con IA (sin ella, resumen determinista) | — |
-| `GROQ_NEWS_MODEL` | Modelo de Groq para los resúmenes | `llama-3.1-8b-instant` |
+| `GROQ_NEWS_MODEL` | Modelo de Groq para los resúmenes (si ya no existe, se descubre otro solo) | `llama-3.1-8b-instant` |
 | `SCRAPER_CONTACT` | Tu correo, para identificar al programa ante los medios y Wikipedia | — |
 | `SCRAPER_INFO_URL` | URL con información del programa (para el User-Agent) | — |
 | `SCRAPER_USER_AGENT` | User-Agent completo, si quieres sustituir el automático | automático |
@@ -224,7 +225,7 @@ GET /api/calendar              torneos actuales y próximos
 GET /api/live                  torneo en curso (sin marcadores) y enlace al marcador oficial
 GET /api/news                  noticias
 GET /api/data-status           fuente, antigüedad y resultado de la última actualización
-GET /api/version               versión
+GET /api/version               versión desplegada (también en /api/data-status y al pie de la web)
 GET /como-funciona             la arquitectura explicada para todos
 ```
 

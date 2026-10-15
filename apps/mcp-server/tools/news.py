@@ -145,6 +145,58 @@ def _disable_groq_temporarily(reason: str):
     print(f"  Groq deshabilitado {GROQ_COOLDOWN_SECONDS//60} min: {reason}")
 
 
+GROQ_MODEL_PREFERENCE = ("llama-3.3-70b-versatile", "llama-3.1-8b-instant", "llama-3.1-70b-versatile",
+                         "llama3-70b-8192", "llama3-8b-8192", "gemma2-9b-it", "mixtral-8x7b-32768")
+_GROQ_NOT_CHAT = ("whisper", "tts", "guard", "vision", "embed", "playai", "safeguard", "compound", "orpheus")
+_groq_model_state = {"id": None}          # el modelo que funciona (se descubre si el configurado ya no existe)
+
+
+def _is_model_missing_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return any(k in text for k in ("model_not_found", "does not exist", "decommissioned", "no longer supported"))
+
+
+def _pick_groq_model(client, excluded: str = "") -> str | None:
+    """Pregunta a Groq qué modelos hay y elige uno de chat para resumir; None si no se puede saber."""
+    try:
+        listing = client.models.list()
+        raw = getattr(listing, "data", None)
+        if raw is None and isinstance(listing, dict):
+            raw = listing.get("data")
+        ids = [(getattr(m, "id", None) or (m.get("id") if isinstance(m, dict) else None)) for m in (raw or [])]
+    except Exception as exc:  # noqa: BLE001
+        print(f"  Groq: no se pudo listar los modelos: {exc}")
+        return None
+    ids = [i for i in ids if isinstance(i, str) and i != excluded]
+    for preferred in GROQ_MODEL_PREFERENCE:
+        if preferred in ids:
+            return preferred
+    chat = sorted(i for i in ids if not any(b in i.lower() for b in _GROQ_NOT_CHAT)
+                  and any(k in i.lower() for k in ("llama", "qwen", "gpt-oss", "gemma", "mixtral", "kimi")))
+    chat.sort(key=lambda i: (0 if ("instant" in i.lower() or "versatile" in i.lower()) else 1, i))
+    return chat[0] if chat else None
+
+
+async def _groq_chat(client, prompt: str, max_tokens: int = 300, temperature: float = 0.2):
+    """Llama a Groq. Si el modelo configurado ya no existe, descubre otro una sola vez y reintenta; si no hay
+    ninguno, desactiva la IA un rato (las noticias salen igualmente, con un resumen sin IA)."""
+    model = _groq_model_state["id"] or GROQ_MODEL
+    for attempt in (1, 2):
+        try:
+            return await asyncio.to_thread(lambda m=model: client.chat.completions.create(
+                model=m, max_tokens=max_tokens, temperature=temperature,
+                messages=[{"role": "user", "content": prompt}]))
+        except Exception as exc:  # noqa: BLE001
+            if attempt == 1 and _is_model_missing_error(exc):
+                found = await asyncio.to_thread(_pick_groq_model, client, model)
+                if found:
+                    print(f"  Groq: el modelo {model} ya no existe; se usa {found}")
+                    _groq_model_state["id"] = model = found
+                    continue
+                _disable_groq_temporarily("el modelo configurado no existe y no hay otro disponible")
+            raise
+
+
 def _is_rate_limit_error(exc: Exception) -> bool:
     text = str(exc).lower()
     return "429" in text or "rate limit" in text or "rate_limit_exceeded" in text
@@ -185,6 +237,19 @@ FILTRO_FEMENINO = (
 )
 FILTRO_MASCULINO = (
     "masculino", "masculina", "masculinos", "masculinas", "hombres", "varones", "male", "men s", "mens",
+)
+
+# Jugadores muy conocidos (y los apodos con los que los titulares los nombran: «Stupa», «Chingo», «Momo»...).
+# Se UNE siempre a la lista del ranking masculino de Padel API: es la red de seguridad para que ninguno se cuele
+# aunque la API falle o aún no se haya descargado la lista (justo después de un despliegue).
+KNOWN_MEN = (
+    "Arturo Coello", "Agustin Tapia", "Alejandro Galan", "Juan Lebron", "Federico Chingotto", "Franco Stupaczuk",
+    "Martin Di Nenno", "Miguel Yanguas", "Francisco Navarro", "Javier Garrido", "Jon Sanz", "Sanyo Gutierrez",
+    "Maximiliano Sanchez", "Miguel Lamperti", "Fernando Belasteguin", "Pablo Lima", "Juan Tello", "Mohamed Gonzalez",
+    "Jairo Bautista", "Aris Patiniotis", "Lucas Bergamini", "Leonardo Augsburger", "Jose Solano",
+    "Coello", "Tapia", "Galan", "Lebron", "Chingotto", "Chingo", "Stupa", "Stupaczuk", "Di Nenno", "Yanguas",
+    "Lamperti", "Belasteguin", "Paquito", "Sanyo", "Momo", "Ale Galan", "Fede Chingotto", "Javi Garrido",
+    "Maxi Sanchez", "Sanz",
 )
 
 # Las noticias se centran SOLO en el Top 20 del ranking femenino.
@@ -296,6 +361,7 @@ def es_noticia_top20(
     texto: str,
     ranking_names: set[str],
     men_names=(),
+    strict=None,
 ) -> bool:
     """
     Regla determinista: la noticia se conserva SOLO si es de pádel femenino y habla de alguien del Top 20.
@@ -327,7 +393,9 @@ def es_noticia_top20(
 
     if m_title or _male_term_present(padded_title):
         return False
-    if not men_names:
+    if strict is None:
+        strict = not men_names
+    if strict:                          # sin la lista de jugadores de la API: solo lo que diga expresamente que es femenino
         return female_term and not _male_term_present(padded_all)
 
     if f_title:
@@ -450,12 +518,7 @@ Reglas:
 
     async with sem:
         try:
-            resp = await asyncio.to_thread(lambda: client.chat.completions.create(
-                model=GROQ_MODEL,
-                max_tokens=300,
-                temperature=0.2,
-                messages=[{"role": "user", "content": prompt}],
-            ))
+            resp = await _groq_chat(client, prompt, max_tokens=300, temperature=0.2)
             raw = resp.choices[0].message.content.strip()
             match = re.search(r"\{.*\}", raw, re.DOTALL)
             if not match:
@@ -484,7 +547,7 @@ Reglas:
                 "resumen": resumen,
                 "fecha": _latest_article_date(articulos) or None,
                 "fuentes": fuentes,
-                "generated_by": f"groq:{GROQ_MODEL}",
+                "generated_by": f"groq:{_groq_model_state['id'] or GROQ_MODEL}",
             }
             _summary_cache_set(cache_key, result)
             return result
@@ -525,12 +588,7 @@ Solo pádel femenino. No inventes datos ni menciones jugadores masculinos.
 
     async with sem:
         try:
-            resp = await asyncio.to_thread(lambda: client.chat.completions.create(
-                model=GROQ_MODEL,
-                max_tokens=280,
-                temperature=0.2,
-                messages=[{"role": "user", "content": prompt}],
-            ))
+            resp = await _groq_chat(client, prompt, max_tokens=280, temperature=0.2)
             raw = resp.choices[0].message.content.strip()
             match = re.search(r"\{.*\}", raw, re.DOTALL)
             if not match:
@@ -554,7 +612,7 @@ Solo pádel femenino. No inventes datos ni menciones jugadores masculinos.
                 "resumen": resumen,
                 "fecha": art.get("published_date") or None,
                 "fuentes": fuentes,
-                "generated_by": f"groq:{GROQ_MODEL}",
+                "generated_by": f"groq:{_groq_model_state['id'] or GROQ_MODEL}",
             }
             _summary_cache_set(cache_key, result)
             return result
@@ -898,14 +956,16 @@ async def get_latest_news() -> dict:
 
     top_names = await get_top_player_names()
     men_top = await get_top_men_names()
+    men_all = list({_pnorm(n): n for n in list(men_top) + list(KNOWN_MEN)}.values())
     ranking_names = {_pnorm(n) for n in top_names}
-    men_names = {_pnorm(n) for n in men_top}
-    players = _universe(top_names, men_top)
+    men_names = {_pnorm(n) for n in men_all}
+    strict = not men_top                  # modo estricto mientras no haya lista de jugadores de la API
+    players = _universe(top_names, men_all)
     if not top_names:
         print("  sin Top 20 disponible: no se puede filtrar, se devuelven 0 noticias")
     femeninos = []
     for art in raw:
-        if not es_noticia_top20(art["titulo"], art.get("texto", ""), ranking_names, men_names):
+        if not es_noticia_top20(art["titulo"], art.get("texto", ""), ranking_names, men_names, strict=strict):
             continue
         femeninos.append(art)
     print(f"Filtro Top 20: {len(femeninos)} noticias")

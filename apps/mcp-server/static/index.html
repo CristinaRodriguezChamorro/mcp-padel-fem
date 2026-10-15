@@ -1492,6 +1492,7 @@ setTimeout(()=>{ if(!window.__liveHasRendered){ loadEnJuego(); } },1200);loadEnJ
     add('Marcadores en directo: ');link('web oficial de la FIP','https://www.padelfip.com/calendar-premier-padel/');add('. ');
     add('Web no oficial, sin relación con la FIP ni con Premier Padel, ni con las marcas mencionadas, y sin remuneración de ninguna. ');
     link('¿Cómo funciona esta web?','/como-funciona');
+    if(s&&s.version) add(' · Versión '+s.version);
     document.body.appendChild(f);
   }
   try{

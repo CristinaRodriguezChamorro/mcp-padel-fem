@@ -12,6 +12,10 @@ from tools.local_data import (get_ranking_live, get_calendar_live, get_tournamen
                               dataset_status, data_age_seconds)
 from padel_mcp.tools import build_mcp, gate_from_env
 
+# Versión que está corriendo: se ve en /api/version, en /api/data-status y al pie de la web, para saber
+# siempre si el despliegue es el último.
+APP_VERSION = "2026-10-13-v4-solo-femenino-sponsors-sin-fotos"
+
 # ── CACHÉ ─────────────────────────────────────────────────────────────────────
 _cache: dict = {}
 
@@ -173,7 +177,7 @@ async def api_live(gender: str = "female"):
 @app.get("/api/data-status")
 async def api_data_status():
     """De dónde sale cada dato, qué tan al día está, el resultado de la última actualización y si las noticias están activas."""
-    return {"datasets": dataset_status(), "ingesta": ingest.ingest_status(), "noticias": rss_status()}
+    return {"version": APP_VERSION, "datasets": dataset_status(), "ingesta": ingest.ingest_status(), "noticias": rss_status()}
 
 
 # ── MCP: endpoint /ai/mcp ─────────────────────────────────────────────────────
@@ -185,7 +189,7 @@ app.mount("/ai", gate_from_env(mcp_app))
 
 @app.get("/api/version")
 async def api_version():
-    return {"version": "v96-order-final-first-2026-08-09"}
+    return {"version": APP_VERSION}
 
 @app.get("/")
 async def index():
@@ -195,7 +199,7 @@ async def index():
         headers={
             "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
             "Pragma": "no-cache",
-            "X-App-Version": "v96-order-final-first-2026-08-09",
+            "X-App-Version": APP_VERSION,
         },
     )
 

@@ -142,13 +142,35 @@ def clean_name(value) -> str:
     return re.sub(r"\s+", " ", text).strip()[:80]
 
 
+_PARTICLES = {"de", "del", "la", "las", "los", "da", "do", "dos", "y"}
+_COMPOUND_SECOND = {"maria", "jose", "ana", "juan", "luis", "carlos", "angel", "carmen", "isabel", "pilar", "belen",
+                    "teresa", "miguel", "manuel", "antonio", "francisco", "javier", "pablo", "pedro"}
+
+
+def short_name(full: str) -> str:
+    """
+    Padel API da los nombres con los dos apellidos ('Gemma Triay Pons'); la prensa y la gente usan el nombre y el
+    primer apellido ('Gemma Triay'). Con nombres compuestos ('Maria Jose Martinez Lopez') se conserva el compuesto.
+    """
+    words = clean_name(full).split()
+    if len(words) <= 2:
+        return " ".join(words)
+    keep = 2 if words[1].lower() in _COMPOUND_SECOND and len(words) >= 3 else 1
+    i = keep
+    surname = [words[i]]
+    while words[i].lower() in _PARTICLES and i < len(words) - 1:     # 'De la Fuente'
+        i += 1
+        surname.append(words[i])
+    return " ".join(words[:keep] + surname)
+
+
 def parse_ranking(data: list, limit: int = RANKING_ROWS) -> list:
     rows = []
     for r in data:
         if r.get("category") != "women" or r.get("type", "official") != "official":
             continue
         pos, pts = r.get("ranking"), format_points(r.get("points"))
-        name = clean_name(r.get("name"))
+        name = short_name(r.get("name"))
         if not name or pts is None or isinstance(pos, bool) or not isinstance(pos, int) or pos < 1:
             continue                      # incluye los valores 'hidden_free_plan'
         rows.append({"pos": pos, "name": name, "pair": "", "flag": flag(r.get("nationality")), "pts": pts})
@@ -162,7 +184,7 @@ def parse_men_ranking(data: list, limit: int = MEN_ROWS) -> list:
     for r in data:
         if r.get("category") != "men" or r.get("type", "official") != "official":
             continue
-        pos, name = r.get("ranking"), clean_name(r.get("name"))
+        pos, name = r.get("ranking"), short_name(r.get("name"))
         if not name or isinstance(pos, bool) or not isinstance(pos, int) or pos < 1:
             continue
         rows.append({"pos": pos, "name": name})
