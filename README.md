@@ -2,7 +2,7 @@
 
 Servidor **MCP** con datos reales del pádel profesional femenino (circuito Premier Padel / FIP). Cualquier asistente de IA que hable MCP (Copilot en VS Code, Claude, etc.) puede llamar a sus herramientas: el servidor devuelve los datos ya filtrados, con su fuente y su antigüedad, y el propio asistente redacta la respuesta. Incluye además una **web de apoyo** con el ranking, los torneos y las noticias.
 
-> Proyecto no oficial: sin relación con la FIP, con Premier Padel, con Padel API ni con los medios citados.
+> Proyecto no oficial
 
 ## Qué es
 
