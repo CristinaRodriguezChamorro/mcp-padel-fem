@@ -1,4 +1,4 @@
-# 🎾 Pádel Femenino con IA
+# 🎾 MCP de Pádel Femenino
 
 Un asistente de IA que contesta preguntas sobre el pádel profesional femenino con datos reales: ranking, torneos, resultados, jugadoras y noticias. Funciona como un **servidor MCP** que se conecta a Visual Studio Code en dos líneas, y publica además una web sencilla.
 
