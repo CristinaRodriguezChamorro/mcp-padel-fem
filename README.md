@@ -133,7 +133,7 @@ Solo lectura. Hay **23**: 3 por defecto y 20 extra. En la columna «Parámetros�
 
 ### Extra con datos guardados por la tarea diaria (9)
 
-Apagadas por defecto: se activan con `MCP_TOOLS=extended`. Leen los archivos de `data/` que la tarea de actualización renueva cada 24 horas; no consultan a Padel API al preguntar.
+Apagadas por defecto (No obstante, comentar que actualmente se encuentran activadas**): se activan con `MCP_TOOLS=extended`. Leen los archivos de `data/` que la tarea de actualización renueva cada 24 horas; no consultan a Padel API al preguntar.
 
 | Herramienta | Parámetros | Para qué |
 |---|---|---|
