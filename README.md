@@ -77,8 +77,6 @@ El servidor ofrece **23 herramientas** de solo lectura, todas de pádel femenino
 
 **MCP** (*Model Context Protocol*) es un estándar abierto para que un asistente de IA use herramientas y datos de fuera. El servidor publica una lista de herramientas con su descripción; el asistente la lee, decide cuál sirve para tu pregunta, la llama y redacta la respuesta con lo que le devuelve.
 
-## Ventajas del MCP
-
 - **Datos reales asegurados, no inventados.** Un modelo puede no saber con certeza quién lidera el ranking esta semana ni quién ganó ayer, podría inventarselos o cometer errores en la respuesta. Con el MCP consultamos los datos en fuentes válidas y verificadas en el momento y en cada respuesta podemos saber de dónde viene el dato y de cuándo es. Si falta algo, lo dice.
 - **El servidor controla lo que sale**:. El asistente solo decide qué pedir y cómo contarlo. Gracias a esto, obtenemos una respuesta personalizada y orientada a nuestros gustos y requerimientos. 
 - **Una web para personas y un MCP para asistentes.** Comparten los mismos datos guardados y las mismas noticias. 
@@ -233,89 +231,6 @@ Cómo funciona esa memoria:
 **Noticias.** Se consultan como mucho cada 10 minutos, solo se publican las que hablan de alguna jugadora del Top 20 y como máximo 15. **Nunca de hombres**: manda el titular. Si el titular nombra a un jugador, o dice «masculino», la noticia se descarta; un titular solo con apellidos no basta (muchos son también de hombres) y hace falta que diga expresamente que es femenino. Para saber quiénes son ellos, la tarea de actualización guarda también el ranking masculino de Padel API (`data/ranking_masculino.json`, solo nombres: no se muestra en ningún sitio). A esa lista se suma siempre una lista fija de jugadores muy conocidos y de sus apodos (Coello, Tapia, Chingotto, «Stupa»…), para que no se cuele ninguno aunque la API falle o aún no haya descargado la suya. Sin la lista de la API (por ejemplo con el respaldo de Wikipedia, o unos minutos tras un despliegue) el filtro es más estricto: solo pasan las noticias que digan expresamente femenino, mujeres, campeonas o jugadoras. Cada medio se trata según lo que permiten sus condiciones; cualquier fuente nueva empieza en «solo titular y enlace» hasta que se lean las suyas:
 
 Cada noticia que se publica lleva su **fecha real** (la que da el medio; si no la da, no se inventa), un **resumen de al menos unas tres líneas** y el **enlace directo** a la noticia. Una noticia sin ese resumen no sale. Por eso solo se publican las fuentes cuyas condiciones permiten resumir o citar; cualquier otra se ignora (ni siquiera se le pide el feed) hasta que se lean las suyas:
-
-| Nivel | Qué se publica | Medios |
-|---|---|---|
-| resumen | Título, resumen propio de unas tres líneas (con IA si hay `GROQ_API_KEY`; si el modelo de Groq ya no existe se busca otro solo, y si no hay ninguno, las primeras frases de la crónica), fecha, autor y enlace. Usa el texto completo que OKDiario publica en su feed | OKDiario (licencia Creative Commons no comercial) |
-| extracto | Título, extracto literal de unas tres líneas (hasta 300 caracteres, sin reescribir), fecha y enlace | Padel Addict |
-
-Marca, Mundo Deportivo, Padel Spain y Set Padel Magazine se han dejado fuera: no se han verificado sus condiciones para resumir sus noticias, y sin eso no se les puede dar el resumen que se exige.
-
-**Consultas en directo a Padel API.** Las once herramientas extra que no leen archivos (`perfil_jugadora`, `partidos_jugadora`, `cuadro_torneo`, `partidos_en_directo`, `rankings_jugadora`, `prediccion_partido`, `ranking_elo`, `ranking_race`, `movimientos_ranking`, `parejas_jugadora` y `ediciones_torneo`) piden el dato a Padel API **cuando alguien lo pregunta**. Solo usan lo **gratuito** de su plan, y se protegen y protegen a Padel API:
-
-- **Caché**: el mismo dato no se vuelve a pedir hasta que caduca (perfiles, parejas y ediciones 6 h; partidos 15 min; cuadros 2 min; rankings y predicciones 1 h).
-- **Una sola petición** por dato aunque lleguen varias preguntas a la vez.
-- **Presupuesto propio**: `PADELAPI_LIVE_PER_MIN` (5 por minuto) y `PADELAPI_LIVE_PER_DAY` (600 por día), muy por debajo del límite gratuito (10 por minuto y 2.000 al día), para dejar sitio a la actualización diaria. Si se agota, la herramienta dice cuánto esperar; nunca se bloquea. `/api/data-status` muestra el consumo en `consultas_en_directo`.
-- **Lo que el plan no incluye** (error 402) se explica y se recuerda 30 minutos, sin insistir. Las redirecciones de Padel API (cuando fusiona dos registros) se siguen solas.
-- Solo **pádel femenino** y respuestas recortadas a lo necesario: nunca se devuelve en bruto su base de datos.
-
-Límites del plan gratuito, según su documentación (sin probar con un token real): los resultados de partidos de más de 6 meses salen ocultos (`hidden_free_plan`), solo hay cuadro principal, y de los rankings solo se ve la última semana. Una herramienta nunca llama a un endpoint de pago; un test lo vigila. **Lo de pago que no se usa**: estadísticas de jugadora y de pareja (plan Pro), forma reciente y sinergia (Business), el directo punto a punto (`/live`, Pro), el histórico semanal del ranking, el índice de interés de los partidos y el cara a cara. `partidos_en_directo` usa los partidos del torneo en curso: el marcador es por sets y puede ir con unos minutos de retraso.
-
-**Por qué no la web de la FIP.** Sus condiciones de uso prohíben los robots y la extracción de datos, y copiar su contenido sin licencia escrita. Esta aplicación **no lee la web de la FIP**: solo enlaza a su marcador oficial.
-
-## Quién puede conectarse (`MCP_AUTH`)
-
-| Modo | Cómo se activa | Qué exige |
-|---|---|---|
-| **GitHub** | `MCP_AUTH=github` | Un token de GitHub en `Authorization: Bearer <token>` |
-| **Token fijo** | `MCP_TOKEN` (y, si quieres, `MCP_AUTH=token`) | Ese token |
-| **Abierto** | `MCP_AUTH=open`, o no definir nada | Nada, solo un límite de peticiones |
-
-Si `MCP_AUTH` tiene un valor desconocido o contradictorio (por ejemplo `open` junto con `MCP_TOKEN`), el servidor **se niega a arrancar** en lugar de abrirse por error. Si no defines nada, el endpoint queda **abierto** y lo avisa al arrancar: sirve para probar, no para dejarlo público.
-
-**Modo GitHub.** El servidor pregunta a GitHub de quién es el token (`GET https://api.github.com/user`) y deja pasar a esa cuenta:
-
-- `MCP_GITHUB_USERS=cris,otra` limita el acceso a esas cuentas; vacío = cualquier cuenta de GitHub válida.
-- Cada cuenta tiene su propio límite (`MCP_USER_RATE_PER_MIN`), además del límite por IP.
-- El resultado se guarda unos minutos en memoria (solo una huella SHA-256, nunca el token) y las comprobaciones contra GitHub están limitadas.
-- El token **no necesita ningún permiso**: crea uno solo de identidad y con caducidad corta.
-- No sirve para los conectores de claude.ai, que no envían una cabecera fija.
-
-## Desplegar en Railway
-
-1. Sube el proyecto a un repositorio de GitHub (puede ser privado).
-2. En Railway: **New Project → Deploy from GitHub repo** y elige ese repositorio. `railway.toml` indica el `Dockerfile` (`apps/mcp-server/Dockerfile`).
-3. En **Variables** añade (los valores nunca van en el repositorio):
-   - `PADELAPI_TOKEN`: tu token de Padel API.
-   - `MCP_AUTH`: `open` para la primera prueba; después `github` (y, si quieres, `MCP_GITHUB_USERS`).
-   - `MCP_TOOLS`: `extended` si quieres ofrecer las 23 herramientas (sin esto, solo las 3 por defecto).
-   - `SCRAPER_CONTACT`: tu correo, para identificar al programa ante los medios.
-4. En **Settings → Networking → Generate Domain** obtén la dirección pública.
-5. Espera unos 4 minutos tras el arranque y abre `https://mcp-padel-fem-production.up.railway.app/api/data-status`: `ingesta.ok` debe ser `true` y `fuente_activa` `padelapi`. El disco de Railway es efímero: tras cada despliegue los datos se vuelven a pedir.
-6. El MCP queda en `https://mcp-padel-fem-production.up.railway.app/ai/mcp`: esa es la **URL pública** que se comparte para conectarlo desde VS Code.
-7. Para saber qué versión está corriendo, abre `https://mcp-padel-fem-production.up.railway.app/api/version` (también sale al pie de la web): si no es la última que has subido, el despliegue no ha terminado o no ha cogido el último commit.
-
-Si el despliegue falla, el log de Railway dice dónde. Si se queja de no encontrar `requirements.txt` al construir, el contexto de construcción no es `apps/mcp-server`: revisa el *Root Directory* del servicio.
-
-## Variables de entorno
-
-| Variable | Para qué | Por defecto |
-|---|---|---|
-| `PORT` | Puerto del servidor | `8000` |
-| `DATA_DIR` | Carpeta de los archivos de datos | `apps/mcp-server/data` |
-| `PADELAPI_TOKEN` | Token de Padel API: activa la fuente principal (¡solo como variable del servidor!) | — |
-| `PADELAPI_INGEST` | `off` desactiva Padel API aunque haya token | activa |
-| `PADELAPI_LIVE_PER_MIN` | Consultas en directo a Padel API por minuto (herramientas extra) | `5` |
-| `PADELAPI_LIVE_PER_DAY` | Consultas en directo a Padel API por día (herramientas extra) | `600` |
-| `PADELAPI_MIN_INTERVAL` | Segundos entre peticiones a Padel API | `6.5` |
-| `WIKIPEDIA_INGEST` | `off` desactiva toda la actualización de datos (Padel API y Wikipedia) | activa |
-| `WIKIPEDIA_INGEST_HOURS` | Horas entre actualizaciones correctas (mínimo 1) | `24` |
-| `INGEST_START_DELAY` | Segundos de espera tras arrancar antes de la primera actualización | `15` |
-| `MCP_TOOLS` | `extended` añade las herramientas extra | solo las tres |
-| `MCP_AUTH` | Modo de acceso al MCP: `github`, `token` u `open` | automático |
-| `MCP_GITHUB_USERS` | Cuentas de GitHub permitidas (separadas por comas) | cualquiera |
-| `MCP_TOKEN` | Token fijo de acceso al MCP | — |
-| `MCP_RATE_PER_MIN` | Peticiones por minuto al MCP, por IP | `120` |
-| `MCP_USER_RATE_PER_MIN` | Peticiones por minuto al MCP, por cuenta de GitHub | `120` |
-| `MCP_GLOBAL_RATE_PER_MIN` | Peticiones por minuto al MCP, en total | `600` |
-| `NEWS_RSS_ENABLED` | `false` apaga las noticias | activas |
-| `NEWS_RSS_FEEDS` | Sustituye la lista de feeds (URLs separadas por comas); los que no estén en la tabla de arriba se ignoran | los de la tabla |
-| `GROQ_API_KEY` | Resúmenes de noticias con IA (sin ella, resumen determinista) | — |
-| `GROQ_NEWS_MODEL` | Modelo de Groq para los resúmenes (si ya no existe, se descubre otro solo) | `llama-3.1-8b-instant` |
-| `SCRAPER_CONTACT` | Tu correo, para identificar al programa ante los medios y Wikipedia | — |
-| `SCRAPER_INFO_URL` | URL con información del programa (para el User-Agent) | — |
-| `SCRAPER_USER_AGENT` | User-Agent completo, si quieres sustituir el automático | automático |
-| `SCRAPER_MIN_INTERVAL` | Segundos mínimos entre peticiones al mismo dominio | `1.0` |
 
 ## Estructura del proyecto
 
