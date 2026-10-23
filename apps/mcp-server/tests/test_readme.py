@@ -6,6 +6,7 @@ El README no puede mentir. Este test lo compara con el código:
   - las rutas de la web, los archivos que menciona y el árbol de carpetas;
   - cifras clave (límites, tiempos, caducidades) y nada de lo que ya se quitó.
 """
+import asyncio
 import os
 import re
 import sys
@@ -51,6 +52,68 @@ class Tools(unittest.TestCase):
         self.assertIn("top 10", section("Las herramientas del MCP"))
 
 
+class ToolParameters(unittest.TestCase):
+    """La columna «Parámetros» del README es la de verdad: nombres, si son opcionales y su valor por defecto."""
+
+    @staticmethod
+    def real():
+        from fastmcp import Client
+        from padel_mcp.tools import build_mcp
+
+        async def nothing():
+            return {"data": [], "age_s": 0, "fallback": None}
+        providers = {k: nothing for k in ("ranking", "calendar", "live", "finals", "news", "status")}
+
+        async def go():
+            async with Client(build_mcp(providers, extended=True)) as c:
+                return {t.name: t.inputSchema for t in await c.list_tools()}
+        return asyncio.run(go())
+
+    @staticmethod
+    def documented():
+        out = {}
+        for line in section("Las herramientas del MCP").splitlines():
+            m = re.match(r"^\| `([a-z_]+)` \| ([^|]*) \|", line)
+            if m:
+                out[m.group(1)] = {t[0]: (t[1] == "?", t[2]) for t in re.findall(r"`(\w+)(\??)(?:=([^`]*))?`", m.group(2))}
+        return out
+
+    def test_every_tool_documents_exactly_its_real_parameters(self):
+        real, doc = self.real(), self.documented()
+        self.assertEqual(set(doc), set(real))
+        for name, schema in real.items():
+            props, required = schema.get("properties", {}), set(schema.get("required", []))
+            self.assertEqual(set(doc[name]), set(props), f"{name}: parámetros distintos a los del README")
+            for param, spec in props.items():
+                optional, default = doc[name][param]
+                self.assertEqual(optional, param not in required, f"{name}.{param}: ¿opcional?")
+                real_default = spec.get("default")
+                if real_default is None:
+                    self.assertEqual(default, "", f"{name}.{param}: el README da un valor por defecto que no existe")
+                else:
+                    self.assertEqual(default, str(real_default), f"{name}.{param}: valor por defecto")
+
+    def test_a_tool_without_parameters_says_so(self):
+        real = self.real()
+        for name, schema in real.items():
+            if not schema.get("properties"):
+                self.assertRegex(section("Las herramientas del MCP"), rf"\| `{name}` \| — \|")
+
+    def test_the_total_in_the_readme_is_the_real_one(self):
+        from padel_mcp.tools import CORE_TOOLS, EXTRA_TOOLS
+        text = section("Las herramientas del MCP")
+        total = len(CORE_TOOLS) + len(EXTRA_TOOLS)
+        self.assertIn(f"Hay **{total}**: {len(CORE_TOOLS)} por defecto y {len(EXTRA_TOOLS)} extra", text)
+        for title, count in (("Por defecto", len(CORE_TOOLS)), ("Extra con datos guardados", 9), ("Extra que consultan a Padel API", 11)):
+            self.assertRegex(text, rf"### {title}[^\n]*\({count}\)")
+        self.assertEqual(9 + 11, len(EXTRA_TOOLS))
+
+    def test_every_table_row_is_closed(self):
+        for line in section("Las herramientas del MCP").splitlines():
+            if line.startswith("| `"):
+                self.assertTrue(line.rstrip().endswith("|"), f"fila de tabla sin cerrar: {line[:60]}")
+
+
 class Environment(unittest.TestCase):
     @staticmethod
     def read_by_code():
@@ -87,6 +150,9 @@ class Environment(unittest.TestCase):
             self.assertIn(default, rows[name], f"{name}: el valor por defecto real es {default}")
         from tools import padelapi_source as pa
         self.assertIn(str(pa.DEFAULT_INTERVAL), rows["PADELAPI_MIN_INTERVAL"])
+        from tools import padelapi_live as live
+        self.assertIn(str(live.DEFAULT_PER_MINUTE), rows["PADELAPI_LIVE_PER_MIN"])
+        self.assertIn(str(live.DEFAULT_PER_DAY), rows["PADELAPI_LIVE_PER_DAY"])
         self.assertIn("8000", rows["PORT"])
         self.assertIn("24", rows["WIKIPEDIA_INGEST_HOURS"])
         self.assertIn("15", rows["INGEST_START_DELAY"])

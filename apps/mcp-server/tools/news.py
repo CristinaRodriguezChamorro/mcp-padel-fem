@@ -50,7 +50,6 @@ SOURCE_POLICY = {
 }
 DEFAULT_MODE = "ninguno"
 PUBLISHABLE_MODES = ("resumen", "extracto")
-OUTLET_NAMES = {host: name for host, (name, _) in SOURCE_POLICY.items()}
 
 NEWS_CACHE_SECONDS = 10 * 60      # cada cuánto se vuelve a consultar (como mucho)
 MAX_RESUMENES = 6                 # noticias que se resumen con IA en cada actualización
@@ -265,18 +264,6 @@ def _normalizar(texto: str) -> str:
     texto = "".join(c for c in texto if not unicodedata.combining(c))
     texto = texto.casefold()
     return re.sub(r"[^a-z0-9]+", " ", texto).strip()
-
-
-def _ranking_full_names(names: list[str]) -> set[str]:
-    """
-    Normaliza los nombres completos devueltos por el ranking femenino.
-    No genera apellidos sueltos ni heurísticas adicionales.
-    """
-    return {
-        norm
-        for name in names
-        if (norm := _normalizar(name))
-    }
 
 
 async def get_top_player_names(limit: int = TOP_N) -> list[str]:
@@ -677,16 +664,6 @@ def _female_title_strength(titulo: str, ranking_names: set[str], men_names=()) -
     return 0
 
 
-def _titulo_pasa_filtro(titulo: str, ranking_names: set[str]) -> bool:
-    """
-    El titular puede demostrar que la noticia es femenina por:
-    - female / women / femenino / mujeres;
-    - nombre completo de una jugadora;
-    - al menos dos apellidos distintos del ranking femenino.
-    """
-    return _female_title_strength(titulo, ranking_names) >= 2
-
-
 def _titulo_fallback_desde_frase(frase: str) -> str:
     """
     Construye un titular corto sin inventar información.
@@ -1052,8 +1029,6 @@ async def get_latest_news() -> dict:
         }
 
         for art in femeninos:
-            if False:  # sin límite fijo de noticias
-                break
             if art.get("url", "") in usados_urls:
                 continue
 

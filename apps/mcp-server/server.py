@@ -7,14 +7,14 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from tools.news import get_latest_news, rss_status, NEWS_CACHE_SECONDS
-from tools import ingest
+from tools import ingest, padelapi_live
 from tools.local_data import (get_ranking_live, get_calendar_live, get_tournament_now, get_recent_finals,
                               dataset_status, data_age_seconds)
 from padel_mcp.tools import build_mcp, gate_from_env
 
 # Versión que está corriendo: se ve en /api/version, en /api/data-status y al pie de la web, para saber
 # siempre si el despliegue es el último.
-APP_VERSION = "2026-10-13-v4-solo-femenino-sponsors-sin-fotos"
+APP_VERSION = "2026-10-23-v8-revision-final"
 
 # ── CACHÉ ─────────────────────────────────────────────────────────────────────
 _cache: dict = {}
@@ -65,6 +65,7 @@ async def _status_provider():
             "age_s": 0, "fallback": None}
 
 mcp = build_mcp({
+    "padelapi": padelapi_live.service(),
     "ranking":  lambda: _provide("ranking", LOCAL_TTL, get_ranking_live, "ranking"),
     "calendar": lambda: _provide("calendar", LOCAL_TTL, get_calendar_live, "calendario"),
     "live":     lambda: _provide("live:female", LOCAL_TTL, lambda: get_tournament_now(gender="female"), "calendario"),
@@ -177,7 +178,8 @@ async def api_live(gender: str = "female"):
 @app.get("/api/data-status")
 async def api_data_status():
     """De dónde sale cada dato, qué tan al día está, el resultado de la última actualización y si las noticias están activas."""
-    return {"version": APP_VERSION, "datasets": dataset_status(), "ingesta": ingest.ingest_status(), "noticias": rss_status()}
+    return {"version": APP_VERSION, "datasets": dataset_status(), "ingesta": ingest.ingest_status(), "noticias": rss_status(),
+            "consultas_en_directo": padelapi_live.service().status()}
 
 
 # ── MCP: endpoint /ai/mcp ─────────────────────────────────────────────────────

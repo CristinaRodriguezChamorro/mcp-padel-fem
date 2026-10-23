@@ -2,7 +2,7 @@
 
 Servidor **MCP** con datos reales del pádel profesional femenino (circuito Premier Padel / FIP). Cualquier asistente de IA que hable MCP (Copilot en VS Code, Claude, etc.) puede llamar a sus herramientas: el servidor devuelve los datos ya filtrados, con su fuente y su antigüedad, y el propio asistente redacta la respuesta. Incluye además una **web de apoyo** con el ranking, los torneos y las noticias.
 
-> Proyecto no oficial
+> Proyecto no oficial: sin relación con la FIP, con Premier Padel, con Padel API ni con los medios citados.
 
 ## Qué es
 
@@ -66,29 +66,51 @@ No inventes datos que el MCP no devuelva.
 
 ## Las herramientas del MCP
 
-Solo lectura. Por defecto el servidor expone **tres**:
+Solo lectura. Hay **23**: 3 por defecto y 20 extra. En la columna «Parámetros», `?` marca un parámetro opcional y `=` su valor por defecto; `—` significa que no lleva ninguno.
 
-| Herramienta | Qué devuelve |
-|---|---|
-| `ranking_femenino` | Posición, nombre, país y puntos de cada jugadora, de la 1.ª a la `top` (por defecto el top 10, máximo 20) |
-| `ultimo_torneo` | El último torneo terminado: dónde fue, qué tipo de torneo es, quién jugó la final, primeras, segundas y terceras, resultado final y una frase que lo resume |
-| `proximo_torneo` | El próximo torneo: nombre, ciudad y país, fechas, días que faltan, tipo de torneo y dónde verlo; si hay uno en juego, también ese |
+### Por defecto (3)
 
-Otras herramientas, apagadas por defecto: se activan con `MCP_TOOLS=extended`.
+| Herramienta | Parámetros | Qué devuelve |
+|---|---|---|
+| `ranking_femenino` | `top?=10` | Posición, nombre, país y puntos de cada jugadora, de la 1.ª a la `top` (por defecto el top 10, máximo 20) |
+| `ultimo_torneo` | — | El último torneo terminado: dónde fue, qué tipo de torneo es, quién jugó la final, primeras, segundas y terceras, resultado final y una frase que lo resume |
+| `proximo_torneo` | — | El próximo torneo: nombre, ciudad y país, fechas, días que faltan, tipo de torneo y dónde verlo; si hay uno en juego, también ese |
 
-| Herramienta | Para qué |
-|---|---|
-| `jugadora` | Ficha de una jugadora: ranking, finales jugadas y noticias que la mencionan |
-| `comparar_jugadoras` | Dos jugadoras lado a lado |
-| `torneo_actual` | Torneo en juego y enlace al marcador oficial |
-| `resultado_torneo` | Ficha de la final femenina de cualquier torneo ya jugado (por nombre o por jugadora) |
-| `resultados_recientes` | Finales femeninas ya jugadas, con filtro opcional por jugadora |
-| `calendario` | Próximos torneos |
-| `noticias` | Noticias de pádel femenino con un resumen de unas tres líneas, su fecha real y el enlace directo a la noticia, con filtro opcional por jugadora |
-| `resumen_del_dia` | Panorama rápido |
-| `estado_de_los_datos` | Fuente, antigüedad y última actualización de cada dato |
+### Extra con datos guardados por la tarea diaria (9)
 
-Cada respuesta indica su fuente, su antigüedad y los avisos (datos de ejemplo, datos con retraso). Cuando falta un dato lo dice en una nota en vez de inventarlo: por ejemplo, las terceras (las semifinalistas, porque en pádel no se juega partido por el tercer puesto) solo se dan si la fuente aporta las semifinales. **No hay marcadores en directo**: se enlaza al marcador oficial.
+Apagadas por defecto: se activan con `MCP_TOOLS=extended`. Leen los archivos de `data/` que la tarea de actualización renueva cada 24 horas; no consultan a Padel API al preguntar.
+
+| Herramienta | Parámetros | Para qué |
+|---|---|---|
+| `jugadora` | `nombre` | Ficha de una jugadora del Top 20: ranking, finales jugadas y noticias que la mencionan |
+| `comparar_jugadoras` | `jugadora_a`, `jugadora_b` | Dos jugadoras del Top 20 lado a lado |
+| `torneo_actual` | — | Torneo en juego y enlace al marcador oficial |
+| `resultado_torneo` | `torneo?`, `jugadora?` | Ficha de la final femenina de cualquier torneo ya jugado (por nombre o por jugadora) |
+| `resultados_recientes` | `jugadora?`, `limite?=5` | Finales femeninas ya jugadas, con filtro opcional por jugadora |
+| `calendario` | `limite?=6` | Próximos torneos |
+| `noticias` | `jugadora?`, `limite?=5` | Noticias de pádel femenino con un resumen de unas tres líneas, su fecha real y el enlace directo a la noticia, con filtro opcional por jugadora |
+| `resumen_del_dia` | — | Panorama rápido: top 5, torneo en juego, última final y 3 noticias |
+| `estado_de_los_datos` | — | Fuente, antigüedad y última actualización de cada dato |
+
+### Extra que consultan a Padel API en el momento (11)
+
+También con `MCP_TOOLS=extended`. Piden el dato a Padel API cuando alguien lo pregunta, con caché y presupuesto (ver «Consultas en directo a Padel API», más abajo). Solo usan lo gratuito de su plan.
+
+| Herramienta | Parámetros | Para qué |
+|---|---|---|
+| `perfil_jugadora` | `nombre` | Ficha de cualquier jugadora (no solo del Top 20): país, puesto, puntos, Elo, altura, lado, mano, edad |
+| `partidos_jugadora` | `nombre`, `limite?=5` | Sus últimos partidos (1 a 10): ronda, pareja, rival, resultado y si ganó |
+| `cuadro_torneo` | `torneo?`, `ronda?` | Cuartos, semifinales y final del cuadro femenino de un torneo (por nombre o ciudad; por defecto el actual o el último); `ronda`: final, semifinales, cuartos u octavos |
+| `partidos_en_directo` | — | Qué se juega hoy en el torneo en curso: en juego con su marcador por sets, terminados y próximos |
+| `rankings_jugadora` | `nombre` | Su puesto y puntos en el ranking oficial, el RACE y el Elo, y lo que han cambiado en la última semana |
+| `prediccion_partido` | `pareja_a`, `pareja_b` | Probabilidad de victoria entre dos parejas (o dos jugadoras): una lista de una o dos jugadoras por lado, con el Elo de Padel API |
+| `ranking_elo` | `top?=10` | Clasificación femenina por Elo (de la 1.ª a la `top`, máximo 20) |
+| `ranking_race` | `top?=10` | Clasificación femenina RACE (de la 1.ª a la `top`, máximo 20), con sus cambios de la semana |
+| `movimientos_ranking` | `tipo?=oficial`, `sentido?=suben`, `top?=5` | Las jugadoras que más suben o bajan esta semana; `tipo`: oficial, race o elo; `sentido`: suben o bajan |
+| `parejas_jugadora` | `nombre` | Con quién ha jugado una jugadora, desde y hasta cuándo |
+| `ediciones_torneo` | `torneo?` | Ediciones anteriores de un torneo con sus campeonas, fechas, ciudad y premio |
+
+Cada respuesta indica su fuente, su antigüedad y los avisos (datos de ejemplo, datos con retraso). Cuando falta un dato lo dice en una nota en vez de inventarlo: por ejemplo, las terceras (las semifinalistas, porque en pádel no se juega partido por el tercer puesto) solo se dan si la fuente aporta las semifinales. Ni la web ni las herramientas por defecto tienen marcadores en directo (se enlaza al marcador oficial); `partidos_en_directo`, que es extra, da el marcador por sets del torneo en curso, con algo de retraso. En un torneo o una jugadora vale una parte del nombre o de la ciudad («Milano», «Triay»).
 
 ## De dónde salen los datos
 
@@ -113,6 +135,16 @@ Cada noticia que se publica lleva su **fecha real** (la que da el medio; si no l
 | extracto | Título, extracto literal de unas tres líneas (hasta 300 caracteres, sin reescribir), fecha y enlace | Padel Addict |
 
 Marca, Mundo Deportivo, Padel Spain y Set Padel Magazine se han dejado fuera: no se han verificado sus condiciones para resumir sus noticias, y sin eso no se les puede dar el resumen que se exige.
+
+**Consultas en directo a Padel API.** Las once herramientas extra que no leen archivos (`perfil_jugadora`, `partidos_jugadora`, `cuadro_torneo`, `partidos_en_directo`, `rankings_jugadora`, `prediccion_partido`, `ranking_elo`, `ranking_race`, `movimientos_ranking`, `parejas_jugadora` y `ediciones_torneo`) piden el dato a Padel API **cuando alguien lo pregunta**. Solo usan lo **gratuito** de su plan, y se protegen y protegen a Padel API:
+
+- **Caché**: el mismo dato no se vuelve a pedir hasta que caduca (perfiles, parejas y ediciones 6 h; partidos 15 min; cuadros 2 min; rankings y predicciones 1 h).
+- **Una sola petición** por dato aunque lleguen varias preguntas a la vez.
+- **Presupuesto propio**: `PADELAPI_LIVE_PER_MIN` (5 por minuto) y `PADELAPI_LIVE_PER_DAY` (600 por día), muy por debajo del límite gratuito (10 por minuto y 2.000 al día), para dejar sitio a la actualización diaria. Si se agota, la herramienta dice cuánto esperar; nunca se bloquea. `/api/data-status` muestra el consumo en `consultas_en_directo`.
+- **Lo que el plan no incluye** (error 402) se explica y se recuerda 30 minutos, sin insistir. Las redirecciones de Padel API (cuando fusiona dos registros) se siguen solas.
+- Solo **pádel femenino** y respuestas recortadas a lo necesario: nunca se devuelve en bruto su base de datos.
+
+Límites del plan gratuito, según su documentación (sin probar con un token real): los resultados de partidos de más de 6 meses salen ocultos (`hidden_free_plan`), solo hay cuadro principal, y de los rankings solo se ve la última semana. Una herramienta nunca llama a un endpoint de pago; un test lo vigila. **Lo de pago que no se usa**: estadísticas de jugadora y de pareja (plan Pro), forma reciente y sinergia (Business), el directo punto a punto (`/live`, Pro), el histórico semanal del ranking, el índice de interés de los partidos y el cara a cara. `partidos_en_directo` usa los partidos del torneo en curso: el marcador es por sets y puede ir con unos minutos de retraso.
 
 **Por qué no la web de la FIP.** Sus condiciones de uso prohíben los robots y la extracción de datos, y copiar su contenido sin licencia escrita. Esta aplicación **no lee la web de la FIP**: solo enlaza a su marcador oficial.
 
@@ -157,6 +189,8 @@ Si el despliegue falla, el log de Railway dice dónde. Si se queja de no encontr
 | `DATA_DIR` | Carpeta de los archivos de datos | `apps/mcp-server/data` |
 | `PADELAPI_TOKEN` | Token de Padel API: activa la fuente principal (¡solo como variable del servidor!) | — |
 | `PADELAPI_INGEST` | `off` desactiva Padel API aunque haya token | activa |
+| `PADELAPI_LIVE_PER_MIN` | Consultas en directo a Padel API por minuto (herramientas extra) | `5` |
+| `PADELAPI_LIVE_PER_DAY` | Consultas en directo a Padel API por día (herramientas extra) | `600` |
 | `PADELAPI_MIN_INTERVAL` | Segundos entre peticiones a Padel API | `6.5` |
 | `WIKIPEDIA_INGEST` | `off` desactiva toda la actualización de datos (Padel API y Wikipedia) | activa |
 | `WIKIPEDIA_INGEST_HOURS` | Horas entre actualizaciones correctas (mínimo 1) | `24` |
@@ -197,6 +231,7 @@ Si el despliegue falla, el log de Railway dice dónde. Si se queja de no encontr
     │   └── auth.py        #   verificación de tokens de GitHub
     ├── tools/             # capa de datos COMPARTIDA por la web y el MCP (no son herramientas del MCP)
     │   ├── padelapi_source.py   # fuente principal: Padel API (con token, a ritmo y sin repetir peticiones)
+    │   ├── padelapi_live.py     # consultas a Padel API en el momento (herramientas extra), con caché y presupuesto
     │   ├── wikipedia_source.py  # respaldo: lee la página de la temporada (API de MediaWiki)
     │   ├── ingest.py            # elige la fuente, valida y guarda; actualización diaria
     │   ├── local_data.py        # lee data/*.json (sin red) y arma las fichas de torneo
@@ -255,6 +290,7 @@ Si eres titular de una web usada como fuente y prefieres que no se acceda a ella
 - **Arranque.** El disco de Railway es efímero: tras cada despliegue se vuelven a pedir los datos y durante unos 3-4 minutos se muestran los de ejemplo.
 - **Noticias.** Hay pocas (los medios publican unas pocas de pádel a la semana), como máximo 15, y la mayoría solo con titular y enlace.
 - **Superficie pública.** FastAPI publica `/docs`, `/redoc` y `/openapi.json`. El MCP en modo abierto no identifica a nadie: para uso público, `MCP_AUTH=github`.
+- **Consultas en directo.** Cada pregunta distinta de las once herramientas cuesta una o dos peticiones a Padel API (el Top 20 se resuelve sin peticiones). El presupuesto las limita, pero un uso muy intenso puede agotarlo; sube `PADELAPI_LIVE_PER_MIN` y `PADELAPI_LIVE_PER_DAY` con cuidado. No se han probado con un token real: la búsqueda de una jugadora fuera del Top 20 por su nombre, los cuadros del torneo en curso, la ordenación de los rankings por puntos ganados y los estados de las parejas se han escrito a partir de la documentación.
 - **Padel API.** Si el MCP se hace muy público, conviene confirmar con ellos que su uso encaja con sus condiciones.
 
 ## Objetivo

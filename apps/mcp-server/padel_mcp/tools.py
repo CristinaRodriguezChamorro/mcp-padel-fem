@@ -37,7 +37,12 @@ READ_ONLY = {"readOnlyHint": True, "openWorldHint": True}
 # defecto: se activa con MCP_TOOLS=extended. Los tests comprueban que CORE + EXTRA son todas las que hay.
 CORE_TOOLS = ("ranking_femenino", "ultimo_torneo", "proximo_torneo")
 EXTRA_TOOLS = ("jugadora", "comparar_jugadoras", "torneo_actual", "resultados_recientes", "resultado_torneo",
-               "calendario", "noticias", "estado_de_los_datos", "resumen_del_dia")
+               "calendario", "noticias", "estado_de_los_datos", "resumen_del_dia",
+               # consultan a Padel API en el momento (con caché y un presupuesto de peticiones) y solo usan lo
+               # GRATUITO de su plan: tools/padelapi_live.py
+               "perfil_jugadora", "partidos_jugadora", "cuadro_torneo", "partidos_en_directo", "rankings_jugadora",
+               "prediccion_partido", "ranking_elo", "ranking_race", "movimientos_ranking", "parejas_jugadora",
+               "ediciones_torneo")
 
 
 def extended_tools_enabled() -> bool:
@@ -128,21 +133,30 @@ def build_mcp(providers: dict, extended: Optional[bool] = None) -> FastMCP:
     providers: {'ranking','calendar','live','finals','news','status'} -> funciones async sin argumentos.
     extended: True registra también las herramientas extra; por defecto lo decide MCP_TOOLS=extended.
     """
-    mcp = FastMCP(
-        "PadelFemMCP",
-        instructions=(
-            "Datos del pádel profesional FEMENINO (circuito FIP / Premier Padel). Solo lectura. Tres "
-            "herramientas: ranking_femenino (posición, nombre y puntos de cada jugadora), ultimo_torneo (el "
-            "último torneo terminado) y proximo_torneo (el siguiente). Los datos los guarda el servidor; cada "
-            "respuesta indica su fuente y su antigüedad: si trae un aviso de retraso, dilo. "
-            "Al contar un resultado responde con: torneo y dónde fue, qué tipo de torneo es, quién jugó la "
-            "final, primeras, segundas y terceras, y el resultado final; si falta un dato (las terceras, por "
-            "ejemplo), dilo sin inventarlo. NO hay marcadores en directo: para eso se da el enlace oficial. "
-            "Si ves más herramientas (jugadora, noticias, resultado_torneo...), úsalas con sus filtros; cada "
-            "noticia trae su resumen (modo 'resumen': resumen propio; 'extracto': texto literal), su fecha y "
-            "el enlace directo a la noticia ('enlace'). Cita siempre el medio, la fecha y el enlace."
-        ),
+    # Las instrucciones de siempre NO cambian. El párrafo sobre las herramientas que consultan a Padel API solo se
+    # añade cuando esas herramientas están activas (MCP_TOOLS=extended): sin ellas, el agente no lee nada nuevo.
+    instructions = (
+        "Datos del pádel profesional FEMENINO (circuito FIP / Premier Padel). Solo lectura. Tres "
+        "herramientas: ranking_femenino (posición, nombre y puntos de cada jugadora), ultimo_torneo (el "
+        "último torneo terminado) y proximo_torneo (el siguiente). Los datos los guarda el servidor; cada "
+        "respuesta indica su fuente y su antigüedad: si trae un aviso de retraso, dilo. "
+        "Al contar un resultado responde con: torneo y dónde fue, qué tipo de torneo es, quién jugó la "
+        "final, primeras, segundas y terceras, y el resultado final; si falta un dato (las terceras, por "
+        "ejemplo), dilo sin inventarlo. NO hay marcadores en directo: para eso se da el enlace oficial. "
+        "Si ves más herramientas (jugadora, noticias, resultado_torneo...), úsalas con sus filtros; cada "
+        "noticia trae su resumen (modo 'resumen': resumen propio; 'extracto': texto literal), su fecha y "
+        "el enlace directo a la noticia ('enlace'). Cita siempre el medio, la fecha y el enlace."
     )
+    if extended_tools_enabled() if extended is None else extended:
+        instructions += (
+            " Las herramientas perfil_jugadora, partidos_jugadora, cuadro_torneo, partidos_en_directo, "
+            "rankings_jugadora, prediccion_partido, ranking_elo, ranking_race, movimientos_ranking, "
+            "parejas_jugadora y ediciones_torneo consultan a Padel API en el momento, solo con lo gratuito de su "
+            "plan: si devuelven un error de tipo 'plan', 'budget' o 'limit', explícaselo a la persona y no "
+            "reintentes en bucle; los resultados de más de 6 meses salen ocultos en el plan gratuito y de los "
+            "rankings solo se ve la última semana."
+        )
+    mcp = FastMCP("PadelFemMCP", instructions=instructions)
 
     async def ranking_players():
         payload, err = await _call(providers["ranking"], "ranking")
@@ -384,6 +398,81 @@ def build_mcp(providers: dict, extended: Optional[bool] = None) -> FastMCP:
         out["noticias"] = ({"error": nerr} if nerr else
                            [_news_item(n) for n in news["data"].get("resumen_diario", [])[:3]])
         return out
+
+    # ── Padel API en el momento (solo con MCP_TOOLS=extended) ────────────────
+    live_service = providers.get("padelapi")
+
+    async def _live(method: str, *args):
+        if live_service is None:
+            return {"error": "Las consultas en directo a Padel API no están activas en este servidor.", "tipo": "config"}
+        return await getattr(live_service, method)(*args)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def perfil_jugadora(nombre: str) -> dict:
+        """Ficha de una jugadora (cualquiera, no solo del Top 20): país, puesto y puntos, Elo, altura, lado de la
+        pista (derecha/izquierda), mano, edad y lugar de nacimiento. Consulta a Padel API en el momento."""
+        return await _live("perfil", nombre)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def partidos_jugadora(nombre: str, limite: int = 5) -> dict:
+        """Los últimos partidos de una jugadora (de 1 a 10): fecha, ronda, con quién jugó, rival, resultado y si ganó.
+        Solo cuadro principal. En el plan gratuito de Padel API, los resultados de más de 6 meses salen ocultos."""
+        return await _live("partidos", nombre, limite)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def cuadro_torneo(torneo: Optional[str] = None, ronda: Optional[str] = None) -> dict:
+        """Partidos del cuadro principal FEMENINO de un torneo, por ronda (cuartos, semifinales y final por defecto).
+        'torneo' es parte del nombre o de la ciudad ('Madrid', 'Milano'); sin él, el torneo en juego o el último
+        terminado. 'ronda': final, semifinales, cuartos u octavos."""
+        return await _live("cuadro", torneo, ronda)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def partidos_en_directo() -> dict:
+        """Qué se está jugando ahora en el torneo en curso (solo femenino): partidos en juego con su marcador por
+        sets, los terminados hoy y los que quedan. Puede ir con unos minutos de retraso; sin punto a punto."""
+        return await _live("directo")
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def rankings_jugadora(nombre: str) -> dict:
+        """Posición y puntos de una jugadora en el ranking oficial, el ranking RACE y el Elo, con lo que han cambiado
+        respecto a la semana anterior. Solo la última semana (el histórico semanal es de pago y no se usa)."""
+        return await _live("ranking_jugadora", nombre)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def ranking_elo(top: int = 10) -> dict:
+        """Clasificación femenina por Elo de Padel API (de la 1.ª a la 'top', máximo 20): mide la fuerza real de
+        cada jugadora partido a partido. Solo entran las que tienen al menos 5 partidos valorados en 12 meses."""
+        return await _live("ranking_tipo", "elo", top)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def ranking_race(top: int = 10) -> dict:
+        """Clasificación femenina RACE (puntos de la FIP de la temporada, de la 1.ª a la 'top', máximo 20), distinta
+        del ranking oficial. Trae el cambio de posiciones y de puntos respecto a la semana anterior."""
+        return await _live("ranking_tipo", "race", top)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def movimientos_ranking(tipo: str = "oficial", sentido: str = "suben", top: int = 5) -> dict:
+        """Las jugadoras que más han subido o bajado esta semana, por puntos ganados o perdidos. 'tipo': oficial,
+        race o elo. 'sentido': suben o bajan. 'top': hasta 20."""
+        return await _live("movimientos", tipo, sentido, top)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def parejas_jugadora(nombre: str) -> dict:
+        """Con quién ha jugado una jugadora: sus compañeras, desde y hasta cuándo, y los puntos de cada pareja
+        (las 10 más recientes)."""
+        return await _live("parejas", nombre)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def ediciones_torneo(torneo: Optional[str] = None) -> dict:
+        """Ediciones anteriores de un torneo con sus campeonas, fechas, ciudad y premio. 'torneo' es parte del
+        nombre o de la ciudad ('Madrid', 'Milano'); sin él, el torneo en juego o el último terminado."""
+        return await _live("ediciones", torneo)
+
+    @mcp.tool(annotations=READ_ONLY)
+    async def prediccion_partido(pareja_a: list[str], pareja_b: list[str]) -> dict:
+        """Probabilidad de victoria de un partido entre dos parejas (o dos jugadoras): una o dos jugadoras por lado,
+        con el mismo número en cada uno. Se calcula con el Elo de Padel API: es una estimación, no una garantía."""
+        return await _live("prediccion", pareja_a, pareja_b)
 
     if not (extended_tools_enabled() if extended is None else extended):
         mcp.disable(names=set(EXTRA_TOOLS), components={"tool"})

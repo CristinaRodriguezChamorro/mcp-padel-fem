@@ -280,7 +280,10 @@ class AppEndToEnd(unittest.IsolatedAsyncioTestCase):
         names = {t.name for t in tools}
         self.assertEqual(names, {"ranking_femenino", "jugadora", "comparar_jugadoras", "torneo_actual",
                                  "resultados_recientes", "resultado_torneo", "calendario", "noticias",
-                                 "resumen_del_dia", "estado_de_los_datos", "ultimo_torneo", "proximo_torneo"})
+                                 "resumen_del_dia", "estado_de_los_datos", "ultimo_torneo", "proximo_torneo",
+                                 "perfil_jugadora", "partidos_jugadora", "cuadro_torneo", "partidos_en_directo",
+                                 "rankings_jugadora", "prediccion_partido", "ranking_elo", "ranking_race",
+                                 "movimientos_ranking", "parejas_jugadora", "ediciones_torneo"})
         self.assertNotIn("proximo_partido", names, "sin marcadores en directo no hay próximo partido que ofrecer")
         for t in tools:
             self.assertTrue(t.annotations and t.annotations.read_only_hint, t.name)
@@ -510,7 +513,7 @@ class CoreToolsAreTheDefault(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(len((await self.names())[0]), 3)
             for value in ("extended", "EXTENDED", " extended "):
                 os.environ["MCP_TOOLS"] = value
-                self.assertEqual(len((await self.names())[0]), 12, value)
+                self.assertEqual(len((await self.names())[0]), 23, value)
             os.environ["MCP_TOOLS"] = "todas"
             self.assertEqual(len((await self.names())[0]), 3, "un valor desconocido no abre nada")
         finally:

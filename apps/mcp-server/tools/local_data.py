@@ -138,6 +138,58 @@ async def get_ranking_live() -> list:
         return []
 
 
+def player_ids() -> list:
+    """[{'name', 'id'}] de las jugadoras del ranking guardado que traen su identificador de Padel API."""
+    try:
+        doc = _load("ranking")
+    except DataError:
+        return []
+    out = []
+    for raw in doc.get("jugadoras") or []:
+        pid = raw.get("id") if isinstance(raw, dict) else None
+        name = str(raw.get("name", "")).strip() if isinstance(raw, dict) else ""
+        if name and isinstance(pid, int) and not isinstance(pid, bool):
+            out.append({"name": name, "id": pid})
+    return out
+
+
+def tournament_refs() -> list:
+    """Torneos del calendario guardado CON su identificador de Padel API (también los ya jugados), por fecha de inicio."""
+    try:
+        doc = _load("calendario")
+    except DataError:
+        return []
+    out = []
+    for raw in doc.get("torneos") or []:
+        if not isinstance(raw, dict) or raw.get("cancelado"):
+            continue
+        tid, start, end = raw.get("padelapi_id"), _parse_date(raw.get("start")), _parse_date(raw.get("end"))
+        name = str(raw.get("name", "")).strip()
+        if isinstance(tid, int) and not isinstance(tid, bool) and start and end and name:
+            out.append({"id": tid, "name": name, "place": str(raw.get("place") or ""), "start": start, "end": end,
+                        "tipo": str(raw.get("badgeText") or "")})
+    out.sort(key=lambda x: x["start"])
+    return out
+
+
+def pick_tournament(refs: list, query: Optional[str] = None, today: Optional[date] = None):
+    """(torneo | None, candidatos). Sin texto: el que está en juego o, si no, el último terminado.
+    Con texto: el que contiene todas sus palabras en el nombre o en el lugar (si hay varios, el más reciente ya jugado)."""
+    today = today or date.today()
+    if query and str(query).strip():
+        words = set(_fold(str(query)).split())
+        matches = [r for r in refs if words <= set(_fold(f"{r['name']} {r['place']}").split())]
+        if not matches:
+            return None, []
+        played = [r for r in matches if r["start"] <= today]
+        return (played[-1] if played else matches[0]), matches
+    live = [r for r in refs if r["start"] <= today <= r["end"]]
+    if live:
+        return live[0], live
+    finished = [r for r in refs if r["end"] < today]
+    return (finished[-1], finished[-3:]) if finished else (None, [])
+
+
 async def get_womens_ranking_names(limit: int = 200) -> list[str]:
     try:
         return [r["name"] for r in _ranking_rows(min(limit, TOP_N))]
