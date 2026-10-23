@@ -77,8 +77,11 @@ El servidor ofrece **23 herramientas** de solo lectura, todas de pádel femenino
 
 **MCP** (*Model Context Protocol*) es un estándar abierto para que un asistente de IA use herramientas y datos de fuera. El servidor publica una lista de herramientas con su descripción; el asistente la lee, decide cuál sirve para tu pregunta, la llama y redacta la respuesta con lo que le devuelve.
 
-- **El servidor controla lo que sale**: solo pádel femenino, solo lectura, sin hombres en las noticias y con límites de uso. El asistente solo decide qué pedir y cómo contarlo. Gracias a esto, obtenemos una respuesta personalizada y orientada a nuestros gustos y requerimientos iniciales. 
-- **Una web sirve para personas y un MCP para asistentes**: aquí hay las dos, y comparten los mismos datos guardados y las mismas noticias.
+## Ventajas del MCP
+
+- **Datos reales asegurados, no inventados.** Un modelo puede no saber con certeza quién lidera el ranking esta semana ni quién ganó ayer, podría inventarselos o cometer errores en la respuesta. Con el MCP consultamos los datos en fuentes válidas y verificadas en el momento y en cada respuesta podemos saber de dónde viene el dato y de cuándo es. Si falta algo, lo dice.
+- **El servidor controla lo que sale**:. El asistente solo decide qué pedir y cómo contarlo. Gracias a esto, obtenemos una respuesta personalizada y orientada a nuestros gustos y requerimientos. 
+- **Una web para personas y un MCP para asistentes.** Comparten los mismos datos guardados y las mismas noticias. 
 
 ## Flujo y arquitectura
 
