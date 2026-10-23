@@ -1,61 +1,132 @@
 # 🎾 MCP Pádel Femenino
 
-Servidor **MCP** con datos reales del pádel profesional femenino (circuito Premier Padel / FIP). Cualquier asistente de IA que hable MCP (Copilot en VS Code, Claude, etc.) puede llamar a sus herramientas: el servidor devuelve los datos ya filtrados, con su fuente y su antigüedad, y el propio asistente redacta la respuesta. Incluye además una **web de apoyo** con el ranking, los torneos y las noticias.
+Servidor **MCP** con datos reales del pádel profesional femenino (circuito Premier Padel / FIP). Cualquier asistente de IA que hable MCP (Copilot en VS Code, Claude, etc.) puede llamar a sus herramientas: el servidor devuelve los datos ya filtrados, con su fuente y su antigüedad, y el propio asistente redacta la respuesta. Además publica una web sencilla, que es un apartado aparte (ver «La web»).
 
 > Proyecto no oficial: sin relación con la FIP, con Premier Padel, con Padel API ni con los medios citados.
 
-## Qué es
+## Qué puedes consumir
 
-| Parte | Qué hace | Dónde está |
-|---|---|---|
-| **El MCP** | Tres herramientas (ranking, último torneo y próximo torneo). Devuelve datos, no redacta nada | `/ai/mcp` · carpeta `apps/mcp-server/padel_mcp/` |
-| **La web** | Ranking, torneos, noticias y una página que explica la arquitectura «para todos» (`/como-funciona`) | `/` · `server.py` y `static/` |
-| **Los datos** | Una tarea diaria los pide a su fuente, los valida y los guarda en `data/`. La web y el MCP solo leen esos archivos | carpeta `tools/` |
+El servidor ofrece **23 herramientas** de solo lectura, todas de pádel femenino. La mayoría de la gente las usa desde VS Code con la **URL pública** del servidor: `https://TU-APP.up.railway.app/ai/mcp` (sustituye `TU-APP` por el dominio del despliegue).
 
-```text
-Tú preguntas → el agente (Copilot, Claude…) elige una herramienta → el MCP devuelve datos filtrados → el agente redacta la respuesta
-```
+| Grupo | Nº | Qué te dan | De dónde salen los datos | Cómo se activan |
+|---|---|---|---|---|
+| Por defecto | 3 | Ranking, último torneo y próximo torneo | Archivos que una tarea renueva cada 24 h | Siempre |
+| Extra con datos guardados | 9 | Fichas del Top 20, comparar jugadoras, resultados, calendario, noticias, resumen del día, estado de los datos | Esos mismos archivos y las noticias de los medios | `MCP_TOOLS=extended` en el servidor |
+| Extra en el momento | 11 | Cualquier jugadora, sus partidos y parejas, cuadros y ediciones de torneos, rankings Elo y RACE, quién sube o baja, predicciones | Padel API, al preguntar (con memoria en el servidor) | `MCP_TOOLS=extended` en el servidor |
 
-El servidor decide **qué datos** devuelve; el agente decide **cómo contarlos**. El servidor no puede imponer una tabla o un tono: eso se pide en las instrucciones de tu cliente (ver más abajo).
+**Cuántas herramientas ves depende del servidor, no de tu VS Code:** si el servidor no tiene `MCP_TOOLS=extended`, solo verás las 3 por defecto. El catálogo completo, con los parámetros de cada una, está en «Las herramientas del MCP».
 
-## Empezar en local
+## Conectarlo desde VS Code (Copilot)
 
-Necesitas Python 3.12 (vale 3.11).
+Necesitas una versión reciente de VS Code con GitHub Copilot Chat y su **modo Agent**, que es el que puede usar servidores MCP. Si usas Copilot de una empresa, su administrador puede tener los servidores MCP desactivados.
 
-```bash
-cd apps/mcp-server
-python -m venv .venv
-source .venv/bin/activate          # Windows PowerShell: .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-export PADELAPI_TOKEN="tu-token"   # PowerShell: $env:PADELAPI_TOKEN="tu-token"
-python server.py
-```
+### Opción A: el servidor público (la habitual)
 
-- La web está en <http://localhost:8000> y el MCP en <http://localhost:8000/ai/mcp>.
-- El token de [Padel API](https://padelapi.org) es gratuito y **opcional**: sin él se usa Wikipedia, con más retraso (ver más abajo). Va **solo** como variable de entorno, nunca en un archivo ni en el repositorio.
-- Con token, la primera actualización tarda unos 3-4 minutos (hace unas veinte peticiones con pausa entre ellas). Abre `/api/data-status`: `ingesta.ok` debe ser `true` y `fuente_activa` debe ser `padelapi`. Hasta entonces se muestran los datos de ejemplo de `data/`, marcados como tales.
-- La actualización reescribe `data/ranking.json` y `data/calendario.json`; no los subas a git (`git checkout -- apps/mcp-server/data` los restaura).
-- Con Docker: `docker compose up --build` (usa `docker-compose.yml` y pasa las variables de tu entorno).
+No instalas nada: el servidor ya está en marcha y solo necesitas su dirección.
 
-## Conectarlo a VS Code (Copilot)
-
-1. Con el servidor en marcha, crea `.vscode/mcp.json` (o copia `examples/vscode-mcp-local.json`):
+1. Pide la URL pública del servidor. Tiene la forma `https://TU-APP.up.railway.app/ai/mcp` (termina siempre en `/ai/mcp`) y te dirán si exige un token de GitHub.
+2. Crea el archivo `.vscode/mcp.json` en cualquier carpeta que tengas abierta. Para tenerlo en todos tus proyectos, abre la paleta de comandos (Ctrl/Cmd + Mayús + P), ejecuta **MCP: Open User Configuration** y pega lo mismo ahí.
+3. Pega esta configuración con tu dirección (servidor abierto, sin token):
 
    ```json
    {
      "servers": {
-       "padel-femenino": { "type": "http", "url": "http://localhost:8000/ai/mcp" }
+       "padel-femenino": {
+         "type": "http",
+         "url": "https://TU-APP.up.railway.app/ai/mcp"
+       }
      }
    }
    ```
 
-2. Pulsa **Start** sobre el servidor en ese archivo.
-3. Abre Copilot Chat en modo **Agent** y comprueba, en el icono de herramientas, que salen las tres.
-4. Pregunta: *«Dame el top 10 del ranking femenino con sus nombres y sus puntos»*, *«¿Quién ganó el último torneo y por cuánto?»* o *«¿Cuándo y dónde es el próximo torneo?»*. Despliega la llamada en el chat para ver lo que devolvió el servidor.
+4. Pulsa **Start** sobre el servidor en ese archivo (o ejecuta **MCP: List Servers** y arráncalo desde ahí).
+5. Abre Copilot Chat, cambia al modo **Agent** y mira el icono de herramientas: debe aparecer `padel-femenino` con sus herramientas (3 o 23, según cómo esté configurado el servidor).
+6. Pregunta, por ejemplo: *«Dame el top 10 del ranking femenino con sus nombres y sus puntos»*, *«¿Quién ganó el último torneo y por cuánto?»* o, con las 23, *«¿Quién gana, Triay y Brea contra Sánchez y González?»*. Despliega la llamada en el chat para ver lo que devolvió el servidor.
 
-Para un servidor desplegado con acceso por GitHub, usa `examples/vscode-mcp.json` (VS Code pide el token al arrancar, con la entrada oculta).
+**Si el servidor exige un token de GitHub** (`MCP_AUTH=github`), usa `examples/vscode-mcp.json` en lugar de lo anterior. VS Code te pide el token al arrancar, con la entrada oculta, y lo envía en la cabecera `Authorization`:
 
-**Tu estilo, en tus instrucciones.** Por ejemplo, en `.github/copilot-instructions.md`:
+```json
+{
+  "inputs": [
+    {
+      "type": "promptString",
+      "id": "github-token",
+      "description": "Token de GitHub (sin permisos) para el MCP de pádel femenino",
+      "password": true
+    }
+  ],
+  "servers": {
+    "padel-fem": {
+      "type": "http",
+      "url": "https://TU-APP.up.railway.app/ai/mcp",
+      "headers": {
+        "Authorization": "Bearer ${input:github-token}"
+      }
+    }
+  }
+}
+```
+
+El token de GitHub no necesita **ningún permiso**: crea uno solo de identidad (GitHub → Settings → Developer settings → Personal access tokens) y con caducidad corta.
+
+### Opción B: tu propio servidor, en local
+
+Sirve para probar cambios o para no depender del servidor público. Necesitas Python 3.12 (vale 3.11).
+
+1. Arranca el servidor desde `apps/mcp-server`:
+
+   ```bash
+   cd apps/mcp-server
+   python -m venv .venv
+   source .venv/bin/activate          # Windows PowerShell: .venv\Scripts\Activate.ps1
+   pip install -r requirements.txt
+   export MCP_TOOLS=extended          # PowerShell: $env:MCP_TOOLS="extended"  (sin esto, solo las 3 por defecto)
+   export PADELAPI_TOKEN="tu-token"   # PowerShell: $env:PADELAPI_TOKEN="tu-token"  (opcional)
+   python server.py
+   ```
+
+2. Espera unos 3-4 minutos la primera vez y abre <http://localhost:8000/api/data-status>: `ingesta.ok` debe ser `true` y `fuente_activa` `padelapi`. Hasta entonces se muestran los datos de ejemplo.
+3. Crea `.vscode/mcp.json` con esto (es `examples/vscode-mcp-local.json`) y pulsa **Start**:
+
+   ```json
+   {
+     "servers": {
+       "padel-femenino": {
+         "type": "http",
+         "url": "http://localhost:8000/ai/mcp"
+       }
+     }
+   }
+   ```
+
+El token de [Padel API](https://padelapi.org) es gratuito y **opcional**: sin él se usa Wikipedia, con más retraso. Va **solo** como variable de entorno, nunca en un archivo ni en el repositorio. La actualización reescribe `data/ranking.json` y `data/calendario.json`: no los subas a git (`git checkout -- apps/mcp-server/data` los restaura). También puedes arrancarlo con Docker: `docker compose up --build`.
+
+### Público o local
+
+| | Público | Local |
+|---|---|---|
+| Dirección | `https://TU-APP.up.railway.app/ai/mcp` | `http://localhost:8000/ai/mcp` |
+| Quién lo arranca | Ya está en marcha | Tú, en tu ordenador (debe seguir encendido) |
+| Herramientas | Las que active el servidor (3 o 23) | Las que actives tú con `MCP_TOOLS` |
+| Acceso | Abierto o con token de GitHub, según el servidor | Sin acceso: solo desde tu ordenador |
+| Token de Padel API | Lo tiene el servidor | Opcional, el tuyo |
+
+### Si algo falla
+
+Abre **MCP: List Servers**, elige el servidor y pulsa **Show Output**: ahí está el mensaje real.
+
+| Síntoma | Causa más probable | Qué hacer |
+|---|---|---|
+| Error 404 | La ruta está mal escrita (`/ia/mcp` en vez de `/ai/mcp`) | Corrige la dirección: acaba en `/ai/mcp` |
+| No conecta desde otro ordenador | Usas `localhost`, que es siempre el ordenador donde escribes | Usa la dirección pública del servidor |
+| No conecta en local | Pusiste `https://` con `localhost` | Es `http://localhost:8000/ai/mcp` |
+| No sale ninguna herramienta | No pulsaste **Start**, o no estás en modo **Agent** | Arranca el servidor y cambia a Agent |
+| Solo salen 3 herramientas | El servidor no tiene `MCP_TOOLS=extended` | Pídeselo a quien lo administra, o actívalo si es tuyo |
+| Errores 401 o 403 | El servidor exige token de GitHub | Usa `examples/vscode-mcp.json` con un token válido |
+| La dirección abierta en el navegador da error 405 | Es normal: no está hecha para abrirse en una página | Compruébalo abriendo `/api/version` en su lugar |
+| Cambiaste algo del servidor y no lo ve | VS Code guarda la lista de herramientas | **MCP: List Servers** → reiniciar el servidor |
+
+**Tu estilo, en tus instrucciones.** El servidor decide qué datos devuelve y el agente cómo contarlos; el formato se pide en las instrucciones de tu cliente. Por ejemplo, en `.github/copilot-instructions.md`:
 
 ```text
 Cuando pregunte por pádel femenino, usa el MCP.
@@ -111,6 +182,90 @@ También con `MCP_TOOLS=extended`. Piden el dato a Padel API cuando alguien lo p
 | `ediciones_torneo` | `torneo?` | Ediciones anteriores de un torneo con sus campeonas, fechas, ciudad y premio |
 
 Cada respuesta indica su fuente, su antigüedad y los avisos (datos de ejemplo, datos con retraso). Cuando falta un dato lo dice en una nota en vez de inventarlo: por ejemplo, las terceras (las semifinalistas, porque en pádel no se juega partido por el tercer puesto) solo se dan si la fuente aporta las semifinales. Ni la web ni las herramientas por defecto tienen marcadores en directo (se enlaza al marcador oficial); `partidos_en_directo`, que es extra, da el marcador por sets del torneo en curso, con algo de retraso. En un torneo o una jugadora vale una parte del nombre o de la ciudad («Milano», «Triay»).
+
+## Cómo funciona por dentro
+
+### El flujo completo
+
+```text
+                Tú ──pregunta──▶ Copilot (el agente)
+                                          │  elige una herramienta
+                                          ▼
+                             MCP del servidor (/ai/mcp)
+                                          │
+             ┌────────────────────────────┴────────────────────────────┐
+             ▼                            ▼                            ▼
+Archivos guardados           Padel API, en el             Feeds de los medios,
+(carpeta data/): los         momento, con memoria         con memoria en el
+renueva cada 24 h una        en el servidor               servidor
+tarea de fondo
+◀── Padel API
+             └────────────────────────────┬────────────────────────────┘
+                                          ▼
+                  datos ya filtrados, con su fuente y su antigüedad
+                                          ▼
+                         Copilot redacta la respuesta ──▶ Tú
+```
+
+1. **Preguntas** en lenguaje normal en Copilot, en modo Agent.
+2. **El agente elige** la herramienta y sus parámetros leyendo sus descripciones y las instrucciones del servidor.
+3. **El servidor la ejecuta**: según la herramienta, lee archivos guardados, pregunta a Padel API en ese momento o lee las noticias.
+4. **Devuelve datos ya recortados y filtrados** (solo pádel femenino, sin hombres en las noticias), con su fuente, su antigüedad y los avisos. Si algo falla, el error llega con un tipo (`plan`, `limit`, `budget`, `notfound`, `invalid`, `config`, `network`, `upstream` o `auth`) y el agente se lo explica a la persona.
+5. **El agente redacta la respuesta.** El servidor no decide el formato: solo qué datos.
+
+### Tres caminos para los datos
+
+| Camino | Herramientas | Quién pide los datos y cuándo | Dónde se guardan |
+|---|---|---|---|
+| **1. Archivos guardados** | Las 3 por defecto, `jugadora`, `comparar_jugadoras`, `torneo_actual`, `resultado_torneo`, `resultados_recientes`, `calendario`, `resumen_del_dia` y `estado_de_los_datos` | Una tarea de fondo, **cada 24 h**, aunque nadie pregunte. Si falla, reintenta a la hora, a las 2, a las 4 y después cada 6 h | Archivos JSON en `data/`, en el disco del servidor, más una capa de 60 s en memoria al leerlos |
+| **2. Noticias** | `noticias`, y la parte de noticias de `jugadora` y `resumen_del_dia` | El servidor, **al preguntar**, si pasaron 10 min | Memoria del servidor: 10 min el resultado, cada feed con su control de cambios y 24 h los resúmenes con IA |
+| **3. Padel API en el momento** | Las 11 extra de Padel API | El servidor, **al preguntar**, si ese dato no está en memoria o caducó | Solo memoria del servidor (no se escribe nada en archivos) |
+
+### La memoria de cada herramienta
+
+«Dura en memoria» es cuánto tiempo se reutiliza lo que ya se pidió antes de volver a pedirlo.
+
+| Herramienta | Lee de | Dura en memoria |
+|---|---|---|
+| `ranking_femenino` | `ranking.json` | 60 s |
+| `ultimo_torneo` | `calendario.json` (finales) | 60 s |
+| `proximo_torneo` | `calendario.json` | 60 s |
+| `jugadora` | `ranking.json`, finales y noticias (estas con su propia memoria de 10 min) | 60 s |
+| `comparar_jugadoras` | `ranking.json` | 60 s |
+| `torneo_actual` | `calendario.json` | 60 s |
+| `resultado_torneo` | `calendario.json` (finales) | 60 s |
+| `resultados_recientes` | `calendario.json` (finales) y `ranking.json` | 60 s |
+| `calendario` | `calendario.json` | 60 s |
+| `noticias` | Feeds RSS de los medios | 10 min |
+| `resumen_del_dia` | Ranking, calendario, finales y noticias (estas con su memoria de 10 min) | 60 s |
+| `estado_de_los_datos` | El estado de los archivos y de la tarea; se calcula al momento | — |
+| `perfil_jugadora` | Padel API: ficha de la jugadora | 6 h |
+| `partidos_jugadora` | Padel API: partidos de la jugadora | 15 min |
+| `cuadro_torneo` | Padel API: partidos del torneo | 2 min |
+| `partidos_en_directo` | Padel API: partidos del torneo | 2 min |
+| `rankings_jugadora` | Padel API: rankings de la jugadora | 1 h |
+| `prediccion_partido` | Padel API: simulación del partido | 1 h |
+| `ranking_elo` | Padel API: rankings | 1 h |
+| `ranking_race` | Padel API: rankings | 1 h |
+| `movimientos_ranking` | Padel API: rankings | 1 h |
+| `parejas_jugadora` | Padel API: parejas de la jugadora | 6 h |
+| `ediciones_torneo` | Padel API: ediciones del torneo | 6 h |
+
+Cómo funciona esa memoria:
+
+- **El plazo cuenta desde que se guardó**, no desde la última pregunta: volver a preguntar no lo alarga.
+- **Pasado el plazo no se renueva solo.** La siguiente pregunta es la que vuelve a pedir el dato. Lo único que se renueva por su cuenta es el camino 1, con la tarea diaria.
+- **Cada petición distinta es otro dato**: otro torneo, otra ronda o `limite=6` en vez de `limite=5` no aprovechan lo anterior.
+- **Varias preguntas a la vez** por el mismo dato hacen una sola petición.
+- **Un dato que el plan no incluye** se recuerda 30 min, y uno que no existe, 2 min, para no insistir.
+- **Una jugadora fuera del Top 20** se busca por su nombre en Padel API, y esa búsqueda se recuerda 6 h. Las del Top 20 se resuelven con lo guardado, sin ninguna petición.
+- **Tras un reinicio o un despliegue la memoria queda vacía**, y en Railway el disco también: los datos reales tardan unos 4 minutos en volver y, mientras tanto, se ven los de ejemplo.
+
+### Cuánto consume de Padel API
+
+- **La tarea diaria** hace unas 3 peticiones al día (ranking femenino, ranking masculino —solo para filtrar noticias— y calendario) y 2 más por cada torneo terminado nuevo. La primera pasada tras desplegar hace unas veinte, con pausa entre ellas.
+- **Las preguntas** a las herramientas de Padel API tienen un presupuesto propio de **5 por minuto y 600 por día**, muy por debajo del límite gratuito (10 por minuto y 2.000 al día). Una pregunta nueva cuesta una o dos peticiones y repetirla enseguida cuesta cero. Si el presupuesto se agota, la herramienta dice cuánto esperar y nunca se bloquea.
+- El consumo se ve en `/api/data-status`, en `consultas_en_directo`.
 
 ## De dónde salen los datos
 
@@ -173,13 +328,18 @@ Si `MCP_AUTH` tiene un valor desconocido o contradictorio (por ejemplo `open` ju
 3. En **Variables** añade (los valores nunca van en el repositorio):
    - `PADELAPI_TOKEN`: tu token de Padel API.
    - `MCP_AUTH`: `open` para la primera prueba; después `github` (y, si quieres, `MCP_GITHUB_USERS`).
+   - `MCP_TOOLS`: `extended` si quieres ofrecer las 23 herramientas (sin esto, solo las 3 por defecto).
    - `SCRAPER_CONTACT`: tu correo, para identificar al programa ante los medios.
 4. En **Settings → Networking → Generate Domain** obtén la dirección pública.
 5. Espera unos 4 minutos tras el arranque y abre `https://TU-APP.up.railway.app/api/data-status`: `ingesta.ok` debe ser `true` y `fuente_activa` `padelapi`. El disco de Railway es efímero: tras cada despliegue los datos se vuelven a pedir.
-6. El MCP queda en `https://TU-APP.up.railway.app/ai/mcp`.
+6. El MCP queda en `https://TU-APP.up.railway.app/ai/mcp`: esa es la **URL pública** que se comparte para conectarlo desde VS Code (ver «Conectarlo desde VS Code»).
 7. Para saber qué versión está corriendo, abre `https://TU-APP.up.railway.app/api/version` (también sale al pie de la web): si no es la última que has subido, el despliegue no ha terminado o no ha cogido el último commit.
 
 Si el despliegue falla, el log de Railway dice dónde. Si se queja de no encontrar `requirements.txt` al construir, el contexto de construcción no es `apps/mcp-server`: revisa el *Root Directory* del servicio.
+
+## La web
+
+Además del MCP, el mismo servidor publica una web sencilla en la raíz (`/`), pensada como apoyo y aparte de las herramientas. Tiene las pestañas Noticias, En juego, Ranking, Torneos, Sponsors y ¿Sabías que?, y lee los mismos archivos guardados y las mismas noticias que las herramientas. No usa las consultas en directo a Padel API, no muestra fotos y no tiene marcadores en directo. `/como-funciona` explica la arquitectura para todos. Las rutas están en «Endpoints de la web».
 
 ## Variables de entorno
 
@@ -273,7 +433,7 @@ cd apps/mcp-server
 python -m unittest discover -s tests -v
 ```
 
-No necesitan internet ni tokens. Incluyen una barrera que falla si el código apunta a un dominio que no esté en la lista permitida o si se reintroduce una librería de scraping, y un test que compara este README con el código (herramientas, variables de entorno, rutas, archivos y árbol de carpetas).
+No necesitan internet ni tokens. Incluyen una barrera que falla si el código apunta a un dominio que no esté en la lista permitida o si se reintroduce una librería de scraping, y tests que comparan este README con el código (herramientas y sus parámetros, la memoria de cada una, variables de entorno, rutas, archivos, árbol de carpetas y los ejemplos de VS Code).
 
 ## Uso responsable y licencias
 
