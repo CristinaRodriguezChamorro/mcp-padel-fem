@@ -1,12 +1,12 @@
 # 🎾 MCP de Pádel Femenino
 
-Un asistente de IA que contesta preguntas sobre el pádel profesional femenino con datos reales: ranking, torneos, resultados, jugadoras y noticias. Funciona como un **servidor MCP** que se conecta a Visual Studio Code en dos líneas, y publica además una web sencilla.
+Servidor MCP con datos reales del pádel profesional femenino. Cualquier asistente de IA que hable MCP (Copilot en VS Code, Claude, etc.) puede llamar a sus herramientas: el servidor devuelve los datos ya filtrados, con su fuente y su antigüedad, y el propio asistente redacta la respuesta. Incluye además una web de apoyo con el ranking, los torneos y las noticias.
 
 > Proyecto no oficial: sin relación con la FIP, Premier Padel, Padel API ni los medios citados.
 
 ## Conectarlo en Visual Studio Code
 
-Necesitas VS Code con GitHub Copilot. No hace falta ninguna clave ni instalar nada más.
+Necesitas VS Code con GitHub Copilot. No hace falta ninguna clave ni instalar nada más. Es un MCP público, y regulado con límites de consumo. 
 
 1. Pulsa `Ctrl` + `Mayús` + `P` (en Mac, `Cmd` + `Mayús` + `P`), escribe `MCP: Open User Configuration` y pulsa Enter.
 2. Pega esto y guarda. Las dos líneas que importan son `type` y `url`:
