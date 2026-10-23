@@ -173,7 +173,9 @@ def parse_ranking(data: list, limit: int = RANKING_ROWS) -> list:
         name = short_name(r.get("name"))
         if not name or pts is None or isinstance(pos, bool) or not isinstance(pos, int) or pos < 1:
             continue                      # incluye los valores 'hidden_free_plan'
-        rows.append({"pos": pos, "name": name, "pair": "", "flag": flag(r.get("nationality")), "pts": pts})
+        pid = r.get("id")
+        rows.append({"pos": pos, "name": name, "pair": "", "flag": flag(r.get("nationality")), "pts": pts,
+                     "id": pid if isinstance(pid, int) and not isinstance(pid, bool) else None})
     rows.sort(key=lambda x: x["pos"])
     return rows[:limit]
 
@@ -293,7 +295,7 @@ async def fetch_all(today: date, previous_tournaments: Optional[list] = None,
     known = {t.get("padelapi_id"): t["final_femenina"] for t in (previous_tournaments or [])
              if isinstance(t, dict) and t.get("padelapi_id") is not None and isinstance(t.get("final_femenina"), dict)}
     notes = []
-    factory = client_factory or (lambda: httpx.AsyncClient(timeout=httpx.Timeout(20.0)))
+    factory = client_factory or (lambda: httpx.AsyncClient(timeout=httpx.Timeout(20.0), follow_redirects=True))
     async with factory() as client:
         api = _Api(client, sleep, interval)
 

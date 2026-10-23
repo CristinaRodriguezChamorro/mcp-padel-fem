@@ -283,7 +283,7 @@ class OutletNames(unittest.TestCase):
         from urllib.parse import urlparse
         for url in news.RSS_FEEDS:
             host = urlparse(url).netloc.replace("www.", "")
-            self.assertIn(host, news.OUTLET_NAMES, f"falta el nombre legible de {host}")
+            self.assertIn(host, news.SOURCE_POLICY, f"falta el nombre legible de {host}")
 
 
 if __name__ == "__main__":

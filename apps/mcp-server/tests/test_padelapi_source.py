@@ -166,7 +166,7 @@ class Conversions(unittest.TestCase):
         rows[5]["ranking"] = pa.HIDDEN
         out = pa.parse_ranking(rows)
         self.assertEqual([r["name"] for r in out], ["Primera", "Segunda", "Tercera"])
-        self.assertEqual(out[0], {"pos": 1, "name": "Primera", "pair": "", "flag": "🇪🇸", "pts": "300"})
+        self.assertEqual(out[0], {"pos": 1, "name": "Primera", "pair": "", "flag": "🇪🇸", "pts": "300", "id": 1})
 
     def test_ranking_limit_and_snapshot_date(self):
         self.assertEqual(len(pa.parse_ranking(ranking_rows(40), limit=20)), 20)
@@ -447,7 +447,7 @@ class IngestWithPadelApi(WithToken):
         rank, cal = self.read("ranking"), self.read("calendario")
         self.assertEqual((rank["_meta"]["tipo"], rank["_meta"]["actualizado"], rank["_meta"]["fuente"]), ("api", "2026-10-05", "Padel API (padelapi.org)"))
         self.assertEqual(cal["_meta"]["tipo"], "api")
-        self.assertEqual(rank["jugadoras"][0], {"pos": 1, "name": "Jugadora 01", "pair": "", "flag": "🇦🇷", "pts": "19.500"})
+        self.assertEqual(rank["jugadoras"][0], {"pos": 1, "name": "Jugadora 01", "pair": "", "flag": "🇦🇷", "pts": "19.500", "id": 1})
         t = next(x for x in cal["torneos"] if x["padelapi_id"] == 111)
         self.assertEqual((t["badgeText"], t["place"], t["final_femenina"]["resultado"]), ("P2", "Ciudad11 🇫🇷", "6-3 7-5"))
         self.assertEqual(len(t["final_femenina"]["semifinalistas"]), 2)
