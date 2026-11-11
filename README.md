@@ -1,6 +1,6 @@
 # 🎾 MCP de Pádel Femenino
 
-Servidor MCP con datos reales del pádel profesional femenino. Cualquier asistente de IA que hable MCP (Copilot en VS Code, Claude, etc.) puede llamar a sus herramientas: el servidor devuelve los datos ya filtrados, con su fuente y su antigüedad, y el propio asistente redacta la respuesta. Incluye además una web de apoyo con el ranking, los torneos y las noticias.
+MCP especializado en datos del pádel profesional femenino. Ofrece herramientas para consultar información actualizada sobre rankings, jugadoras, partidos, resultados, torneos y noticias. Cada consulta devuelve los datos pertinentes junto con su fuente y fecha del dato, para que el asistente de IA pueda responder con contexto y transparencia. Es compatible con asistentes que admiten MCP, como copilot en vs CODE, y claude. Además, cuenta con una web de apoyo para consultar el ranking, los torneos y las noticias del circuito. 
 
 > Proyecto no oficial: sin relación con la FIP, Premier Padel, Padel API ni los medios citados.
 
